@@ -1,0 +1,28 @@
+// Top level gradle build file for Android builds.
+// Put configuration in here for all projects.
+
+buildscript {
+    
+    repositories {
+        google()
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:3.4.0'
+        // No application dependencies here; they belong in the individual module build.gradle files
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        jcenter()
+    }
+
+    // Put all build related files into a single top level build dir.
+    buildDir = file("${rootDir.absolutePath}/../../build/android/${project.name}")
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

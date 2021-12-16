@@ -1,0 +1,1 @@
+call gradlew build -Dorg.gradle.warning.mode=none

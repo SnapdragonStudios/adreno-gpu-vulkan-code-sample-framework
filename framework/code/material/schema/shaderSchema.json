@@ -1,0 +1,157 @@
+{
+  "$id": "shaderSchema.json",
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Shader Material Definition Schema",
+  "version": "1.0.0",
+
+  "definitions": {
+    "Pass": {
+      "type": "object",
+      "description": "Shaders to render this material in the named pass",
+      "properties": {
+        "Name": {
+          "type": "string",
+          "description": "Pass name"
+        },
+        "Shaders": {
+          "type": "object",
+          "description": "vulkan shaders",
+          "properties": {
+            "Vertex": {
+              "type": "string",
+              "description": "filename of the spir-v vertex shader"
+            },
+            "Fragment": {
+              "type": "string",
+              "description": "filename of the spir-v fragment shader"
+            }
+          },
+          "required": [ "Vertex" ],
+          "additionalProperties": false
+        },
+        "DescriptorSets": {
+          "type": "array",
+          "description": "vulkan descriptor sets",
+          "items": {
+            "type": "object",
+            "description": "descriptor set",
+            "properties": {
+              "Buffers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "buffers in descriptor set",
+                  "properties": {
+                    "Type": {
+                      "type": "string",
+                      "description": "Descriptor set(s) type",
+                      "enum": [ "ImageSampler", "UniformBuffer" ]
+                    },
+                    "Count": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Number of sets of this type"
+                    },
+                    "Names": {
+                      "type": "array",
+                      "description": "Identifier for each buffer (for code lookup)",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [ "Type" ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false,
+            "minItems": 1
+          }
+        },
+        "VertexBindings": {
+          "type": "array",
+          "description": "Vertex set binding(s)",
+          "items": {
+            "type": "string",
+            "description": "Vertex layout name"
+          },
+          "additionalProperties": false,
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "Vertex": {
+      "type": "object",
+      "description": "Vertex layout",
+      "properties": {
+        "Span": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Span in bytes"
+        },
+        "Name": {
+          "type": "string",
+          "description": "Vertex format name"
+        },
+        "Elements": {
+          "type": "array",
+          "description": "Individual data elements in this layout",
+          "items": {
+            "type": "object",
+            "properties": {
+              "Name": {
+                "type": "string",
+                "description": "Element name (all elements must be named or none)",
+                "examples": [ "Position", "UV", "Color", "Normal" ]
+              },
+              "Offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Offset in bytes of this element with the span"
+              },
+              "Type": {
+                "type": "string",
+                "enum": [ "Int32", "Float", "Vec2", "Vec3", "Vec4" ],
+                "description": "Element data type"
+              }
+            },
+            "required": [ "Offset", "Type" ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "additionalProperties": false
+        }
+      },
+      "required": [ "Span", "Elements" ],
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "properties": {
+    "Passes": {
+      "type": "array",
+      "description": "Top level array of valid passes for this material definition.",
+      "items": {
+        "$ref": "#/definitions/Pass"
+      },
+      "minItems": 0,
+      "additionalProperties": false
+    },
+    "Vertex": {
+      "type": "array",
+      "description": "Top level object containing the vertex layout for this material.",
+      "items": {
+        "$ref": "#/definitions/Vertex"
+      },
+      "minItems": 1,
+      "additionalProperties": false
+    },
+    "$schema": {
+      "type":  "string"
+    }
+  },
+  "required": [ "Passes" ],
+  "additionalProperties": false
+}

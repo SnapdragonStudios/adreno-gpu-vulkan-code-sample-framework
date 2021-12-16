@@ -1,0 +1,30 @@
+[submodule "framework/external/VulkanMemoryAllocator"]
+	path = framework/external/VulkanMemoryAllocator
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+[submodule "framework/external/glm"]
+	path = framework/external/glm
+	url = https://github.com/g-truc/glm
+	shallow = true
+[submodule "framework/external/tinyobjloader"]
+	path = framework/external/tinyobjloader
+	url = https://github.com/tinyobjloader/tinyobjloader
+[submodule "framework/external/json"]
+	path = framework/external/json
+	url = https://github.com/nlohmann/json
+[submodule "framework/external/tinygltf"]
+	path = framework/external/tinygltf
+	url = https://github.com/syoyo/tinygltf
+[submodule "samples/application/Media/Objects/Sponza"]
+	path = samples/application/Media/Objects/Sponza
+	url = https://github.com/jimmiebergmann/Sponza
+        shallow = true
+[submodule "framework/external/imgui"]
+	path = framework/external/imgui
+	url = https://github.com/ocornut/imgui
+[submodule "framework/external/eigen"]
+	path = framework/external/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+	shallow = true
+[submodule "framework/external/span"]
+	path = framework/external/span
+	url = https://github.com/tcbrindle/span
