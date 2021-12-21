@@ -14,10 +14,6 @@
 [submodule "framework/external/tinygltf"]
 	path = framework/external/tinygltf
 	url = https://github.com/syoyo/tinygltf
-[submodule "samples/application/Media/Objects/Sponza"]
-	path = samples/application/Media/Objects/Sponza
-	url = https://github.com/jimmiebergmann/Sponza
-        shallow = true
 [submodule "framework/external/imgui"]
 	path = framework/external/imgui
 	url = https://github.com/ocornut/imgui
