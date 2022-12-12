@@ -1,10 +1,15 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "imguiBase.hpp"
 #include "imgui.h"
 
-bool GuiImguiBase::Initialize(uintptr_t windowHandle)
+bool GuiImguiBase::Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint32_t renderHeight)
 {
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();

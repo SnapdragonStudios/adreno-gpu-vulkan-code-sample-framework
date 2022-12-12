@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include "vertexFormat.hpp"
@@ -8,6 +13,7 @@
 #include <map>
 #include <vector>
 #include <optional>
+#include <array>
 
 // Forward declarations
 class AssetManager;
@@ -71,14 +77,18 @@ public:
         bool                blendEnable = false;
         BlendFactor         srcColorBlendFactor = BlendFactor::SrcAlpha;
         BlendFactor         dstColorBlendFactor = BlendFactor::OneMinusSrcAlpha;
+        BlendFactor         srcAlphaBlendFactor = BlendFactor::One;
+        BlendFactor         dstAlphaBlendFactor = BlendFactor::Zero;
+        uint32_t            colorWriteMask = 0x7fffffff;
         //VkBlendOp                colorBlendOp;
-        //VkBlendFactor            srcAlphaBlendFactor;
-        //VkBlendFactor            dstAlphaBlendFactor;
         //VkBlendOp                alphaBlendOp;
-        //VkColorComponentFlags    colorWriteMask;
+    };
+    struct WorkGroupSettings
+    {
+        std::array<uint32_t, 3> localSize = {};
     };
 
-    ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, std::vector<uint32_t> vertexFormatBindings);
+    ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, WorkGroupSettings workGroupSettings, std::vector<uint32_t> vertexFormatBindings);
     ShaderPassDescription(ShaderPassDescription&&) = default;
 
     std::vector<DescriptorSetDescription> m_sets;
@@ -88,6 +98,7 @@ public:
     std::string m_fragmentName;                     ///< Name of the fragment shader used by this shader pass (optional, only valid if m_vertexName set)
     FixedFunctionSettings m_fixedFunctionSettings;
     SampleShadingSettings m_sampleShadingSettings;
+    WorkGroupSettings     m_workGroupSettings;
     std::vector<uint32_t> m_vertexFormatBindings;   //< Indices of the vertex buffers bound by this shader pass (index in to ShaderDescription::m_vertexFormats)
     //std::vector<uint32_t> m_vertexInstanceFormatBindings;  ///TODO: support more than one buffer of instance rate data
 };
@@ -112,7 +123,7 @@ public:
         , m_descriptionPerPass(std::move(passes))
     {
         uint32_t passIdx = 0;
-        for (const auto passname : passNames)
+        for (const auto& passname : passNames)
         {
             m_passNameToIndex.try_emplace(passname, passIdx);
             ++passIdx;

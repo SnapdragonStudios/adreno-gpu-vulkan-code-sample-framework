@@ -1,9 +1,14 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include "system/glm_common.hpp"
-#include "vulkan/vulkan_support.hpp"
+#include "vulkan/renderTarget.hpp"
 
 /// Simple projected shadow
 class Shadow
@@ -17,11 +22,10 @@ public:
 
     void SetLightPos(const glm::vec3& lightPos, const glm::vec3& lightTarget);
     glm::vec3 GetLightPos() const;
-    void SetEyeClipPlanes(float eyeCameraFov, float eyeNearPlane, float farPlane);
+    void SetEyeClipPlanes(float eyeCameraFov, float cameraAspect, float eyeNearPlane, float shadowFarPlane);
 
     void Update(const glm::mat4& eyeViewMatrix);
 
-    const auto& GetColor() const { return m_ShadowColor; }
     const auto& GetViewProj() const { return m_ShadowViewProj; }
     VkRenderPass GetRenderPass() const
     {
@@ -66,24 +70,20 @@ public:
 
 protected:
     float           m_eyeCameraFov = 1.0f;// fov of the scene (not the shadow) camera
+    float           m_eyeCameraAspect = 1.0f;// aspect of the scene (not the shadow) camera
     float           m_eyeNearPlane = 1.0f;// near plane of the scene camera
     float           m_farPlane = 1000.0f; // farthest distance we want to see shadows (from the scene camera's origin - can be lower than the scenes draw distance)
+    float           m_shadowCameraAspect = 1.0f;    // Aspect ratio of shadow camera (if we have a non-square shadow map)
 
-    glm::vec4       m_ShadowColor;
     glm::vec3       m_ShadowLightPos;
     glm::vec3       m_ShadowLightTarget;
     glm::mat4       m_ShadowProj;
     glm::mat4       m_ShadowView;
     glm::mat4       m_ShadowViewProj;
-    //glm::mat4       m_ShadowMVP;
-    //glm::mat4       m_ShadowGenMVP;
     glm::mat4       m_ShadowBiasScale;
 
     VkViewport      m_Viewport = {};
     VkRect2D        m_Scissor = {};
-
-    float           m_shadowCameraAspect = 1.f;
-    float           m_LightFrustumDepth;
 
     // Render targets and renderpass
     CRenderTargetArray<1> m_ShadowMapRT;

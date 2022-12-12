@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "imguiAndroid.hpp"
 #define NOMINMAX
@@ -19,7 +24,7 @@ GuiImguiPlatform::~GuiImguiPlatform()
 
 bool GuiImguiPlatform::Initialize(uintptr_t windowHandle, uint32_t deviceWidth, uint32_t deviceHeight, uint32_t renderWidth, uint32_t renderHeight)
 {
-    if (!GuiImguiBase::Initialize(windowHandle))
+    if (!GuiImguiBase::Initialize(windowHandle, renderWidth, renderHeight))
     {
         return false;
     }
@@ -32,11 +37,10 @@ bool GuiImguiPlatform::Initialize(uintptr_t windowHandle, uint32_t deviceWidth, 
     io.DisplayFramebufferScale.y = (float)renderHeight / io.DisplaySize.y;
 
     float SCALE = 4.0f;
-    ImFontConfig cfg;
+    ImFontConfig cfg {};
     cfg.SizePixels = 13 * SCALE;
-    ImGui::GetIO().Fonts->AddFontDefault(&cfg)->DisplayOffset.y = SCALE;
+    ImGui::GetIO().Fonts->AddFontDefault(&cfg);
 
-    //style.ScaleAllSizes(0);
     return true;
 }
 

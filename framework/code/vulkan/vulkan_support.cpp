@@ -1,10 +1,16 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
-#include "vulkan_support.hpp"
 #include "system/assetManager.hpp"
 #include "system/os_common.h"
 #include "memory/memoryManager.hpp"
+#include "vulkan_support.hpp"
+#include "renderTarget.hpp"
 
 //-----------------------------------------------------------------------------
 bool LoadShader(Vulkan* pVulkan, AssetManager& assetManager, ShaderInfo* pShader, const std::string& VertFilename, const std::string& FragFilename)
@@ -37,7 +43,7 @@ void ReleaseShader( Vulkan* pVulkan, ShaderInfo* pShader )
 }
 
 //-----------------------------------------------------------------------------
-bool CreateUniformBuffer(Vulkan* pVulkan, Uniform* pNewUniform, uint32_t dataSize, const void* const pData, VkBufferUsageFlags usage)
+bool CreateUniformBuffer(Vulkan* pVulkan, Uniform* pNewUniform, size_t dataSize, const void* const pData, VkBufferUsageFlags usage)
 //-----------------------------------------------------------------------------
 {
     MemoryManager& memoryManager = pVulkan->GetMemoryManager();
@@ -55,12 +61,9 @@ bool CreateUniformBuffer(Vulkan* pVulkan, Uniform* pNewUniform, uint32_t dataSiz
 }
 
 //-----------------------------------------------------------------------------
-void UpdateUniformBuffer(Vulkan* pVulkan, Uniform* pUniform, uint32_t dataSize, const void* const pNewData)
+void UpdateUniformBuffer(Vulkan* pVulkan, Uniform* pUniform, size_t dataSize, const void* const pNewData)
 //-----------------------------------------------------------------------------
 {
-    VkResult RetVal = VK_SUCCESS;
-
-    void* pMappedData = NULL;
     MemoryCpuMapped<uint8_t> mapped = pVulkan->GetMemoryManager().Map<uint8_t>(pUniform->buf);
     if (mapped.data()==nullptr)
     {
@@ -72,7 +75,6 @@ void UpdateUniformBuffer(Vulkan* pVulkan, Uniform* pUniform, uint32_t dataSize, 
     pVulkan->GetMemoryManager().Unmap(pUniform->buf, std::move(mapped));
 }
 
-
 //-----------------------------------------------------------------------------
 void ReleaseUniformBuffer(Vulkan* pVulkan, Uniform* pUniform)
 //-----------------------------------------------------------------------------
@@ -81,6 +83,47 @@ void ReleaseUniformBuffer(Vulkan* pVulkan, Uniform* pUniform)
     {
         pVulkan->GetMemoryManager().Destroy(std::move(pUniform->buf));
     }
+}
+
+
+//-----------------------------------------------------------------------------
+bool CreateUniformBuffer(Vulkan* pVulkan, MemoryVmaAllocatedBuffer<VkBuffer> &rNewUniformBuffer, size_t dataSize, const void* const pData, VkBufferUsageFlags usage)
+//-----------------------------------------------------------------------------
+{
+    MemoryManager& memoryManager = pVulkan->GetMemoryManager();
+
+    // Create the memory buffer...
+    rNewUniformBuffer = memoryManager.CreateBuffer(dataSize, usage, MemoryManager::MemoryUsage::CpuToGpu, nullptr);
+
+    // If we have initial data, add it now
+    if (pData != nullptr)
+    {
+        UpdateUniformBuffer(pVulkan, rNewUniformBuffer, dataSize, pData);
+    }
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+void UpdateUniformBuffer(Vulkan* pVulkan, MemoryVmaAllocatedBuffer<VkBuffer>& rUniform, size_t dataSize, const void* const pNewData)
+//-----------------------------------------------------------------------------
+{
+    MemoryCpuMapped<uint8_t> mapped = pVulkan->GetMemoryManager().Map<uint8_t>(rUniform);
+    if (mapped.data() == nullptr)
+    {
+        return;
+    }
+
+    memcpy(mapped.data(), pNewData, dataSize);
+
+    pVulkan->GetMemoryManager().Unmap(rUniform, std::move(mapped));
+}
+
+//-----------------------------------------------------------------------------
+void ReleaseUniformBuffer(Vulkan* pVulkan, MemoryVmaAllocatedBuffer<VkBuffer>& rUniform)
+//-----------------------------------------------------------------------------
+{
+    pVulkan->GetMemoryManager().Destroy(std::move(rUniform));
 }
 
 
@@ -216,6 +259,8 @@ void Wrap_VkImage::Release()
         memoryManager.Destroy(std::move(m_VmaImage));
     }
     m_pVulkan = nullptr;
+    m_ImageInfo = {};
+    m_Name.clear();
 }
 
 //=============================================================================
@@ -279,12 +324,12 @@ bool Wrap_VkCommandBuffer::Initialize(Vulkan* pVulkan, const std::string& Name, 
         LOGE("Command Buffer initialization with unknown level! (%d)", CmdBuffLevel);
     }
 
-    // If we have an independant async compute pool indicate this command list is using it (and must be submitted to the associated device queue).
-    m_UseComputeCmdPool = UseComputeCmdPool && pVulkan->m_VulkanAsyncComputeCmdPool;
+    // If we have an independant compute pool indicate this command list is using it (and must be submitted to the associated device queue).
+    m_UseComputeCmdPool = UseComputeCmdPool && pVulkan->m_VulkanComputeCmdPool;
 
     // Allocate the command buffer from the pool
     VkCommandBufferAllocateInfo AllocInfo {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    AllocInfo.commandPool = m_UseComputeCmdPool ? pVulkan->m_VulkanAsyncComputeCmdPool : pVulkan->m_VulkanCmdPool;
+    AllocInfo.commandPool = m_UseComputeCmdPool ? pVulkan->m_VulkanComputeCmdPool : pVulkan->m_VulkanCmdPool;
     AllocInfo.level = CmdBuffLevel;
     AllocInfo.commandBufferCount = 1;
 
@@ -403,7 +448,7 @@ bool Wrap_VkCommandBuffer::Begin( VkFramebuffer FrameBuffer, VkRenderPass Render
 }
 
 //-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::BeginRenderPass(VkRect2D RenderExtent, float MinDepth, float MaxDepth, VkClearColorValue ClearColor, uint32_t NumColorBuffers, bool HasDepth, VkRenderPass RenderPass, bool IsSwapChainRenderPass, VkFramebuffer FrameBuffer, VkSubpassContents SubContents)
+bool Wrap_VkCommandBuffer::BeginRenderPass(VkRect2D RenderExtent, float MinDepth, float MaxDepth, const tcb::span<const VkClearColorValue> ClearColors, uint32_t NumColorBuffers, bool HasDepth, VkRenderPass RenderPass, bool IsSwapChainRenderPass, VkFramebuffer FrameBuffer, VkSubpassContents SubContents)
 //-----------------------------------------------------------------------------
 {
     VkResult RetVal = VK_SUCCESS;
@@ -426,7 +471,7 @@ bool Wrap_VkCommandBuffer::BeginRenderPass(VkRect2D RenderExtent, float MinDepth
 
     for (uint32_t i=0; i< NumColorBuffers; ++i)
     {
-        ClearValues[ClearValuesCount].color = ClearColor;
+        ClearValues[ClearValuesCount].color = ClearColors[ClearColors.size() > NumColorBuffers ? ClearValuesCount : 0];
         ++ClearValuesCount;
     }
     if (HasDepth)
@@ -437,8 +482,7 @@ bool Wrap_VkCommandBuffer::BeginRenderPass(VkRect2D RenderExtent, float MinDepth
     }
 
     // ... begin render pass ...
-    VkRenderPassBeginInfo RPBeginInfo = {};
-    RPBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    VkRenderPassBeginInfo RPBeginInfo = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     RPBeginInfo.renderPass = RenderPass;
     RPBeginInfo.renderArea = RenderExtent;
     RPBeginInfo.clearValueCount = ClearValuesCount;
@@ -449,8 +493,7 @@ bool Wrap_VkCommandBuffer::BeginRenderPass(VkRect2D RenderExtent, float MinDepth
 
     if (IsSwapChainRenderPass && m_pVulkan->FillRenderPassTransformBeginInfoQCOM(RPTransformBeginInfoQCOM))
     {
-        //LOGI("RPTransformBeginInfoQCOM(%s): Pre swap Extents = (%d x %d)", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height);
-        std::swap(RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height);
+        //LOGI("RPTransformBeginInfoQCOM(%s): Pre swap Extents = (%d x %d) transform = %d", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, RPTransformBeginInfoQCOM.transform);
         RPBeginInfo.pNext = &RPTransformBeginInfoQCOM;
     }
 
@@ -461,10 +504,23 @@ bool Wrap_VkCommandBuffer::BeginRenderPass(VkRect2D RenderExtent, float MinDepth
 }
 
 //-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::NextSubpass()
+bool Wrap_VkCommandBuffer::BeginRenderPass(const CRenderTarget& renderTarget, VkRenderPass RenderPass, VkSubpassContents SubContents)
 //-----------------------------------------------------------------------------
 {
-    vkCmdNextSubpass(m_VkCommandBuffer, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+    VkRect2D Scissor = {};
+    Scissor.offset.x = 0;
+    Scissor.offset.y = 0;
+    Scissor.extent.width = renderTarget.m_Width;
+    Scissor.extent.height = renderTarget.m_Height;
+
+    return BeginRenderPass(Scissor, 0.0f, 1.0f, { renderTarget.m_ClearColorValues.data(), renderTarget.m_ClearColorValues.size() }, renderTarget.GetNumColorLayers(), renderTarget.m_DepthFormat != VK_FORMAT_UNDEFINED, RenderPass, false, renderTarget.m_FrameBuffer, SubContents);
+}
+
+//-----------------------------------------------------------------------------
+bool Wrap_VkCommandBuffer::NextSubpass( VkSubpassContents SubContents )
+//-----------------------------------------------------------------------------
+{
+    vkCmdNextSubpass(m_VkCommandBuffer, SubContents);
     return true;
 }
 
@@ -500,12 +556,21 @@ bool Wrap_VkCommandBuffer::End()
 }
 
 //-----------------------------------------------------------------------------
-void Wrap_VkCommandBuffer::QueueSubmit(tcb::span<VkSemaphore> WaitSemaphores, const tcb::span<const VkPipelineStageFlags> WaitDstStageMasks, tcb::span<VkSemaphore> SignalSemaphores)
+void Wrap_VkCommandBuffer::QueueSubmit( const tcb::span<const VkSemaphore> WaitSemaphores, const tcb::span<const VkPipelineStageFlags> WaitDstStageMasks, const tcb::span<const VkSemaphore> SignalSemaphores, VkFence CompletionFence ) const
 //-----------------------------------------------------------------------------
 {
     assert( m_VkCommandBuffer != VK_NULL_HANDLE );
-    m_pVulkan->QueueSubmit( { &m_VkCommandBuffer, 1 }, WaitSemaphores, WaitDstStageMasks, SignalSemaphores, m_UseComputeCmdPool );
+    m_pVulkan->QueueSubmit( { &m_VkCommandBuffer, 1 }, WaitSemaphores, WaitDstStageMasks, SignalSemaphores, m_UseComputeCmdPool, CompletionFence );
 }
+
+//-----------------------------------------------------------------------------
+void Wrap_VkCommandBuffer::QueueSubmit( const Vulkan::BufferIndexAndFence& CurrentVulkanBuffer, VkSemaphore renderCompleteSemaphore ) const
+//-----------------------------------------------------------------------------
+{
+    assert( m_VkCommandBuffer != VK_NULL_HANDLE );
+    QueueSubmit( CurrentVulkanBuffer.semaphore, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, renderCompleteSemaphore, CurrentVulkanBuffer.fence );
+}
+
 
 //-----------------------------------------------------------------------------
 void Wrap_VkCommandBuffer::Release()
@@ -515,184 +580,10 @@ void Wrap_VkCommandBuffer::Release()
     {
         // Do not need to worry about the device or pool being NULL since we could 
         // not have created the command buffer!
-        auto* cmdPool = m_UseComputeCmdPool ? m_pVulkan->m_VulkanAsyncComputeCmdPool : m_pVulkan->m_VulkanCmdPool;
+        auto* cmdPool = m_UseComputeCmdPool ? m_pVulkan->m_VulkanComputeCmdPool : m_pVulkan->m_VulkanCmdPool;
         vkFreeCommandBuffers(m_pVulkan->m_VulkanDevice, cmdPool, 1, &m_VkCommandBuffer);
     }
 
     // Clear everything back to starting state
     HardReset();
 }
-
-
-
-//=============================================================================
-// CRenderTarget
-//=============================================================================
-//-----------------------------------------------------------------------------
-CRenderTarget::CRenderTarget()
-//-----------------------------------------------------------------------------
-{
-    HardReset();
-}
-
-//-----------------------------------------------------------------------------
-CRenderTarget::~CRenderTarget()
-//-----------------------------------------------------------------------------
-{
-    Release();
-}
-
-//-----------------------------------------------------------------------------
-void CRenderTarget::HardReset()
-//-----------------------------------------------------------------------------
-{
-    m_Name = "RenderTarget";
-
-    m_Width = 0;
-    m_Height = 0;
-
-    m_pLayerFormats.clear();
-    m_DepthFormat = VK_FORMAT_UNDEFINED;
-    m_Msaa = {};
-
-    m_ColorAttachments.clear();
-    m_DepthAttachment = std::move(VulkanTexInfo());
-
-    m_FrameBuffer = VK_NULL_HANDLE;
-    m_FrameBufferDepthOnly = VK_NULL_HANDLE;
-
-    m_pVulkan = nullptr;
-}
-
-//-----------------------------------------------------------------------------
-bool CRenderTarget::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat, tcb::span<const VkSampleCountFlagBits> Msaa, const char* pName)
-//-----------------------------------------------------------------------------
-{
-    m_pVulkan = pVulkan;
-    m_DepthFormat = DepthFormat;
-    m_Msaa.assign(Msaa.begin(), Msaa.end());
-    m_Msaa.resize( pLayerFormats.size(), VK_SAMPLE_COUNT_1_BIT );
-
-    m_Width = uiWidth;
-    m_Height = uiHeight;
-
-    // If we have a name, save it
-    if (pName != NULL)
-    {
-        m_Name = pName;
-    }
-
-    m_ColorAttachments.clear();
-
-    m_pLayerFormats.assign( pLayerFormats.begin(), pLayerFormats.end() );
-
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool CRenderTarget::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat, VkSampleCountFlagBits Msaa, const char* pName)
-//-----------------------------------------------------------------------------
-{
-    m_Msaa.resize( pLayerFormats.size(), Msaa );
-
-    return Initialize(pVulkan, uiWidth, uiHeight, pLayerFormats, DepthFormat, m_Msaa, pName);
-}
-
-//-----------------------------------------------------------------------------
-bool CRenderTarget::InitializeDepth()
-//-----------------------------------------------------------------------------
-{
-    if (m_DepthFormat != VK_FORMAT_UNDEFINED)
-    {
-        char szName[256];
-        sprintf(szName, "%s: Depth", m_Name.c_str());
-        m_DepthAttachment = CreateTextureObject(m_pVulkan, m_Width, m_Height, m_DepthFormat, TT_DEPTH_TARGET, m_Name.c_str(), m_Msaa.empty() ? VK_SAMPLE_COUNT_1_BIT : m_Msaa[0]);
-    }
-    else
-    {
-        ReleaseTexture(m_pVulkan, &m_DepthAttachment);
-    }
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool CRenderTarget::InitializeColor(const tcb::span<const TEXTURE_TYPE> TextureTypes)
-//-----------------------------------------------------------------------------
-{
-    const auto NumColorLayers = GetNumColorLayers();
-    LOGI("Creating Render Target (%s): (%d x %d); %d color layer[s]", m_Name.c_str(), m_Width, m_Height, NumColorLayers);
-
-    m_ColorAttachments.clear();
-    m_ColorAttachments.reserve(NumColorLayers);
-
-    // First create the actual texture objects...
-    char szName[256];
-    for (size_t WhichLayer = 0; WhichLayer < NumColorLayers; WhichLayer++)
-    {
-        sprintf(szName, "%s: Color", m_Name.c_str());
-
-        const TEXTURE_TYPE TextureType = (WhichLayer < TextureTypes.size()) ? TextureTypes[WhichLayer] : TT_RENDER_TARGET;
-        m_ColorAttachments.emplace_back( CreateTextureObject(m_pVulkan, m_Width, m_Height, m_pLayerFormats[WhichLayer], TextureType, m_Name.c_str(), m_Msaa[WhichLayer]) );
-    }
-    return true;
-}
-
-bool CRenderTarget::InitializeFrameBuffer(VkRenderPass renderPass, const tcb::span<const VulkanTexInfo> ColorAttachments, const VulkanTexInfo* pDepthAttachment, VkFramebuffer* pFramebuffer )
-{
-    VkResult RetVal;
-
-    // ... then attach them to the render target
-    std::vector<VkImageView> attachments;
-    attachments.reserve( ColorAttachments.size() + 1/*depth*/ );
-
-    for (const VulkanTexInfo& ColorAttachement: ColorAttachments)
-    {
-        attachments.push_back(ColorAttachement.GetVkImageView());
-    }
-    if (pDepthAttachment && pDepthAttachment->Format != VK_FORMAT_UNDEFINED)
-    {
-        attachments.push_back(pDepthAttachment->GetVkImageView());
-    }
-
-    VkFramebufferCreateInfo BufferInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-    BufferInfo.flags = 0;
-    BufferInfo.renderPass = renderPass;
-    BufferInfo.attachmentCount = (uint32_t)attachments.size();
-    BufferInfo.pAttachments = attachments.data();
-    BufferInfo.width = m_Width;
-    BufferInfo.height = m_Height;
-    BufferInfo.layers = 1;
-
-    RetVal = vkCreateFramebuffer(m_pVulkan->m_VulkanDevice, &BufferInfo, NULL, pFramebuffer);
-    if (!CheckVkError("vkCreateFramebuffer()", RetVal))
-    {
-        return false;
-    }
-
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-void CRenderTarget::Release()
-//-----------------------------------------------------------------------------
-{
-    if (m_pVulkan == nullptr)
-        return;
-
-    for (auto& ColorAttachment: m_ColorAttachments)
-    {
-        ReleaseTexture(m_pVulkan, &ColorAttachment);
-    }
-    m_ColorAttachments.clear();
-
-    m_pLayerFormats.clear();
-
-    ReleaseTexture(m_pVulkan, &m_DepthAttachment);
-
-    if (m_FrameBuffer != VK_NULL_HANDLE)
-        vkDestroyFramebuffer(m_pVulkan->m_VulkanDevice, m_FrameBuffer, NULL);
-
-    // Clear everything back to starting state
-    HardReset();
-}
-

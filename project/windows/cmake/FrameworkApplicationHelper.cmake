@@ -3,16 +3,18 @@
 #
 
 # Input:
-#  CPP_SRC     - list of cpp/hpp files
-#  SHADERS_SRC - list of 'shader' (.vert, .frag, .comp) source files
-#  PROJECT_NAME - name of the application being compiled (from the 'project(...)' command)
+#  CPP_SRC       - list of cpp/hpp files
+#  SHADERS_SRC   - list of 'shader' (.vert, .frag, .comp) source files
+#  NATVIS_SCHEMA - list of application specific Visual Studio visualization schemas (for debuffer)
+#  PROJECT_NAME  - name of the application being compiled (from the 'project(...)' command)
 
 
 # Windows and Android differ in terms of output.
 # Windows generates an executable, Android generates a library (that the AndroidManifest references)
 if(WIN32)
     set( TARGET_NAME ${PROJECT_NAME} )
-    add_executable( ${TARGET_NAME} WIN32 ${CPP_SRC} ${SHADERS_SRC} )
+    add_executable( ${TARGET_NAME} WIN32 ${CPP_SRC} ${SHADERS_SRC} ${NATVIS_SCHEMA})
+    add_dependencies( ${TARGET_NAME} buildTimestamp )
     target_compile_definitions( ${TARGET_NAME} PRIVATE OS_WINDOWS;_CRT_SECURE_NO_WARNINGS )
     set_property(TARGET ${TARGET_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 elseif(ANDROID)

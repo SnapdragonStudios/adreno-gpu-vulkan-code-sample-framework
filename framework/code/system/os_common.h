@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 /// @defgroup System
@@ -14,8 +19,14 @@ void        OS_SetApplicationName(const char* applicationName);
 /// Return number of CPU cores (or 0 if unknown)
 uint32_t    OS_GetNumCores();
 
-/// Get current CPU (wall) time in ms.
-uint32_t	OS_GetTimeMS();
+/// Get current CPU (wall) time in ms (thousandths).
+uint32_t    OS_GetTimeMS();
+
+/// Get current CPU (wall) time in us (millionths).
+uint64_t    OS_GetTimeUS();
+
+/// Sleep this thread for the given number of ms
+void        OS_SleepMs(uint32_t ms);
 
 //
 // Logging.
@@ -36,15 +47,14 @@ extern const char* gpAndroidAppShortName;
 #define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN,  gpAndroidAppShortName, __VA_ARGS__))
 #define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, gpAndroidAppShortName, __VA_ARGS__))
 
-#endif // OS_ANDROID
+#elif OS_WINDOWS
 
-#ifdef OS_WINDOWS
 void LOGI(const char* pszFormat, ...);
 void LOGW(const char* pszFormat, ...);
 void LOGE(const char* pszFormat, ...);
-#endif // OS_WINDOWS
 
-#if OS_ANDROID
-// For now, put a define here to use Android Hardware Buffers (helps transition to AHB)
-// #define USE_HARDWARE_BUFFER
-#endif // OS_ANDROID
+#else
+
+#error "Must define an OS_xxx!"
+
+#endif // OS_WINDOWS

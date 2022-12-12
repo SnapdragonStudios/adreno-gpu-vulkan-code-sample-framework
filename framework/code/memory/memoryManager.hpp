@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 /// @defgroup Memory
@@ -64,7 +69,11 @@ public:
 	~MemoryManager();
 
 	/// Initialize the memory manager (must be initialized before using CreateBuffer etc)
-	bool Initialize(VkPhysicalDevice vkPhysicalDevice, VkDevice vkDevice, VkInstance vkInstance, bool );
+	/// @param EnableBufferDeviceAddress enable ability to call GetBufferDeviceAddress
+	/// @return true if successfully initialized
+	bool Initialize(VkPhysicalDevice vkPhysicalDevice, VkDevice vkDevice, VkInstance vkInstance, bool EnableBufferDeviceAddress);
+	/// Destroy the memory manager (do before you destroy the Vulkan device)
+	void Destroy();
 
 	/// Create buffer in memory and create the associated Vulkan objects
 	MemoryVmaAllocatedBuffer<VkBuffer> CreateBuffer(size_t size, VkBufferUsageFlags bufferUsage, MemoryUsage memoryUsage, VkDescriptorBufferInfo* /*output, optional*/ = nullptr);
@@ -86,6 +95,9 @@ public:
 	/// Unmap a buffer from cpu memory
 	template<typename T_VKTYPE>
 	void Unmap(MemoryVmaAllocatedBuffer<T_VKTYPE>& buffer, MemoryCpuMappedUntyped allocation);
+
+    /// Copy data in one buffer into another.  Assumes buffers created with appropriate VK_BUFFER_USAGE_TRANSFER_SRC_BIT and VK_BUFFER_USAGE_TRANSFER_DST_BIT
+    bool CopyData(VkCommandBuffer vkCommandBuffer, const MemoryVmaAllocatedBuffer<VkBuffer>& src, MemoryVmaAllocatedBuffer<VkBuffer>& dst, size_t copySize, size_t srcOffset = 0, size_t dstOffset = 0);
 
 	/// Query the device address (assuming that Vulkan extension was enabled)
 	VkDeviceAddress GetBufferDeviceAddress(VkBuffer b) const { return GetBufferDeviceAddressInternal(b); }

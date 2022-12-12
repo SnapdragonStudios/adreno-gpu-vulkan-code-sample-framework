@@ -22,7 +22,7 @@ foreach(file ${files})
     add_custom_command(
         OUTPUT ${OUTPUT_SHADER}
         MAIN_DEPENDENCY ${file}
-        COMMAND ${GLSL_VALIDATOR} -V ${file} -o ${OUTPUT_FILENAME}.spv
+        COMMAND ${GLSL_VALIDATOR} -V --target-env vulkan1.1 ${file} -o ${OUTPUT_FILENAME}.spv
         COMMAND ${CMAKE_COMMAND} -E rename ${OUTPUT_FILENAME}.spv ${OUTPUT_SHADER}
         COMMENT "Compiling shader ... ${file}" to ${OUTPUT_SHADER}
     )

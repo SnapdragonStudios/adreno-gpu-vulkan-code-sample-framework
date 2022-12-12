@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 ///
@@ -36,9 +41,9 @@ void LoadVariable(const char* text);
 
 namespace {
 
-inline bool CompareTextCaseless(const char* s1, const char* s2)
+inline bool CompareTextCaseless(const char* s1, const char* s2, size_t MaxStringLength = SIZE_MAX )
 {
-	for (int a = 0;; a++) {
+	for (int a = 0; a < MaxStringLength; a++) {
 		unsigned long x = *reinterpret_cast<const unsigned char*>(s1 + a);
 		unsigned long y = *reinterpret_cast<const unsigned char*>(s2 + a);
 		if (x - 65 < 26UL) x += 32;
@@ -50,26 +55,28 @@ inline bool CompareTextCaseless(const char* s1, const char* s2)
 	return true;
 }
 
-inline bool CompareTextLessThan(const char* s1, const char* s2)
+inline bool CompareTextLessThan(const char* s1, const char* s2, size_t MaxStringLength = SIZE_MAX)
 {
-	for (int a = 0;; a++) {
+	for (int a = 0; a < MaxStringLength; a++) {
 		unsigned long x = *reinterpret_cast<const unsigned char*>(s1 + a);
 		unsigned long y = *reinterpret_cast<const unsigned char*>(s2 + a);
 		if (x - 'a' < 26UL) x -= 32;
 		if (y - 'a' < 26UL) y -= 32;
 		if ((x != y) || (x == 0)) return (x < y);
 	}
+	return false;
 }
 
-inline bool CompareTextLessEqual(const char* s1, const char* s2)
+inline bool CompareTextLessEqual(const char* s1, const char* s2, size_t MaxStringLength = SIZE_MAX )
 {
-	for (int a = 0;; a++) {
+	for (int a = 0; a < MaxStringLength; a++) {
 		unsigned long x = *reinterpret_cast<const unsigned char*>(s1 + a);
 		unsigned long y = *reinterpret_cast<const unsigned char*>(s2 + a);
 		if (x - 'a' < 26UL) x -= 32;
 		if (y - 'a' < 26UL) y -= 32;
 		if ((x != y) || (x == 0)) return (x <= y);
 	}
+	return true;
 }
 
 inline long StringToInteger(const char* text)
@@ -339,6 +346,7 @@ end:
 	return (len);
 }
 
+template< size_t MaxStringLength >
 struct ConstCharPtr {
 private:
 	const char	*ptr;
@@ -363,32 +371,32 @@ public:
 
 	bool operator ==(const char* c) const
 	{
-		return CompareTextCaseless(ptr, c);
+		return CompareTextCaseless(ptr, c, MaxStringLength);
 	}
 
 	bool operator !=(const char* c) const
 	{
-		return !CompareTextCaseless(ptr, c);
+		return !CompareTextCaseless(ptr, c, MaxStringLength);
 	}
 
 	bool operator <(const char* c) const
 	{
-		return CompareTextLessThan(ptr, c);
+		return CompareTextLessThan(ptr, c, MaxStringLength);
 	}
 
 	bool operator <=(const char* c) const
 	{
-		return CompareTextLessEqual(ptr, c);
+		return CompareTextLessEqual(ptr, c, MaxStringLength);
 	}
 
 	bool operator >(const char* c) const
 	{
-		return !CompareTextLessEqual(ptr, c);
+		return !CompareTextLessEqual(ptr, c, MaxStringLength);
 	}
 
 	bool operator >=(const char* c) const
 	{
-		return !CompareTextLessThan(ptr, c);
+		return !CompareTextLessThan(ptr, c, MaxStringLength);
 	}
 };
 
@@ -398,7 +406,9 @@ enum {
 	/// Mark variable as non persistant (do not write back to config)
 	kVariableNonpersistent = 1 << 0,
 	/// Mark variable as persistant (write back to config)
-	kVariablePermanent = 1 << 1
+	kVariablePermanent = 1 << 1,
+	/// Mark variable as modified (has been set outside of the app default - although may have been set back to the default value!)
+	kVariableModified = 1 << 2,
 };
 
 enum {
@@ -419,7 +429,7 @@ protected:
 	}
 	virtual ~VariableBase() {}
 public:
-	typedef ConstCharPtr KeyType;
+	typedef ConstCharPtr<kMaxVariableNameLength> KeyType;
 
 	unsigned long GetFlags() const
 	{
@@ -442,7 +452,7 @@ public:
 	}
 
 	virtual void SetValue(const char* const text) = 0;
-	virtual void GetValue(char* text, long max) = 0;
+	virtual void GetValue(char* text, long max) const = 0;
 };
 
 template <class Type>
@@ -612,6 +622,16 @@ inline void ReadFromText<glm::vec4>(glm::vec4* val, const char* const text)
 {
 	ReadFromText((float(*)[4]) val, text);
 }
+template<>
+inline void WriteToText<glm::vec3>(const glm::vec3& val, char* text, long max)
+{
+	snprintf(text, max, "{%f,%f,%f}", val.x, val.y, val.z);
+}
+template<>
+inline void WriteToText<glm::vec4>(const glm::vec4& val, char* text, long max)
+{
+	snprintf(text, max, "{%f,%f,%f,%f}", val.x, val.y, val.z, val.w);
+}
 #endif // defined(GLM_VERSION)
 
 template <class Type>
@@ -631,15 +651,17 @@ public:
 	virtual void SetValue(const char* const text)
 	{
 		ReadFromText(mPtr, text);
+		SetFlags(GetFlags() | kVariableModified);
 	}
 
-	virtual void GetValue(char* text, long max)
+	virtual void GetValue(char* text, long max) const
 	{
 		WriteToText(*mPtr, text, max);
 	}
 };
 
 extern VariableBase* GetVariable(const char* name);
+extern Map<VariableBase>* GetAllVariables();
 extern bool AddVariable(VariableBase* variable);
 
 template <typename Type>

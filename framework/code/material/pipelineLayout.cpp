@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "pipelineLayout.hpp"
 #include "descriptorSetLayout.hpp"
@@ -28,15 +33,24 @@ void PipelineLayout::Destroy(Vulkan& vulkan)
 	}
 }
 
-bool PipelineLayout::Init(Vulkan& vulkan, const std::vector<DescriptorSetLayout>& descriptorSetLayouts)
+bool PipelineLayout::Init(Vulkan& vulkan, const tcb::span<const DescriptorSetLayout> descriptorSetLayouts)
 {
 	std::vector<VkDescriptorSetLayout> vkDescriptorSetLayouts;
 	vkDescriptorSetLayouts.reserve(descriptorSetLayouts.size());
 	for (const auto& descriptorSetLayout : descriptorSetLayouts)
 	{
-		vkDescriptorSetLayouts.push_back(descriptorSetLayout.GetVkDescriptorSetLayout());
+		VkDescriptorSetLayout vkDescriptorSetLayout = descriptorSetLayout.GetVkDescriptorSetLayout();
+		if (vkDescriptorSetLayout == VK_NULL_HANDLE)
+			// early exit if we dont have a 'solid' descriptor set layout yet!
+			return false;
+		vkDescriptorSetLayouts.push_back(vkDescriptorSetLayout);
 	}
 
+	return Init(vulkan, vkDescriptorSetLayouts);
+}
+
+bool PipelineLayout::Init(Vulkan& vulkan, const tcb::span<const VkDescriptorSetLayout> vkDescriptorSetLayouts)
+{
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
 	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pipelineLayoutInfo.setLayoutCount = (uint32_t)vkDescriptorSetLayouts.size();

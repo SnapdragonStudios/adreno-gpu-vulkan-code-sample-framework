@@ -110,3 +110,4 @@ debug/
 
 # imgui config
 imgui.ini
+project/buildtimestamp.h

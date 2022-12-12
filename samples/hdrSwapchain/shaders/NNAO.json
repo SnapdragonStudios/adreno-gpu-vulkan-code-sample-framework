@@ -1,0 +1,125 @@
+{
+	"$schema": "shaderSchema.json",
+	"Passes": [
+		{
+			"Name": "NNAO",
+			"Shaders": {
+				"Compute": "Media/Shaders/NNAO.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Uniform" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Depth" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Normal" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "nnao_f0" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "nnao_f1" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "nnao_f2" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "nnao_f3" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "NNAOout" ]
+						}
+					]
+				}
+			]
+		},
+		{
+			"Name": "NNAOFilter_horiz",
+			"Shaders": {
+				"Compute": "Media/Shaders/NNAOFilter_horiz.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "NNAOout" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "NNAOtmp" ]
+						},
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Uniform" ]
+						}
+					]
+				}
+			]
+		},
+		{
+			"Name": "NNAOFilter_vertical",
+			"Shaders": {
+				"Compute": "Media/Shaders/NNAOFilter_vertical.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "NNAOtmp" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "NNAOout" ]
+						},
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Uniform" ]
+						}
+					]
+				}
+			]
+		}
+	]
+}

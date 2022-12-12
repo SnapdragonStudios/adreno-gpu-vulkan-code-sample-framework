@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "shaderModule.hpp"
 #include <fstream>
@@ -58,6 +63,8 @@ bool ShaderModule::Load(Vulkan& vulkan, AssetManager& assetManager, const std::s
             {
                 m_shader = shaderModule;
             }
+            vulkan.SetDebugObjectName(shaderModule, m_filename.c_str());
+
         }
         else
         {
@@ -69,6 +76,20 @@ bool ShaderModule::Load(Vulkan& vulkan, AssetManager& assetManager, const std::s
 
 bool ShaderModule::Load(Vulkan& vulkan, AssetManager& assetManager, const ShaderPassDescription& shaderDescription, const ShaderType shaderType)
 {
-    const auto& filename = shaderType == ShaderType::Fragment ? shaderDescription.m_fragmentName : (shaderType == ShaderType::Vertex ? shaderDescription.m_vertexName : shaderDescription.m_computeName);
-    return Load(vulkan, assetManager, filename);    ///TODO: better return code / error handling
+    const std::string* shaderFileName = nullptr;
+    switch (shaderType)
+    {
+    case ShaderType::Fragment:
+        shaderFileName = &shaderDescription.m_fragmentName;
+        break;
+    case ShaderType::Vertex:
+        shaderFileName = &shaderDescription.m_vertexName;
+        break;
+    case ShaderType::Compute:
+        shaderFileName = &shaderDescription.m_computeName;
+        break;
+    }
+
+    assert(shaderFileName!=nullptr);
+    return Load(vulkan, assetManager, *shaderFileName);    ///TODO: better return code / error handling
 }

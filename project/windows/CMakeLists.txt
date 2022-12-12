@@ -18,6 +18,26 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 endif()
 endif()
 
+# Generate build time stamp as 2 part process.  CMake file that exe depends upon and the header file that cmake writes the header to be included by code.  This way we only rebuild what is needed.
+file (WRITE ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "string(TIMESTAMP TIMEZ UTC)\n")
+file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(WRITE  ../../buildtimestamp.h \"#ifndef _BUILDTIMESTAMP_H_\\n\")\n")
+file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(APPEND ../../buildTimestamp.h \"#define _BUILDTIMESTAMP_H_\\n\\n\")\n")
+file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(APPEND ../../buildTimestamp.h \"// Automatically built by build process.  Do NOT check into version control.\\n\\n\")\n")
+file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(APPEND ../../buildTimestamp.h \"#define BUILD_TIMESTAMP \\\"\${TIMEZ}\\\"\\n\\n\")\n")
+file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(APPEND ../../buildTimestamp.h \"#endif // _BUILDTIMESTAMP_H_\\n\")\n")
+add_custom_target (
+    buildTimestamp
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/buildTimestamp.cmake
+    ADD_DEPENDENCIES ${CMAKE_BINARY_DIR}/buildTimestamp.cmake)
+
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 set(FRAMEWORK_DIR ../../framework)
 add_subdirectory( ${FRAMEWORK_DIR} framework )
 add_subdirectory(../../samples/empty/ samples/empty)
+add_subdirectory(../../samples/hello-gltf/ samples/hello-gltf)
+add_subdirectory(../../samples/shaderResolveTonemap/ samples/shaderResolveTonemap)
+add_subdirectory(../../samples/hdrSwapchain/ samples/hdrSwapchain)
+add_subdirectory(../../samples/SubPass/ samples/SubPass)
+add_subdirectory(../../samples/rotatedCopy/ samples/rotatedCopy)
+add_subdirectory(../../samples/BloomImageProcessing/ samples/BloomImageProcessing)

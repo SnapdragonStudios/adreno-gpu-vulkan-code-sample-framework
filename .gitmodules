@@ -24,3 +24,6 @@
 [submodule "framework/external/span"]
 	path = framework/external/span
 	url = https://github.com/tcbrindle/span
+[submodule "assets"]
+	path = assets
+	url = https://github.com/quic/game-assets-for-adreno-gpu-code-samples

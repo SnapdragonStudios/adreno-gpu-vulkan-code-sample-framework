@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "shaderDescription.hpp"
 #include "nlohmann/json.hpp"
@@ -11,7 +16,7 @@
 
 using Json = nlohmann::json;
 
-ShaderPassDescription::ShaderPassDescription(std::vector<DescriptorSetDescription> setDescriptions, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, ShaderPassDescription::FixedFunctionSettings fixedFunctionSettings, ShaderPassDescription::SampleShadingSettings sampleShadingSettings, std::vector<uint32_t> vertexFormatBindings)
+ShaderPassDescription::ShaderPassDescription(std::vector<DescriptorSetDescription> setDescriptions, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, ShaderPassDescription::FixedFunctionSettings fixedFunctionSettings, ShaderPassDescription::SampleShadingSettings sampleShadingSettings, ShaderPassDescription::WorkGroupSettings workGroupSettings, std::vector<uint32_t> vertexFormatBindings)
     : m_sets(std::move(setDescriptions))
     , m_outputs(std::move(outputs))
     , m_computeName(std::move(computeName))
@@ -19,6 +24,7 @@ ShaderPassDescription::ShaderPassDescription(std::vector<DescriptorSetDescriptio
     , m_fragmentName(std::move(fragmentName))
     , m_fixedFunctionSettings(std::move(fixedFunctionSettings))
     , m_sampleShadingSettings(std::move(sampleShadingSettings))
+    , m_workGroupSettings(std::move(workGroupSettings))
     , m_vertexFormatBindings(std::move(vertexFormatBindings))
 //    , m_vertexInstanceFormatBindings(std::move(vertexInstanceFormatBindings))
 {
@@ -29,19 +35,28 @@ const static std::map<std::string, VertexFormat::Element::ElementType> cElementT
     {"Float", VertexFormat::Element::ElementType::t::Float},
     {"Vec2", VertexFormat::Element::ElementType::t::Vec2},
     {"Vec3", VertexFormat::Element::ElementType::t::Vec3},
-    {"Vec4", VertexFormat::Element::ElementType::t::Vec4}
+    {"Vec4", VertexFormat::Element::ElementType::t::Vec4},
+    {"Int16", VertexFormat::Element::ElementType::t::Int16},
+    {"Float16", VertexFormat::Element::ElementType::t::Float16},
+    {"F16Vec2", VertexFormat::Element::ElementType::t::F16Vec2},
+    {"F16Vec3", VertexFormat::Element::ElementType::t::F16Vec3},
+    {"F16Vec4", VertexFormat::Element::ElementType::t::F16Vec4}
 };
 const static std::map<std::string, VertexFormat::eInputRate> cBufferRateByName{
     {"Vertex", VertexFormat::eInputRate::Vertex},
     {"Instance", VertexFormat::eInputRate::Instance}
 };
 
-const static std::map<std::string, DescriptorSetDescription::DescriptorType> cBufferTypeByName {
-    {"ImageSampler",  DescriptorSetDescription::DescriptorType::ImageSampler},
-    {"UniformBuffer", DescriptorSetDescription::DescriptorType::UniformBuffer},
-    {"StorageBuffer", DescriptorSetDescription::DescriptorType::StorageBuffer},
-    {"ImageStorage",  DescriptorSetDescription::DescriptorType::ImageStorage},
-    {"InputAttachment",  DescriptorSetDescription::DescriptorType::InputAttachment},
+struct DescriptorTypeAndReadOnly {
+    DescriptorSetDescription::DescriptorType type;
+    bool readOnly = false;
+};
+const static std::map<std::string, DescriptorTypeAndReadOnly> cBufferTypeByName {
+    {"ImageSampler",  {DescriptorSetDescription::DescriptorType::ImageSampler, true}},
+    {"UniformBuffer", {DescriptorSetDescription::DescriptorType::UniformBuffer, true}},
+    {"StorageBuffer", {DescriptorSetDescription::DescriptorType::StorageBuffer, false}},
+    {"ImageStorage",  {DescriptorSetDescription::DescriptorType::ImageStorage, false}},
+    {"InputAttachment",  {DescriptorSetDescription::DescriptorType::InputAttachment, true}}
 };
 
 const static std::map<std::string, DescriptorSetDescription::StageFlag> cStageFlagBitsByName{
@@ -95,6 +110,15 @@ static void from_json(const Json& j, ShaderPassDescription::Output& output) {
 
     it = j.find("DstColorBlendFactor");
     if (it != j.end()) it->get_to(output.dstColorBlendFactor);
+
+    it = j.find("SrcAlphaBlendFactor");
+    if (it != j.end()) it->get_to(output.srcAlphaBlendFactor);
+
+    it = j.find("DstAlphaBlendFactor");
+    if (it != j.end()) it->get_to(output.dstAlphaBlendFactor);
+
+    it = j.find("ColorWriteMask");
+    if (it != j.end()) it->get_to(output.colorWriteMask);
 }
 
 static void from_json(const Json& j, ShaderPassDescription::FixedFunctionSettings& ffs) {
@@ -134,7 +158,12 @@ static void from_json(const Json& j, ShaderPassDescription::SampleShadingSetting
     it = j.find("Mask");
     if (it != j.end()) it->get_to(sss.sampleShadingMask);
 }
-    
+
+static void from_json(const Json& j, ShaderPassDescription::WorkGroupSettings& ws) {
+    auto it = j.find("LocalSize");
+    if (it != j.end()) it->get_to(ws.localSize);
+}
+
 std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& assetManager, const std::string& filename)
 {
     Json json;
@@ -222,6 +251,7 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
         std::vector<uint32_t> instanceVertexFormatBindings;     // index(s) in to the VertexFormat array for instance rate data (ie per instance)
         ShaderPassDescription::FixedFunctionSettings fixedFunctionSettings;
         ShaderPassDescription::SampleShadingSettings sampleShadingSettings;
+        ShaderPassDescription::WorkGroupSettings workGroupSettings;
 
         for (const auto& el : ar.items())
         {
@@ -231,14 +261,14 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
             }
             else if ( el.key().compare("Shaders") == 0)
             {
-                // Either Compute or Vertex shader has to be defined, but Fragment is optional
+                // Either Compute or Vertex shader has to be defined, but Fragment is optional.
                 computeShader = el.value().contains("Compute") ? (std::string) el.value()["Compute"] : std::string();
                 vertexShader = el.value().contains("Vertex") ? (std::string) el.value()["Vertex"] : std::string();
                 fragmentShader = el.value().contains("Fragment") ? (std::string) el.value()["Fragment"] : std::string();
 
                 if (computeShader.empty() && vertexShader.empty())
                 {
-                    throw std::runtime_error("must have a vertex or compute shader name!");
+                    throw std::runtime_error("must have a Vertex or Compute shader name!");
                 }
             }
             else if ( el.key().compare("DescriptorSets") == 0)
@@ -253,6 +283,7 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
                         {
                             const std::string& bufferType = ar["Type"];
                             uint32_t count = ar.contains("Count") ? (uint32_t)ar["Count"] : 1;
+                            bool readOnly = ar.contains("ReadOnly") ? (bool)ar["ReadOnly"] : false; // may be overridden if the 'Type' is intrinsically read-only
                             DescriptorSetDescription::StageFlag stageBindingFlags = { DescriptorSetDescription::StageFlag::t::None };
                             for (const auto& ar2 : ar["Stages"])
                             {
@@ -266,8 +297,10 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
                                     names.push_back(ar2);
                                 }
                             }
-                            count = std::max(count, (uint32_t)names.size());
-                            descriptors.emplace_back(DescriptorSetDescription::DescriptorTypeAndCount{ cBufferTypeByName.find(bufferType)->second, stageBindingFlags, names, (int)count });
+                            assert(names.size() <= 1);  ///TODO: array of names does not currently work (especially since dynmamic 'Count' was added) 
+                            //count = std::max(count, (uint32_t)names.size());
+                            const auto& bufferTypeData = cBufferTypeByName.find(bufferType)->second;
+                            descriptors.emplace_back(DescriptorSetDescription::DescriptorTypeAndCount{ bufferTypeData.type, stageBindingFlags, names, (int)count, readOnly || bufferTypeData.readOnly });
                         }
                     }
                     sets.push_back({ std::move(descriptors) });
@@ -288,10 +321,14 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
             {
                 el.value().get_to(sampleShadingSettings);// <ShaderPassDescription::SampleShadingSettings>();
             }
+            else if (el.key().compare("WorkGroup") == 0)
+            {
+                el.value().get_to(workGroupSettings);// <ShaderPassDescription::WorkGroupSettings>();
+            }
             else if (el.key().compare("VertexBindings") == 0)
             {
                 // Array of VertexBinding names
-                for (const std::string& vertexFormatName : el.value())
+                for (const auto& vertexFormatName : el.value())
                 {
                     auto it = vertexFormatLookup.find(vertexFormatName);
                     if (it != vertexFormatLookup.end())
@@ -314,7 +351,7 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
         //                                         VertexFormat::Element{24, VertexFormat::Element::ElementType::t::Vec2},
         //     } };
 
-        descriptions.emplace_back(ShaderPassDescription( std::move(sets), std::move(outputs), std::move(computeShader), std::move(vertexShader), std::move(fragmentShader), std::move(fixedFunctionSettings), std::move(sampleShadingSettings), std::move(vertexFormatBindings)) );
+        descriptions.emplace_back(ShaderPassDescription( std::move(sets), std::move(outputs), std::move(computeShader), std::move(vertexShader), std::move(fragmentShader), std::move(fixedFunctionSettings), std::move(sampleShadingSettings), std::move(workGroupSettings), std::move(vertexFormatBindings)) );
         passNames.push_back(passname);
     }
     return std::make_optional(ShaderDescription{ std::move(vertexFormats), std::move(descriptions), passNames });

@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 //
@@ -7,14 +12,16 @@
 // Handles file loading from device storage.
 // Implementations are expected to be device specific (eg in android/androidAssetManager.cpp)
 #include "system/os_common.h"
+#include <assert.h>
+#include <istream>
+#include <optional>
+#include <streambuf>
 #include <string>
 #include <vector>
-#include <istream>
-#include <streambuf>
-#include <optional>
 
 // Forward declarations
 class AAssetManager;
+class AssetManager;
 class AssetHandle;
 
 /// Implement std::basic_istream wrapper that contains a fixed size data buffer.
@@ -67,6 +74,46 @@ private:
 };
 
 
+/// @brief Wrapper around an open AssetHandle.
+/// Provides a safe asset handle (will close when guard is destroyed or on EarlyClose() )
+class AssetHandleGuard {
+public:
+    friend class AssetManager;
+    AssetHandleGuard() {}
+    AssetHandleGuard( AssetManager* pAssetManager, AssetHandle* pAssetHandle ) : m_AssetManager( pAssetManager ), m_AssetHandle( pAssetHandle ) { assert( (m_AssetManager != nullptr) == (m_AssetHandle != nullptr) ); }
+    AssetHandleGuard( AssetHandleGuard&& src ) noexcept
+    {
+        *this = std::move( src );
+    }
+    AssetHandleGuard& operator=( AssetHandleGuard&& src ) noexcept
+    {
+        if (this != &src)
+        {
+            m_AssetManager = src.m_AssetManager;
+            src.m_AssetManager = nullptr;
+            m_AssetHandle = src.m_AssetHandle;
+            src.m_AssetHandle = nullptr;
+        }
+        return *this;
+    }
+    ~AssetHandleGuard()
+    {
+        Release();
+    }
+    void EarlyRelease()
+    {
+        Release();
+    }
+    explicit operator bool() const { return m_AssetHandle != nullptr; }
+private:
+    AssetHandleGuard( const AssetHandleGuard& ) = delete;
+    AssetHandleGuard& operator=( const AssetHandleGuard& ) = delete;
+    void Release();
+    AssetManager* m_AssetManager = nullptr;
+    AssetHandle* m_AssetHandle = nullptr;
+};
+
+
 /// Handles file loading from device storage.
 /// Implementations are expected to be device specific (eg in android/androidAssetManager.cpp)
 /// @ingroup System
@@ -76,9 +123,13 @@ class AssetManager
     AssetManager(const AssetManager&) = delete;
 public:
     AssetManager() {}
+    friend class AssetHandleGuard;
 
-    /// Set the poiner to Android AssetManager.  On non Android plaforms this pointer is not used.
+    /// Set the pointer to Android AssetManager.  On non Android plaforms this pointer is not used.
     void SetAAssetManager(AAssetManager* pAAssetManager) { m_AAssetManager = pAAssetManager; }
+
+    /// Set the location of the external files directory.  On non Android plaforms this string is not used.
+    void SetAndroidExternalFilesDir(const std::string& s) { m_AndroidExternalFilesDir = s; }
 
     /// Load the contents of the given file in to a given storage type.
     /// NOT zero padded (by default) but can be used with a std::string to correctly handle termination.
@@ -88,7 +139,7 @@ public:
     template<typename T_Container>
     bool LoadFileIntoMemory(const std::string& portableFileName, T_Container& fileData)
     {
-        AssetHandle* handle = OpenFile(portableFileName);
+        AssetHandle* handle = OpenFile(portableFileName, Mode::Read);
         if (!handle)
         {
             return false;
@@ -123,6 +174,81 @@ public:
         return true;
     }
 
+    AssetHandleGuard OpenFile( const std::string& portableFilename )
+    {
+        auto* fileHandle = OpenFile( portableFilename, Mode::Read );
+        if (fileHandle)
+            return { this, fileHandle };
+        else
+            return {};
+    }
+
+    /// @brief Read data from given file (handle) into supplied buffer
+    /// @param file open file handle
+    /// @param pDestination pointer to memory location where data should be copied into
+    /// @param maxBytesToRead maximum number of bytes to read into pDestination
+    /// @return number of bytes read (0 on error)
+    size_t ReadFile( const AssetHandleGuard& file, void* pDestination, size_t maxBytesToRead)
+    {
+        assert( pDestination );
+        uint8_t* pData = (uint8_t*) pDestination;
+        size_t totalBytesRead = 0;
+        while (maxBytesToRead > 0)
+        {
+            size_t bytesRead = ReadFile( pData, maxBytesToRead, file.m_AssetHandle );
+            if (bytesRead > 0)
+            {
+                pData += bytesRead;
+                maxBytesToRead -= bytesRead;
+                totalBytesRead += bytesRead;
+            }
+            else
+            {
+                LOGE( "ReadFile error");
+                break;
+            }
+        }
+        return totalBytesRead;
+    }
+
+    /// Save the contents of the given storage container to a named file.
+    /// @tparam T_Container type of container (eg std::vector<char> or std::string)
+    /// @param fileData saved data
+    /// @return true if successful
+    template<typename T_Container>
+    bool SaveMemoryToFile(const std::string& portableFileName, const T_Container& fileData)
+    {
+        AssetHandle* handle = OpenFile(portableFileName, Mode::Write);
+        if (!handle)
+        {
+            return false;
+        }
+
+        char* pData = (char*)fileData.data();
+        size_t bytesToWrite = fileData.size();
+        while (bytesToWrite > 0)
+        {
+            size_t bytesWritten = WriteFile(pData, bytesToWrite, handle);
+            if (bytesWritten > 0)
+            {
+                pData += bytesWritten;
+                bytesToWrite -= bytesWritten;
+            }
+            else
+            {
+                LOGE("SaveMemoryToFile error in WriteFile saving %s", portableFileName.c_str());
+                break;
+            }
+        }
+
+        CloseFile(handle);
+        if (bytesToWrite != 0)
+        {
+            return false;
+        }
+        return true;
+    }
+
     /// Join together two file paths
     inline std::string JoinPath(const std::string& a, const std::string& b) const
     {
@@ -147,14 +273,30 @@ public:
 public:
     ~AssetManager() {}
 protected:
-    AssetHandle* OpenFile(const std::string& pPortableFileName);
+    enum class Mode { Read, Write };
+    AssetHandle* OpenFile(const std::string& pPortableFileName, Mode);
     size_t FileSize(AssetHandle*) const;
     size_t ReadFile(void* pDest, size_t bytes, AssetHandle* pHandle);
+    size_t WriteFile(const void* psrc, size_t bytes, AssetHandle* pHandle);
     void CloseFile(AssetHandle*);
 
-    static std::string PortableFilenameToDevicePath(const std::string& pPortableFileName);
+    std::string PortableFilenameToDevicePath(const std::string& pPortableFileName);
 
 private:
     AAssetManager* m_AAssetManager = nullptr;
+    std::string m_AndroidExternalFilesDir;
     std::vector<AssetHandle*> m_OpenHandles;    // Managed by platform implementation
 };
+
+
+inline void AssetHandleGuard::Release()
+{
+    if (m_AssetManager)
+    {
+        assert( m_AssetHandle );
+        m_AssetManager->CloseFile( m_AssetHandle );
+        m_AssetHandle = nullptr;
+        m_AssetManager = nullptr;
+    }
+    assert( m_AssetHandle == nullptr );
+}

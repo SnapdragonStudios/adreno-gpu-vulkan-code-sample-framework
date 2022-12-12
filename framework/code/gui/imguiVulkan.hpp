@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <memory>
@@ -22,8 +27,9 @@ public:
     GuiImguiVulkan(Vulkan& vulkan, VkRenderPass renderPass);
     ~GuiImguiVulkan();
 
-    bool Initialize(uintptr_t windowHandle) override;
+    bool Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint32_t renderHeight) override;
     VkCommandBuffer Render(uint32_t frameIdx, VkFramebuffer frameBuffer) override;
+    void Render(VkCommandBuffer cmdBuffer) override;
     void Update() override;
 
 private:

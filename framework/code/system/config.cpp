@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #include "config.h"
 
 // Need LOGX macros
@@ -20,6 +25,11 @@ static Map<VariableBase>* VariableMap()
 VariableBase* GetVariable(const char* name)
 {
 	return VariableMap()->Find(name);
+}
+
+Map<VariableBase>* GetAllVariables()
+{
+	return VariableMap();
 }
 
 bool AddVariable(VariableBase* variable)
@@ -255,7 +265,7 @@ void WriteVariableFile(const char* filename)
 
 	VariableBase* variable = VariableMap()->First();
 	while (variable) {
-		if (!(variable->GetFlags() & kVariableNonpersistent)) {
+		if ((variable->GetFlags() & kVariablePermanent)!=0) {
 			char value[kMaxVariableValueLength];
 			variable->GetValue(value, kMaxVariableValueLength);
 			char buffer[kMaxVariableValueLength * 2];
