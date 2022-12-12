@@ -1,11 +1,16 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "imguiVulkan.hpp"
 #include "vulkan/vulkan.hpp"
 #include "imgui/imgui.h"
-#include "imgui/examples/imgui_impl_vulkan.h"
-#include "imgui/examples/imgui_impl_win32.h"
+#include "imgui/backends/imgui_impl_vulkan.h"
+#include "imgui/backends/imgui_impl_win32.h"
 #include "system/os_common.h"
 #include <cassert>
 
@@ -32,14 +37,16 @@ GuiImguiVulkan::~GuiImguiVulkan()
 {
     vkDestroyDescriptorPool(m_Vulkan.m_VulkanDevice, m_DescriptorPool, nullptr);
     //We dont own the render pass// vkDestroyRenderPass(m_Vulkan.m_VulkanDevice, m_RenderPass, nullptr);
+
+    ImGui_ImplVulkan_Shutdown();
 }
 
 //-----------------------------------------------------------------------------
 
-bool GuiImguiVulkan::Initialize(uintptr_t windowHandle)
+bool GuiImguiVulkan::Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint32_t renderHeight)
 {
     // Call the platform (windows/android) specific implementation initialize...
-    if (!GuiImguiPlatform::Initialize(windowHandle, m_Vulkan.m_SurfaceWidth, m_Vulkan.m_SurfaceHeight, m_Vulkan.m_RenderWidth, m_Vulkan.m_RenderHeight))
+    if (!GuiImguiPlatform::Initialize(windowHandle, m_Vulkan.m_SurfaceWidth, m_Vulkan.m_SurfaceHeight, renderWidth, renderHeight))
     {
         return false;
     }
@@ -160,10 +167,10 @@ VkCommandBuffer GuiImguiVulkan::Render(uint32_t frameIdx, VkFramebuffer frameBuf
     {
         return VK_NULL_HANDLE;
     }
+
     if (m_CommandBuffer[frameIdx].m_IsPrimary)
     {
-        VkRenderPassBeginInfo info = {};
-        info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        VkRenderPassBeginInfo info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         info.renderPass = m_RenderPass;
         info.framebuffer = frameBuffer;
         info.renderArea.extent.width = m_Vulkan.m_SurfaceWidth;
@@ -173,16 +180,23 @@ VkCommandBuffer GuiImguiVulkan::Render(uint32_t frameIdx, VkFramebuffer frameBuf
         vkCmdBeginRenderPass(m_CommandBuffer[frameIdx].m_VkCommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
     }
 
-    ImGui::Render();
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_CommandBuffer[frameIdx].m_VkCommandBuffer);
+    Render(m_CommandBuffer[frameIdx].m_VkCommandBuffer);
+
     if (m_CommandBuffer[frameIdx].m_IsPrimary)
     {
         vkCmdEndRenderPass(m_CommandBuffer[frameIdx].m_VkCommandBuffer);
     }
+
     {
         VkResult err = vkEndCommandBuffer(m_CommandBuffer[frameIdx].m_VkCommandBuffer);
         check_vk_result(err);
     }
     return m_CommandBuffer[frameIdx].m_VkCommandBuffer;
+}
+
+void GuiImguiVulkan::Render(VkCommandBuffer cmdBuffer)
+{
+    ImGui::Render();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmdBuffer);
 }
 

@@ -1,10 +1,15 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "cameraControllerTouch.hpp"
 
 static const float cMouseRotSpeed = 0.1f;
-static const float cMouseMoveSpeeed = 0.1f;
+static const float cMouseMoveSpeeed = 0.001f;
 
 // Helpers
 constexpr glm::vec3 cVecUp = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -14,8 +19,7 @@ constexpr glm::vec3 cVecForward = glm::vec3(0.0f, 0.0f, -1.0f);
 
 //-----------------------------------------------------------------------------
 
-CameraControllerTouch::CameraControllerTouch()
-    : m_ScreenSize(1920.f, 1080.f)
+CameraControllerTouch::CameraControllerTouch() : CameraControllerBase()
     , m_LastMovementTouchPosition(0.0f)
     , m_CurrentMovementTouchPosition(0.0f)
     , m_LastLookaroundTouchPosition(0.0f)
@@ -27,20 +31,18 @@ CameraControllerTouch::CameraControllerTouch()
 
 //-----------------------------------------------------------------------------
 
+CameraControllerTouch::~CameraControllerTouch()
+{}
+
+//-----------------------------------------------------------------------------
+
 bool CameraControllerTouch::Initialize(uint32_t width, uint32_t height)
 {
-    SetSize(width, height);
-    return true;
+    return CameraControllerBase::Initialize(width, height);
 }
 
 //-----------------------------------------------------------------------------
 
-void CameraControllerTouch::SetSize(uint32_t width, uint32_t height)
-{
-    m_ScreenSize = glm::vec2( width, height );
-}
-
-//-----------------------------------------------------------------------------
 
 void CameraControllerTouch::TouchDownEvent(int iPointerID, float xPos, float yPos)
 {
@@ -95,16 +97,16 @@ void CameraControllerTouch::Update(float frameTime, glm::vec3& position, glm::qu
     if (m_LookaroundTouchId != -1)
     {
         auto mouseDiff = m_LastLookaroundTouchPosition - m_CurrentLookaroundTouchPosition;
-        auto angleChange = mouseDiff * frameTime * cMouseRotSpeed;
+        auto angleChange = mouseDiff * frameTime * m_RotateSpeed;
 
         m_LastLookaroundTouchPosition = m_CurrentLookaroundTouchPosition;
-        rot = glm::angleAxis(angleChange.y, cVecRight) * rot * glm::angleAxis(angleChange.x, cVecUp);
+        rot = glm::angleAxis(angleChange.y, cVecForward) * rot * glm::angleAxis(angleChange.x, cVecUp);
     }
 
     if (m_MovementTouchId != -1)
     {
         auto mouseDiff = m_LastMovementTouchPosition - m_CurrentMovementTouchPosition;
-        auto directionChange = mouseDiff * frameTime * cMouseMoveSpeeed;
+        auto directionChange = mouseDiff * frameTime * m_MoveSpeed;
 
         position -= (cVecRight * directionChange.x) * rot;
         position += (cVecForward * directionChange.y) * rot;

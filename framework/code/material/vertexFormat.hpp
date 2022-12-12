@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <vector>
@@ -23,7 +28,12 @@ public:
                 Float,
                 Vec2,
                 Vec3,
-                Vec4
+                Vec4,
+                Int16,
+                Float16,
+                F16Vec2,
+                F16Vec3,
+                F16Vec4
             };
             constexpr ElementType(const t _type) : type(_type) {}
             constexpr operator t() const { return type; }
@@ -40,6 +50,16 @@ public:
                         return 12;
                     case t::Vec4:
                         return 16;
+                    case t::Int16:
+                        return 2;
+                    case t::Float16:
+                        return 2;
+                    case t::F16Vec2:
+                        return 4;
+                    case t::F16Vec3:
+                        return 6;
+                    case t::F16Vec4:
+                        return 8;
                 }
             }
         private:

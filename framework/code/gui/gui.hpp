@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 /// @defgroup GUI
@@ -15,9 +20,10 @@ class Gui
 {
 public:
     virtual ~Gui() = 0;
-    virtual bool Initialize(uintptr_t windowHandle) = 0;
+    virtual bool Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint32_t renderHeight) = 0;
     virtual void Update() = 0;
     virtual VkCommandBuffer Render(uint32_t frameIdx, VkFramebuffer frameBuffer) = 0;
+    virtual void Render(VkCommandBuffer cmdBuffer) = 0;
 
     /// @returns True if the GUI is capturing mouse events (and so they shouldnt be sent to our application code)
     virtual bool WantCaptureMouse() const = 0;

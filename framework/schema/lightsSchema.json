@@ -1,0 +1,105 @@
+{
+    "$id": "lightsSchema.json",
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "title": "Light Placement Schema",
+    "version": "1.0.0",
+
+    "definitions": {
+        "BaseLight": {
+            "type": "object",
+            "description": "Base (shared) light data",
+            "properties": {
+                "Brightness": {
+                    "type": "number",
+                    "description": "Brightness of the light",
+                    "minimum": 0
+                },
+                "Color": {
+                    "type": "array",
+                    "description": "Light Color (rgb)",
+                    "maxLength": 3,
+                    "minLength": 3,
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "Namez": {
+                    "type": "string",
+                    "description": "optional light name"
+                }
+            },
+            "required": [ "Position", "Brightness" ]
+        },
+        "PointLight": {
+            "type": "object",
+            "description": "Point light",
+            "allOf": [ { "$ref": "#/definitions/BaseLight" } ],
+            "properties": {
+                "Position": {
+                    "type": "array",
+                    "description": "world position",
+                    "maxLength": 3,
+                    "minLength": 3,
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "Radius": {
+                    "type": "number",
+                    "description": "Radius of the light",
+                    "minimum": 0
+                }
+            },
+            "required": [ "Radius" ],
+            "additionalProperties": true
+        },
+        "SpotLight": {
+            "type": "object",
+            "description": "Spot light",
+            "allOf": [ { "$ref": "#/definitions/BaseLight" } ],
+            "properties": {
+                "Position": {
+                    "type": "array",
+                    "description": "world position",
+                    "maxLength": 3,
+                    "minLength": 3,
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "Radius": {
+                    "type": "number",
+                    "description": "Radius of the light",
+                    "minimum": 0
+                }
+            },
+            "required": [ "Radius" ],
+            "additionalProperties": true
+        }
+    },
+    "type": "object",
+    "properties": {
+        "PointLights": {
+            "type": "array",
+            "description": "Top level array of point lights.",
+            "items": {
+                "$ref": "#/definitions/PointLight"
+            },
+            "minItems": 0,
+            "additionalProperties": false
+        },
+        "SpotLights": {
+            "type": "array",
+            "description": "Top level array of spot lights.",
+            "items": {
+                "$ref": "#/definitions/SpotLight"
+            },
+            "minItems": 0,
+            "additionalProperties": false
+        },
+        "$schema": {
+            "type": "string"
+        }
+    },
+    "additionalProperties": false
+}

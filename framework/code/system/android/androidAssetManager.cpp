@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 /// @file androidAssetManager.cpp
 /// Platform specific implementation of AssetManager class.
@@ -30,13 +35,15 @@ public:
         assert(mFp == nullptr);   // expecting the fp to be cleared by Fileclose()
         assert(mAAsset == nullptr);   // expecting the pAAsset to be cleared by Fileclose()
     }
+protected:
+    friend class AssetManager;
     FILE* mFp;
     AAsset* mAAsset;
-    const size_t mFileSize;
+    size_t mFileSize;
 };
 
 //-----------------------------------------------------------------------------
-AssetHandle* AssetManager::OpenFile(const std::string& portableFilename)
+AssetHandle* AssetManager::OpenFile(const std::string& portableFilename, Mode mode)
 //-----------------------------------------------------------------------------
 {
     if (portableFilename.empty())
@@ -45,40 +52,57 @@ AssetHandle* AssetManager::OpenFile(const std::string& portableFilename)
     std::vector<char> fileBuffer;
 
     //
-    // Attempt to load from storage.
+    // Attempt to load/save from storage.
 
     // Fix the filename
     const auto deviceFilename = PortableFilenameToDevicePath(portableFilename);
 
     // Open the file and see what is to be seen
-    FILE* fp = fopen(deviceFilename.c_str(), "r+b");
-    if (fp != nullptr)
+    switch (mode) {
+    case Mode::Read:
     {
-        // Get the file length
-        fseek(fp, 0, SEEK_END);
-        const auto fileSize = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-
-        return new AssetHandle(fp, fileSize);
-    }
-    else
-    {
-        //
-        // Fall back to using AAssetManager (attempt to open file inside the apk)
-
-        // Asset name needs to have / seperators and no ./ preamble!
-        std::string aAssetFilename;
-        const auto skipPreambleOffset = std::max(portableFilename.find_first_not_of("./\\"), (size_t)0);
-        std::transform(portableFilename.begin() + skipPreambleOffset, portableFilename.end(), std::back_inserter(aAssetFilename), [](char c) { return c == '\\' ? '/' : c; });
-
-        AAsset* pAAsset = AAssetManager_open(m_AAssetManager, aAssetFilename.c_str(), AASSET_MODE_STREAMING);
-        if (pAAsset != nullptr)
+        FILE* fp = fopen(deviceFilename.c_str(), "rb");
+        if (fp != nullptr)
         {
             // Get the file length
-            const size_t fileSize = AAsset_getLength(pAAsset);
-            
-            return new AssetHandle(pAAsset, fileSize);
+            fseek(fp, 0, SEEK_END);
+            const auto fileSize = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+
+            return new AssetHandle(fp, fileSize);
         }
+        else
+        {
+            //
+            // Fall back to using AAssetManager (attempt to open file inside the apk)
+            //LOGE("Unable to open file %s attempting to load from apk", deviceFilename.c_str());
+
+            // Asset name needs to have / seperators and no ./ preamble!
+            std::string aAssetFilename;
+            const auto skipPreambleOffset = std::max(portableFilename.find_first_not_of("./\\"), (size_t)0);
+            std::transform(portableFilename.begin() + skipPreambleOffset, portableFilename.end(), std::back_inserter(aAssetFilename), [](char c) { return c == '\\' ? '/' : c; });
+
+            AAsset* pAAsset = AAssetManager_open(m_AAssetManager, aAssetFilename.c_str(), AASSET_MODE_STREAMING);
+            if (pAAsset != nullptr)
+            {
+                // Get the file length
+                const size_t fileSize = AAsset_getLength(pAAsset);
+
+                return new AssetHandle(pAAsset, fileSize);
+            }
+        }
+        break;
+    }
+    case Mode::Write:
+    {
+        // Mode::Write
+        FILE* fp = fopen(deviceFilename.c_str(), "wb");
+        if (fp != nullptr)
+        {
+            return new AssetHandle(fp, 0);
+        }
+        break;
+    }
     }
 
     LOGE("Unable to open file %s", portableFilename.c_str());
@@ -115,6 +139,35 @@ size_t AssetManager::ReadFile(void* pDest, size_t bytes, AssetHandle* pHandle)
 }
 
 //-----------------------------------------------------------------------------
+size_t AssetManager::WriteFile(const void* pSrc, size_t bytes, AssetHandle* pHandle)
+//-----------------------------------------------------------------------------
+{
+    size_t bytesWritten = 0;
+    if (pHandle->mFp)
+    {
+        // Write to file handle.
+        size_t ret;
+        do {
+            ret = fwrite(pSrc, sizeof(char), bytes, pHandle->mFp);
+            if (ret > 0)
+                bytesWritten += ret;
+        } while (ret > 0);
+    }
+    else if (pHandle->mAAsset)
+    {
+        // does not support write
+        assert(0);
+        return -1;
+    }
+    else
+    {
+        return -1;
+    }
+    pHandle->mFileSize += bytesWritten;
+    return bytesWritten;
+}
+
+//-----------------------------------------------------------------------------
 void AssetManager::CloseFile(AssetHandle* pHandle)
 //-----------------------------------------------------------------------------
 {
@@ -133,9 +186,9 @@ std::string AssetManager::PortableFilenameToDevicePath(const std::string& portab
 {
     std::string output;
     output.reserve(28 + portableFilename.length() + strlen(gpAndroidAppName) + 2);
-    output.assign("/sdcard/Android/data/");
-    output.append(gpAndroidAppName);
-    output.append("/files/");
+    output.assign(m_AndroidExternalFilesDir);
+    if (output.back() != '/')
+        output.push_back('/');
     std::transform(portableFilename.begin(), portableFilename.end(), std::back_inserter(output), [](char c) { return c == '\\' ? '/' : c; });
     return output;
 }

@@ -1,29 +1,37 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "cameraController.hpp"
 #include <glm/gtc/quaternion.hpp>
 
-static const float cMouseRotSpeed = 0.1f;
+static const float cMouseRotSpeed = 0.5f;
 
 // Helpers
-constexpr glm::vec3 cVecUp = glm::vec3(0.0f, 1.0f, 0.0f);
-constexpr glm::vec3 cVecRight = glm::vec3(1.0f, 0.0f, 0.0f);
-constexpr glm::vec3 cVecForward = glm::vec3(0.0f, 0.0f, -1.0f);
-
+constexpr glm::vec3 cVecViewRight = glm::vec3(1.0f, 0.0f, 0.0f);    // x-direction (vector pointing to right of screen)!
+constexpr glm::vec3 cVecViewForward = glm::vec3(0.0f, 0.0f, -1.0f); // z-direction (vector pointing into screen)
 
 //-----------------------------------------------------------------------------
 
-CameraController::CameraController()
-    : m_LastMousePosition(0.0f)
-    , m_CurrentMousePosition(0.0f)
-    , m_ScreenSize(1920.f,1080.f)
-{
-}
+CameraControllerBase::CameraControllerBase()
+: m_ScreenSize(1920.f, 1080.f)
+, m_WorldUp(glm::vec3(0.0f, 1.0f, 0.0f))
+, m_MoveSpeed(1.0f)
+, m_RotateSpeed(cMouseRotSpeed)
+{}
 
 //-----------------------------------------------------------------------------
 
-bool CameraController::Initialize(uint32_t width, uint32_t height)
+CameraControllerBase::~CameraControllerBase()
+{}
+
+//-----------------------------------------------------------------------------
+
+bool CameraControllerBase::Initialize(uint32_t width, uint32_t height)
 {
     SetSize(width, height);
     return true;
@@ -31,14 +39,35 @@ bool CameraController::Initialize(uint32_t width, uint32_t height)
 
 //-----------------------------------------------------------------------------
 
-void CameraController::SetSize(uint32_t width, uint32_t height)
+void CameraControllerBase::SetMoveSpeed(float speed)
 {
-    m_ScreenSize = glm::vec2( width, height );
+    m_MoveSpeed = speed;
 }
 
 //-----------------------------------------------------------------------------
 
-enum CameraController::KeysDownBits CameraController::KeyToBits(uint32_t key)
+void CameraControllerBase::SetRotateSpeed(float speed)
+{
+    m_RotateSpeed = speed;
+}
+
+//-----------------------------------------------------------------------------
+
+void CameraControllerBase::SetSize(uint32_t width, uint32_t height)
+{
+    m_ScreenSize = glm::vec2(width, height);
+}
+
+//-----------------------------------------------------------------------------
+
+void CameraControllerBase::SetWorldUp(glm::vec3 up)
+{
+    m_WorldUp = up;
+}
+
+//-----------------------------------------------------------------------------
+
+enum CameraController::KeysDownBits CameraControllerBase::KeyToBits(uint32_t key)
 {
     switch (key)
     {
@@ -54,11 +83,35 @@ enum CameraController::KeysDownBits CameraController::KeyToBits(uint32_t key)
     case 'D':
         return KeysDownBits::eRight;
         break;
+    case 'Q':
+        return KeysDownBits::eDown;
+        break;
+    case 'E':
+        return KeysDownBits::eUp;
+        break;
     default:
         return KeysDownBits::eNone;
         break;
     }
 }
+
+//-----------------------------------------------------------------------------
+
+CameraController::CameraController() : CameraControllerBase()
+    , m_LastMousePosition(0.0f)
+    , m_CurrentMousePosition(0.0f)
+    , m_touchDown(false)
+{
+}
+
+//-----------------------------------------------------------------------------
+
+bool CameraController::Initialize(uint32_t width, uint32_t height)
+{
+    return CameraControllerBase::Initialize(width, height);
+}
+
+//-----------------------------------------------------------------------------
 
 void CameraController::KeyDownEvent(uint32_t key)
 {
@@ -106,23 +159,37 @@ void CameraController::Update(float frameTime, glm::vec3& position, glm::quat& r
     if (m_touchDown)
     {
         auto mouseDiff = m_LastMousePosition - m_CurrentMousePosition;
-        auto angleChange = mouseDiff * frameTime * cMouseRotSpeed;
+        auto angleChange = mouseDiff * frameTime * m_RotateSpeed;
 
         m_LastMousePosition = m_CurrentMousePosition;
-        rot = glm::angleAxis(angleChange.y, cVecRight) * rot * glm::angleAxis(angleChange.x, cVecUp);
+        // one (mouse) rotation axis is relative to the view direction, other is relative to world - prevents camera from 'twisting' although does introduce gimbal when looking along the UP axis and rotationg left/right.
+        rot = glm::angleAxis(angleChange.x, m_WorldUp) * rot * glm::angleAxis(-angleChange.y, cVecViewRight);
+        rot = glm::normalize(rot);
     }
+
 
     if (m_KeysDown != KeysDownBits::eNone)
     {
+        // Position change is relative to the camera rotation/direction.
         if (m_KeysDown & (KeysDownBits::eLeft | KeysDownBits::eRight))
         {
             float direction = (m_KeysDown & KeysDownBits::eLeft) ? -1.0f : 1.0f;
-            position += cVecRight * direction * rot;
+            position += rot * cVecViewRight * frameTime * m_MoveSpeed * direction;
         }
         if (m_KeysDown & (KeysDownBits::eForward | KeysDownBits::eBackward))
         {
             float direction = (m_KeysDown & KeysDownBits::eBackward) ? -1.0f : 1.0f;
-            position += cVecForward * direction * rot;
+            position += rot * cVecViewForward * frameTime * m_MoveSpeed * direction;
+        }
+        if (m_KeysDown & KeysDownBits::eUp)
+        {
+            glm::vec3 VecUp = glm::vec3(0.0f, 1.0f, 0.0f);
+            position += VecUp * frameTime * m_MoveSpeed;
+        }
+        if (m_KeysDown & KeysDownBits::eDown)
+        {
+            glm::vec3 VecUp = glm::vec3(0.0f, -1.0f, 0.0f);
+            position += VecUp * frameTime * m_MoveSpeed;
         }
     }
 }

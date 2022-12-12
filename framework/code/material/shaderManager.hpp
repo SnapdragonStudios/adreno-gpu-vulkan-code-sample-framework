@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <map>
@@ -34,7 +39,7 @@ public:
 	/// @param shaderName name to be given to this shader for lookup within the application code (user determined name).
 	/// @param filename name of the (json formatted) shader desciption file to load and parse.  Filename should include extension.
 	/// @return true if everything loaded correctly.
-	bool AddShader(Vulkan& vulkan, AssetManager& assetManager, const std::string& shaderName, const std::string& filename);
+	bool AddShader(AssetManager& assetManager, const std::string& shaderName, const std::string& filename);
 
 	/// Get description for the given shaderName
 	/// @returns nullptr if shaderName unknown
@@ -44,7 +49,7 @@ public:
 	const Shader* GetShader(const std::string& shaderName) const;
 
 protected:
-	bool AddShader(Vulkan& vulkan, AssetManager& assetManager, const std::string& shaderName, ShaderDescription shaderDescription);
+	bool AddShader(AssetManager& assetManager, const std::string& shaderName, ShaderDescription shaderDescription);
 
 protected:
 	Vulkan& m_vulkan;

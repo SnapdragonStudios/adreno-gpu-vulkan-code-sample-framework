@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "shadow.hpp"
 
@@ -20,17 +25,18 @@ glm::vec3 Shadow::GetLightPos() const
     return m_ShadowLightPos;
 }
 
-void Shadow::SetEyeClipPlanes(float eyeCameraFov, float eyeNearPlane, float farPlane)
+void Shadow::SetEyeClipPlanes(float eyeCameraFov, float eyeCameraAspect, float eyeNearPlane, float shadowFarPlane)
 {
     m_eyeCameraFov = eyeCameraFov;
+    m_eyeCameraAspect = eyeCameraAspect;
     m_eyeNearPlane = eyeNearPlane;
-    m_farPlane = farPlane;
+    m_farPlane = shadowFarPlane;
 }
 
 void Shadow::Update(const glm::mat4& eyeViewMatrix)
 {
     // Shadows are faded out some distance from the 'eye' camera (attempt to control fustrum sizes)
-    glm::mat4 cameraProjection = glm::perspectiveRH(m_eyeCameraFov, m_shadowCameraAspect, m_eyeNearPlane, m_farPlane);
+    glm::mat4 cameraProjection = glm::perspectiveRH(m_eyeCameraFov, m_eyeCameraAspect, m_eyeNearPlane, m_farPlane);
 
     // Now get the un-projection matrix that goes from clip space to shadow view space
     glm::mat4 cameraProjView = cameraProjection * eyeViewMatrix;
@@ -38,42 +44,33 @@ void Shadow::Update(const glm::mat4& eyeViewMatrix)
     glm::mat4 unprojectToLightView = m_ShadowView * unprojectView;
 
     // Calculate the (eye) camera's projection vertices (8 points)
-    glm::vec4 boxExtents[8] = { glm::vec4(1.0f, 1.0f,  1.0f, 1.0f), glm::vec4(-1.0f, 1.0f,  1.0f, 1.0f), glm::vec4(1.0f, -1.0f, 1.0f, 1.0f),  glm::vec4(-1.0f, -1.0f,  1.0f, 1.0f),
-                                glm::vec4(1.0f, 1.0f,  0.0f, 1.0f), glm::vec4(-1.0f, 1.0f,  0.0f, 1.0f), glm::vec4(1.0f, -1.0f,  0.0f, 1.0f), glm::vec4(-1.0f, -1.0f,  0.0f, 1.0f) };
-    glm::vec4 worldExtents[8];
+    constexpr glm::vec4 boxExtents[8] = { glm::vec4(1.0f, 1.0f,  1.0f, 1.0f), glm::vec4(-1.0f, 1.0f,  1.0f, 1.0f), glm::vec4(1.0f, -1.0f, 1.0f, 1.0f),  glm::vec4(-1.0f, -1.0f,  1.0f, 1.0f),
+                                          glm::vec4(1.0f, 1.0f,  0.0f, 1.0f), glm::vec4(-1.0f, 1.0f,  0.0f, 1.0f), glm::vec4(1.0f, -1.0f,  0.0f, 1.0f), glm::vec4(-1.0f, -1.0f,  0.0f, 1.0f) };
+    glm::vec4 orthoExtents[8];
     for (int i = 0; i < 8; ++i)
     {
-        auto t = unprojectToLightView/*unprojectView*/ * boxExtents[i];
-        worldExtents[i] = t / t.w;
+        auto t = unprojectToLightView * boxExtents[i];
+        orthoExtents[i] = t / t.w;
     }
 
-    glm::vec4 worldMax = worldExtents[0];
-    glm::vec4 worldMin = worldExtents[0];
+    glm::vec4 orthoMax = orthoExtents[0];
+    glm::vec4 orthoMin = orthoExtents[0];
     for (int i = 1; i < 8; ++i)
     {
-        worldMin = glm::min(worldMin, worldExtents[i]);
-        worldMax = glm::max(worldMax, worldExtents[i]);
+        orthoMin = glm::min(orthoMin, orthoExtents[i]);
+        orthoMax = glm::max(orthoMax, orthoExtents[i]);
     }
+    // Push size out a little to compensate for any filtering artifacts on edge
+    glm::vec4 orthoSize = orthoMax - orthoMin;
+    orthoMax += orthoSize / 16.0f;
+    orthoMin -= orthoSize / 16.0f;
 
     //LOGI("orthwidth %f->%f , %f->%f , %f->%f", worldMin.x, worldMax.x, worldMin.y, worldMax.y, worldMin.z, worldMax.z);
 
     // Update the shadow map shader parameters
-    //m_ShadowProj = glm::ortho(-gOrthoWidth, +gOrthoWidth, -gOrthoHeight, gOrthoHeight, gOrthoNear, gOrthoFar);
-    //m_ShadowProj = glm::perspectiveRH(PI_DIV_4, (float)gShadowMapWidth / (float)gShadowMapHeight, gOrthoNear, gOrthoFar);
-    m_ShadowProj = glm::ortho(worldMin.x, worldMax.x, worldMin.y, worldMax.y, -worldMax.z, -worldMin.z);
-
-    // Need this so we can map from [0, 1] depth values
-    m_LightFrustumDepth = worldMax.z - worldMin.z;// gOrthoFar - gOrthoNear;
-
-    // GLfloat fltAspect = (GLfloat) gRenderWidth / (GLfloat) gRenderHeight;
-    //m_ShadowProj = glm::mat4::perspective(m_FOV, fltAspect, m_Near, m_Far);
-    // m_ShadowProj = glm::mat4::perspective(m_FOV, 1.0f, gOrthoNear, gOrthoFar);
+    m_ShadowProj = glm::ortho(orthoMin.x, orthoMax.x, orthoMin.y, orthoMax.y, -orthoMax.z, -orthoMin.z);
 
     m_ShadowViewProj = m_ShadowProj * m_ShadowView;
-
-    //m_ShadowGenMVP = m_ShadowProj * m_ShadowView;
-
-    //m_ShadowMVP = m_ShadowViewProj;
 }
 
 bool Shadow::Initialize(Vulkan& vulkan, uint32_t shadowMapWidth, uint32_t shadowMapHeight, bool addColorTarget)
@@ -88,9 +85,6 @@ bool Shadow::Initialize(Vulkan& vulkan, uint32_t shadowMapWidth, uint32_t shadow
     m_Scissor.offset.y = 0;
     m_Scissor.extent.width = shadowMapWidth;
     m_Scissor.extent.height = shadowMapHeight;
-
-    // Shadow Color is multiplied so this is a "darkening"
-    m_ShadowColor = glm::vec4(0.65f, 0.65f, 0.65f, 1.0f);
 
     // This is matrix transform every coordinate x,y,z
     // x = x* 0.5 + 0.5 
@@ -111,13 +105,5 @@ bool Shadow::Initialize(Vulkan& vulkan, uint32_t shadowMapWidth, uint32_t shadow
         LOGE("Unable to create shadow render target");
         return false;
     }
-
-    //VkRenderPass renderPass;
-    //if (!vulkan.CreateRenderPass(colorType[0], depthFormat, false, true, true, &renderPass))
-    //{
-    //    m_ShadowMapRT.Release();
-    //    return false;
-    //}
-    //m_renderPass = renderPass;
     return true;
 }

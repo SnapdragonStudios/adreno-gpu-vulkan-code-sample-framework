@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "vertexBufferObject.hpp"
 #include "material/vertexDescription.hpp"
@@ -50,7 +55,7 @@ VertexBufferObject& VertexBufferObject::operator=(VertexBufferObject&& other) no
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool VertexBufferObject::Initialize(MemoryManager* pManager, size_t span, size_t numVerts, const void* initialData, const bool dspUsable)
+bool VertexBufferObject::Initialize(MemoryManager* pManager, size_t span, size_t numVerts, const void* initialData, const bool dspUsable, const VkBufferUsageFlags usage )
 {
     mNumVertices = numVerts;
     mSpan = span;
@@ -64,7 +69,7 @@ bool VertexBufferObject::Initialize(MemoryManager* pManager, size_t span, size_t
     }
     else
     {
-        return BufferObject::Initialize(pManager, (VkDeviceSize) (mSpan * mNumVertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, initialData);
+        return BufferObject::Initialize(pManager, (VkDeviceSize) (mSpan * mNumVertices), usage, initialData);
     }
 }
 
@@ -83,7 +88,7 @@ void VertexBufferObject::Destroy()
 VertexBufferObject VertexBufferObject::Copy()
 {
     VertexBufferObject copy;
-    if (copy.Initialize(mManager, GetSpan(), GetNumVertices(), Map<void>().data(), mDspUsable))
+    if (copy.Initialize(mManager, GetSpan(), GetNumVertices(), Map<void>().data(), mDspUsable, mBufferUsageFlags ))
     {
         copy.mBindings = mBindings;
         copy.mAttributes = mAttributes;
@@ -93,6 +98,42 @@ VertexBufferObject VertexBufferObject::Copy()
     {
         return {};
     }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+VertexBufferObject VertexBufferObject::Copy( VkCommandBuffer vkCommandBuffer, VkBufferUsageFlags bufferUsage, MemoryManager::MemoryUsage memoryUsage) const
+{
+    VertexBufferObject copy;
+
+    copy.mNumVertices = mNumVertices;
+    copy.mSpan = mSpan;
+    copy.mDspUsable = mDspUsable;
+
+    if (mDspUsable)
+    {
+        assert( 0 ); // dsp currently unsupported
+        return {};
+    }
+
+    // Create the buffer we are copying into.
+    size_t size = GetSpan() * GetNumVertices();
+    if (!copy.BufferObject::Initialize( mManager, size, bufferUsage, memoryUsage ))
+        return {};
+
+    if (((mBufferUsageFlags & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) == 0) || ((bufferUsage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0))
+    {
+        // This copy must be done via copy cmd and transferable buffers (otherwise call VertexBufferObject::Copy() )
+        assert( 0 );
+        return {};
+    }
+
+    // Use gpu copy commands to copy buffer data
+    if (!mManager->CopyData( vkCommandBuffer, mVmaBuffer, copy.mVmaBuffer, size, 0, 0 ))
+        return {};
+    copy.mBindings = mBindings;
+    copy.mAttributes = mAttributes;
+    return copy;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

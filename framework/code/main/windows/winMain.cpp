@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 /// @file winMain.cpp
 /// @brief Windows 'WinMain' entry point and event handler.
@@ -40,14 +45,36 @@ bool gAppInitialized = false;
 // Flag to indicate if the gui is currently 'eating' all the mouse input events (if false the events are passed on to the application)
 static bool gGuiMouseActive = false;
 
+// If the mouse is down and being handled by the application (not the gui)
+static bool gAppMouseActive = false;
+
 // Define a funcion pointer to the GUI's winproc handler.  Use this so the GUI can catch winproc events at the lowest level (eg imgui integration)
 LRESULT (*PFN_Gui_WndProcHandler)(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) = nullptr/*do nothing by default*/;
+
+int DefaultCrashReport(int i, char* msg, int* p)
+{
+    //print error message to stderr
+    fprintf(stderr, "\n");
+    fprintf(stderr, msg);
+
+    // If debugger connected send it the message and break.
+    if (IsDebuggerPresent())
+    {
+        OutputDebugString("\n");
+        OutputDebugString(msg);
+        DebugBreak();
+    }
+    return 0;
+}
+int (*PFN_CrashReportHook)(int, char*, int*) = &DefaultCrashReport;//_CRT_REPORT_HOOK)
 
 void CreateConsoleWindow()
 {
     // Create the new console window
     if (!AllocConsole())
         return;
+
+    _CrtSetReportHook(PFN_CrashReportHook);
 
     // Redirect stdout and stderr from our app to the new console window...
 
@@ -91,13 +118,17 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_PAINT:
         if (gpApplication && gAppInitialized)
         {
-            gpApplication->Render();
+            if (!gpApplication->Render())
+            {
+                // Exit requested.
+                DestroyWindow(hWnd);
+            }
         }
         break;
 
     case WM_SIZE:
-        if (gpApplication && gAppInitialized)
-            gpApplication->SetSize(LOWORD(lParam), HIWORD(lParam));
+        if (gpApplication)
+            gpApplication->SetWindowSize(LOWORD(lParam), HIWORD(lParam));
         break;
 
     case WM_CHAR:
@@ -137,8 +168,13 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             float yPos = (float)vMousePt.y;
             if (gpApplication->GetGui() && gpApplication->GetGui()->TouchDownEvent(0, xPos, yPos))
                 gGuiMouseActive = true;
+
             if (!gGuiMouseActive)
+            {
+                //LOGI("TouchDownEvent: (%0.2f, %0.2f)", xPos, yPos);
                 gpApplication->TouchDownEvent(0, xPos, yPos);
+                gAppMouseActive = true;
+            }
         }
         break;
 
@@ -150,10 +186,13 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             float yPos = (float)vMousePt.y;
             if (!gpApplication->GetGui() || !gpApplication->GetGui()->TouchMoveEvent(0, xPos, yPos))
             {
-                if (!gGuiMouseActive)
+                if (gAppMouseActive)
+                {
                     // Send the application the 'Move' event (if GUI took the 'down' event then wait until there is an 'up' event before sending anything to the application.  Garauntee Down..<Moves>..Up ordering)
+                    //LOGI("TouchMoveEvent: (%0.2f, %0.2f)", xPos, yPos);
                     gpApplication->TouchMoveEvent(0, xPos, yPos);
             }
+        }
         }
         break;
 
@@ -165,9 +204,14 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             float yPos = (float)vMousePt.y;
             if (!gpApplication->GetGui() || !gpApplication->GetGui()->TouchUpEvent(0, xPos, yPos))
             {
-                if (!gGuiMouseActive)
+                if (gAppMouseActive)
+                {
                     // Send the application the 'Touch up' event (gui is is not taking the mouse events, so the application got the 'down')
+                    //LOGI("TouchUpEvent: (%0.2f, %0.2f)", xPos, yPos);
                     gpApplication->TouchUpEvent(0, xPos, yPos);
+                    gAppMouseActive = false;
+                }
+
                 gGuiMouseActive = false;
             }
         }
@@ -228,7 +272,8 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     // Use (WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX) instead of WS_CAPTION so window
     // cannot be resized.
     // DWORD dwStyle = WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
-    DWORD dwStyle = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+    // WS_POPUP allows a window larger than the actual screen
+    DWORD dwStyle = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_POPUP;
 
     // Create the console window
     CreateConsoleWindow();
@@ -243,9 +288,27 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     SetWindowPos(hConsole, 0, WindowMargin, (int)(1.0f * WindowMargin) + gSurfaceHeight, gSurfaceWidth, 3 * gSurfaceHeight / 4, SWP_SHOWWINDOW);    // SWP_NOSIZE
     freopen("CON", "w", stdout);
 
+    // Do a very simple parse of the cmd line...
+    std::string sConfigFilenameOverride;
+    if (!sCommandLine.empty())
+        gpApplication->SetConfigFilename(sCommandLine);
+
     // Load the config file
     // Need this here in order to get the window sizes
     gpApplication->LoadConfigFile();
+
+#ifdef OS_WINDOWS
+    if (gSurfaceWidth == 0)
+    {
+        LOGI("gSurfaceWidth => %d", gRenderWidth);
+        gSurfaceWidth = gRenderWidth;
+    }
+    if (gSurfaceHeight == 0)
+    {
+        LOGI("gSurfaceHeight => %d", gRenderHeight);
+        gSurfaceHeight = gRenderHeight;
+    }
+#endif // OS_WINDOWS
 
     RECT rectWindow;
     SetRect(&rectWindow, 0, 0, gSurfaceWidth, gSurfaceHeight);
@@ -275,10 +338,8 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     // Initialize some Vulkan stuff
     // Do this BEFORE calling CreateVulkanWindow()
-    int iDesiredMSAA = 4;   // 0 = off, -1 = best available, [2|4|8|16] = specified
     if (!gpApplication->GetVulkan()->Init( (uintptr_t)hWnd,
                                            (uintptr_t)hInstance,
-                                           iDesiredMSAA,
                                            [](tcb::span<const VkSurfaceFormatKHR> x) { return gpApplication->PreInitializeSelectSurfaceFormat(x); },
                                            [](Vulkan::AppConfiguration& x) { return gpApplication->PreInitializeSetVulkanConfiguration(x); }))
     {
@@ -290,6 +351,9 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         return FALSE;
 
     gAppInitialized = true;
+
+    if (!gpApplication->PostInitialize())
+        return FALSE;
 
     // Loop on windows messages
     MSG   msg;
@@ -326,7 +390,6 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     if (gpApplication)
     {
         gpApplication->Destroy();
-        // gpApplication->DestroyVulkanWindow();
 
         delete gpApplication;
         gpApplication = NULL;

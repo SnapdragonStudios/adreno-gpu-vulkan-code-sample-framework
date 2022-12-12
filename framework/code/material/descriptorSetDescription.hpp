@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <vector>
@@ -18,6 +23,7 @@ public:
         ImageSampler,
         ImageStorage,
         InputAttachment,
+        DrawIndirectBuffer
     };
     class StageFlag
     {
@@ -48,12 +54,14 @@ public:
         StageFlag stages;
         std::vector<std::string> names;
         uint32_t count;
+        bool readOnly;
 
-        DescriptorTypeAndCount(DescriptorType _type, StageFlag _stages, std::vector<std::string> _names, int _count = -1 /* if un-set (-1), default to the number of names) */ )
+        DescriptorTypeAndCount(DescriptorType _type, StageFlag _stages, std::vector<std::string> _names, int _count = -1 /* if un-set (-1), default to the number of names) */, bool _readOnly = false )
             : type(_type)
             , stages(_stages)
             , names(_names)
-            , count(std::max(_count, (int)_names.size()))
+            , count(_count)
+            , readOnly(_readOnly)
         {
         }
 

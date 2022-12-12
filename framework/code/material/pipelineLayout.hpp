@@ -1,9 +1,15 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <vector>
 #include <vulkan/vulkan.h>
+#include "tcb/span.hpp"
 
 // Forward declarations
 class Vulkan;
@@ -22,7 +28,8 @@ public:
 	PipelineLayout(PipelineLayout&&) noexcept;
 	~PipelineLayout();
 
-	bool Init(Vulkan& vulkan, const std::vector<DescriptorSetLayout>&);
+	bool Init(Vulkan& vulkan, const tcb::span<const DescriptorSetLayout>);
+	bool Init(Vulkan& vulkan, const tcb::span<const VkDescriptorSetLayout> vkDescriptorSetLayouts);
 	void Destroy(Vulkan& vulkan);
 
 	const auto& GetVkPipelineLayout() const { return m_pipelineLayout; }

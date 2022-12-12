@@ -22,7 +22,7 @@ foreach(file ${files})
     add_custom_command(
         OUTPUT ${OUTPUT_SHADER}
         MAIN_DEPENDENCY ${file}
-        COMMAND ${GLSL_VALIDATOR} -V ${file} -o ${OUTPUT_FILENAME}.spv
+        COMMAND ${GLSL_VALIDATOR} -V --target-env vulkan1.1 ${file} -o ${OUTPUT_FILENAME}.spv
         COMMAND ${CMAKE_COMMAND} -E rename ${OUTPUT_FILENAME}.spv ${OUTPUT_SHADER}
         COMMENT "Compiling shader ... ${file}" to ${OUTPUT_SHADER}
     )
@@ -31,6 +31,26 @@ foreach(file ${files})
     unset(OUTPUT_SHADER)
     unset(OUTPUT_FILENAME)
 endforeach()
+
+# Ray Tracing shaders need to target Vulkan 1.2
+file(GLOB files "shaders/*.rgen" "shaders/*.rint" "shaders/*.rahit" "shaders/*.rchit" "shaders/*.rmiss" "shaders/*.rcall")
+foreach(file ${files})
+    get_filename_component(OUTPUT_FILENAME ${file} NAME)
+
+    set(OUTPUT_SHADER ${CMAKE_CURRENT_SOURCE_DIR}/Media/Shaders/${OUTPUT_FILENAME}.spv)
+    add_custom_command(
+        OUTPUT ${OUTPUT_SHADER}
+        MAIN_DEPENDENCY ${file}
+        COMMAND ${GLSL_VALIDATOR} -V --target-env spirv1.4 ${file} -o ${OUTPUT_FILENAME}.spv
+        COMMAND ${CMAKE_COMMAND} -E rename ${OUTPUT_FILENAME}.spv ${OUTPUT_SHADER}
+        COMMENT "Compiling shader ... ${file}" to ${OUTPUT_SHADER}
+    )
+    list(APPEND SHADERS_SRC ${file})
+
+    unset(OUTPUT_SHADER)
+    unset(OUTPUT_FILENAME)
+endforeach()
+
 
 file(GLOB files "shaders/*.json")
 foreach(file ${files})

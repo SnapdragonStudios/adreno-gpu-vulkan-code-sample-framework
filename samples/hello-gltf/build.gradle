@@ -1,0 +1,90 @@
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 30
+    lintOptions {
+        abortOnError false
+    }
+
+    defaultConfig {
+        applicationId "com.quic.hellogltf"
+        minSdkVersion 26
+        targetSdkVersion 30
+        versionCode 1
+        versionName "1.0"
+        ndkVersion "${project.ndkVersionDefault}"
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DPROJECT_ROOT_DIR=${project.rootDir}", "-DFRAMEWORK_DIR=${project.rootDir}/../../framework"
+            }
+        }
+     }
+
+	signingConfigs{
+		unsigned{
+			storeFile file("${System.env.USERPROFILE}/.android/debug.keystore")
+			storePassword = "android"
+			keyAlias = "androiddebugkey"
+			keyPassword = "android"
+			v2SigningEnabled = false
+		}
+	}
+	
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+			signingConfig signingConfigs.unsigned
+        }
+        debug {
+            debuggable = true
+            jniDebuggable = true
+        }
+    }
+
+    sourceSets {
+        main {
+            jni.srcDirs = []
+            manifest.srcFile 'project/android/AndroidManifest.xml'
+            //java.srcDirs = ['src']
+            res.srcDirs = ['project/android/res']
+
+            // Uncomment this to enable validation
+//            jniLibs {
+//                 srcDir "${android.ndkDirectory}/sources/third_party/vulkan/src/build-android/jniLibs"
+//            }
+        }
+		main.assets {
+		    srcDirs = ['assets']
+            // Uncomment this to add Media folder to assets
+            srcDirs += ['assets_tmp']
+		}
+    }
+
+    dependencies {
+    }
+
+    externalNativeBuild {
+        cmake {
+            version "3.19.0+"
+            path 'CMakeLists.txt'
+        }
+    }
+
+	task copyTmpAssets(type: Copy) {
+		from "Media"
+		into "assets_tmp/Media"
+	}
+	task removeTmpAssets(type: Delete) {
+		delete "assets_tmp"
+	}
+
+	afterEvaluate {
+		packageRelease.finalizedBy(removeTmpAssets)
+	}
+
+	preBuild.dependsOn(copyTmpAssets)
+}

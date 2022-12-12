@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <memory>
@@ -36,6 +41,20 @@ EXTERN_VAR(uint32_t, gShadowMapHeight);
 EXTERN_VAR(uint32_t, gHudRenderWidth);
 EXTERN_VAR(uint32_t, gHudRenderHeight);
 
+EXTERN_VAR(uint32_t, gFramesToRender);
+
+EXTERN_VAR(bool,     gRunOnHLM);
+EXTERN_VAR(int,      gHLMDumpFrame);
+EXTERN_VAR( int,     gHLMDumpFrameCount);
+EXTERN_VAR(char*,    gHLMDumpFile);
+
+// Vulkan binding locations for the 'default' layouts when using InitOneLayout
+#define SHADER_VERT_UBO_LOCATION            0
+#define SHADER_FRAG_UBO_LOCATION            1
+// Texture Locations
+#define SHADER_BASE_TEXTURE_LOC             2
+
+
 //#########################################################
 // Config options - End
 //#########################################################
@@ -54,6 +73,12 @@ public:
     /// Set the AAssetManager (on android, does nothing on windows).  Do before LoadConfigFile().
     void SetAndroidAssetManager(AAssetManager* pAAssetManager);
 
+    /// Set the Android ExternalFilesDir (on android, does nothing on windows).  This is the location where the app is 'allowed' to read/write files including the app_config.txt.  Do before LoadConfigFile().
+    void SetAndroidExternalFilesDir(const std::string& pAndroidExternalFilesDir);
+
+    /// Override the (default) filename used by LoadConfigFile
+    virtual void    SetConfigFilename(const std::string& filename);
+
     /// Load config file before Initialize()
     /// This will go to derived class that can then set global parameters
     virtual bool    LoadConfigFile();
@@ -70,11 +95,19 @@ public:
     /// This is the main entry point for your Application code!
     virtual bool    Initialize(uintptr_t windowHandle);
 
+    /// Post-Initialize application.
+    /// This is called immediately after Initialize and before first Render, should be lightweight (reset timers etc)
+    virtual bool    PostInitialize();
+
+    /// ReInitialize application.
+    /// Will only be called if the app was initialized and the underlying platform requires the app be re-initialized (due to Vulkan window changing)
+    virtual bool    ReInitialize(uintptr_t windowHandle);
+
     /// Destroy application (opposite of Initialize, must get back to state that is re-Initializable)
     virtual void    Destroy();
 
-    /// Called by framework whenever the screen (swap chain) size has changed.
-    virtual bool    SetSize(uint32_t width, uint32_t height);
+    /// Called by framework whenever the screen (swap chain) size has changed.  This is the WINDOW size (not necissarily the buffer size etc), mouse/touch input is expected to be in this coordinate space)
+    virtual bool    SetWindowSize(uint32_t width, uint32_t height);
 
     /// Application Main thread 'render' loop (eg ALooper_pollAll loop on Android)
     /// Called every frame.
@@ -106,26 +139,35 @@ public:
 
     /// Main thread 'render' loop (eg ALooper_pollAll loop on Android)
     /// Wraps 'Render(float frameTimeSeconds)' with frame timers.  Applications should derive from Render(float frameTimeSeconds).
-    void            Render();
+    /// @returns false if Render fails or is done (requesting to exit app).
+    bool            Render();
 
     // Accessors
     Vulkan*         GetVulkan() const { return m_vulkan.get(); }
     Gui*            GetGui() const { return m_Gui.get(); }
-
+    uint32_t        GetFrameCount() const { return m_FrameCount; }
 public:
     // Frame timings
     bool                    m_LogFPS = true;
-    float                   m_CurrentFPS;
-    float                   m_FpsEvaluateInterval = 0.5f;
-    uint32_t                m_LastFpsLogTime;
+    float                   m_CurrentFPS = 0.0f;
 
+    /// @brief Timestamp string filled in by cmake build process (time this application was build at).
+    static const char* const sm_BuildTimestamp;
 protected:
     std::unique_ptr<Vulkan> m_vulkan;
     std::unique_ptr<Gui>    m_Gui;
     std::unique_ptr<AssetManager> m_AssetManager;
+    std::string             m_ConfigFilename;
+
+    uint32_t                m_WindowWidth = 0;              ///< Window width in pixels.  MAY not be the resolution of the render buffer or the rendering/backbuffer surface.  In an Android app MAY not be the full screeen device size.  DOES match the mouse/touch co-oordinates (mouse 0,0 is the edge of this window area)
+    uint32_t                m_WindowHeight = 0;             ///< Window width in pixels.  MAY not be the resolution of the render buffer or the rendering/backbuffer surface.  In an Android app MAY not be the full screeen device size.  DOES match the mouse/touch co-oordinates (mouse 0,0 is the edge of this window area)
+    float                   m_FpsEvaluateInterval = 0.5f;   // In seconds
 
 private:
-    uint32_t    m_LastFpsCalcTime;
-    uint32_t    m_FpsFrameCount;
-    uint32_t    m_LastUpdateTime;
+    uint64_t                m_LastUpdateTimeUS = 0;         // In microseconds.
+    uint32_t                m_FrameCount = 0;               // Number of times Render called.
+
+    uint32_t                m_LastFpsCalcTimeMS = 0;        // In milliseconds.
+    uint32_t                m_FpsFrameCount = 0;
+    uint32_t                m_LastFpsLogTimeMS = 0;
 };

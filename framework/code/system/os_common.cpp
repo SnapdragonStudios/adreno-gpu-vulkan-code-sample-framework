@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "os_common.h"
 #include "assetManager.hpp"
@@ -91,6 +96,54 @@ uint32_t OS_GetTimeMS()
     }
 
     return (uint32_t)(t.tv_sec * 1000LL + t.tv_usec / 1000LL);
+
+#endif // defined (OS_WINDOWS|OS_ANDROID)
+}
+
+
+//-----------------------------------------------------------------------------
+uint64_t OS_GetTimeUS()
+//-----------------------------------------------------------------------------
+{
+#if defined (OS_WINDOWS)
+
+    LARGE_INTEGER   nFrequency;
+    LARGE_INTEGER   nTime;
+
+    if (!QueryPerformanceFrequency(&nFrequency) || !QueryPerformanceCounter(&nTime))
+    {
+        return 0;
+    }
+
+    return (uint64_t)((double)nTime.QuadPart / (((double)nFrequency.QuadPart) / 1000000.0));
+
+#elif defined (OS_ANDROID)
+
+    struct timeval t;
+    t.tv_sec = t.tv_usec = 0;
+
+    if (gettimeofday(&t, NULL) == -1)
+    {
+        return 0;
+    }
+
+    return (uint64_t)(t.tv_sec * 1000000LL + t.tv_usec);
+
+#endif // defined (OS_WINDOWS|OS_ANDROID)
+}
+
+
+//-----------------------------------------------------------------------------
+void OS_SleepMs(uint32_t ms)
+//-----------------------------------------------------------------------------
+{
+#if defined (OS_WINDOWS)
+
+    Sleep(ms);
+
+#elif defined (OS_ANDROID)
+
+    usleep(ms*1000);
 
 #endif // defined (OS_WINDOWS|OS_ANDROID)
 }

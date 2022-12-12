@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include "imguiBase.hpp"
@@ -18,7 +23,7 @@ class GuiImguiPlatform : public GuiImguiBase
 public:
     GuiImguiPlatform();
     ~GuiImguiPlatform();
-    bool Initialize(uintptr_t windowHandle) override = 0;
+    bool Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint32_t renderHeight) override = 0;
     bool Initialize(uintptr_t windowHandle, uint32_t deviceWidth, uint32_t deviceHeight, uint32_t renderWidth, uint32_t renderHeight);
     void Update() override;
 
