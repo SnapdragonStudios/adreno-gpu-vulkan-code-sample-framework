@@ -1,11 +1,16 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "imguiWindows.hpp"
 #define NOMINMAX
 #include <Windows.h>
 #include <imgui/imgui.h>
-#include "imgui/examples/imgui_impl_win32.h"
+#include "imgui/backends/imgui_impl_win32.h"
 
 // From WinMain.cpp
 extern LRESULT(*PFN_Gui_WndProcHandler)(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -26,7 +31,7 @@ GuiImguiPlatform::~GuiImguiPlatform()
 
 bool GuiImguiPlatform::Initialize(uintptr_t windowHandle, uint32_t deviceWidth, uint32_t deviceHeight, uint32_t renderWidth, uint32_t renderHeight)
 {
-    if (!GuiImguiBase::Initialize(windowHandle))
+    if (!GuiImguiBase::Initialize(windowHandle, renderWidth, renderHeight))
     {
         return false;
     }

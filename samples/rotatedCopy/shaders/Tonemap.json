@@ -1,0 +1,43 @@
+{
+	"$schema": "shaderSchema.json",
+	"Passes": [
+		{
+			"Name": "Fullscreen",
+			"Shaders": {
+				"Vertex": "Media/Shaders/Fullscreen.vert.spv",
+				"Fragment": "Media/Shaders/Tonemap.frag.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "Diffuse" ]
+						}
+					]
+				}
+			],
+			"VertexBindings": [ "VB0" ]
+		}
+	],
+	"Vertex": [
+		{
+			"Span": 20,
+			"Name": "VB0",
+			"Elements": [
+				{
+					"Name": "Position",
+					"Offset": 0,
+					"Type": "Vec3"
+				},
+				{
+					"Name": "UV",
+					"Offset": 12,
+					"Type": "Vec2"
+				}
+			]
+		}
+	]
+}

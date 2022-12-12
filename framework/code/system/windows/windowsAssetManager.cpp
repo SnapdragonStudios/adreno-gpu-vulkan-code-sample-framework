@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 /// @file windowsAssetManager.cpp
 /// Platform specific implementation of AssetManager class.
@@ -26,12 +31,12 @@ public:
         assert(mFp==nullptr);   // expecting the fp to be cleared by Fileclose()
     }
     FILE* mFp;
-    const size_t mFileSize;
+    size_t mFileSize;
 };
 
 
 //-----------------------------------------------------------------------------
-AssetHandle* AssetManager::OpenFile(const std::string& pPortableFileName)
+AssetHandle* AssetManager::OpenFile(const std::string& pPortableFileName, Mode mode)
 //-----------------------------------------------------------------------------
 {
     if (pPortableFileName.empty())
@@ -41,17 +46,21 @@ AssetHandle* AssetManager::OpenFile(const std::string& pPortableFileName)
     const auto deviceFilename = PortableFilenameToDevicePath(pPortableFileName);
 
     // Open the file and see what is to be seen
-    FILE* fp = fopen(deviceFilename.c_str(), "rb");
+    FILE* fp = fopen(deviceFilename.c_str(), (mode == Mode::Write) ? "wb" : "rb");
     if (fp == nullptr)
     {
         LOGE("Unable to open file: %s (errno=%d)", deviceFilename.c_str(), (int)errno);
         return nullptr;
     }
 
-    // Get the file length
-    fseek(fp, 0, SEEK_END);
-    const auto fileSize = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
+    size_t fileSize = 0;
+    if (mode == Mode::Read)
+    {
+        // Get the file length
+        fseek(fp, 0, SEEK_END);
+        fileSize = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+    }
 
     return new AssetHandle(fp, fileSize);
 }
@@ -68,6 +77,15 @@ size_t AssetManager::ReadFile(void* pDest, size_t bytes, AssetHandle* pHandle)
 //-----------------------------------------------------------------------------
 {
     return fread(pDest, sizeof(char), bytes, pHandle->mFp);
+}
+
+//-----------------------------------------------------------------------------
+size_t AssetManager::WriteFile(const void* pSrc, size_t bytes, AssetHandle* pHandle)
+//-----------------------------------------------------------------------------
+{
+    size_t bytesWritten = fwrite(pSrc, sizeof(char), bytes, pHandle->mFp);
+    pHandle->mFileSize += (bytesWritten > 0 ? bytesWritten : 0);
+    return bytesWritten;
 }
 
 //-----------------------------------------------------------------------------

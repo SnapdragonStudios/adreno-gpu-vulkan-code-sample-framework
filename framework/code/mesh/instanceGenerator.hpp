@@ -1,23 +1,24 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <vector>
 #include <tcb/span.hpp>
 #include "system/glm_common.hpp"
-#include "vulkan/MeshObject.h"
+#include "mesh/meshObjectIntermediate.hpp"
 
 
 /// Container for a single mesh and the positions of all its instances.
 /// @ingroup Mesh
 struct MeshInstance
 {
-    /// Instance transform.
-    /// @note This is transposed (row major) (GLSL is generally column major).
-    typedef glm::mat3x4 tInstanceTransform;
-
-    MeshObjectIntermediate          mesh;
-    std::vector<tInstanceTransform> instances;
+    MeshObjectIntermediate                           mesh;
+    std::vector<MeshObjectIntermediate::FatInstance> instances;
 };
 
 

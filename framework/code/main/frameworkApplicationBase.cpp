@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "frameworkApplicationBase.hpp"
 
@@ -8,6 +13,11 @@
 #include "material/shaderModule.hpp"
 #include "memory/vertexBufferObject.hpp"
 #include "gui/gui.hpp"
+
+// Bring in the timestamp (and assign to a variable)
+#include "../../project/buildtimestamp.h"
+const char* const FrameworkApplicationBase::sm_BuildTimestamp = BUILD_TIMESTAMP;
+
 
 //#########################################################
 // Config options - Begin
@@ -30,6 +40,16 @@ VAR(uint32_t, gShadowMapHeight, 1024, kVariableNonpersistent);
 VAR(uint32_t, gHudRenderWidth, 1280, kVariableNonpersistent);
 VAR(uint32_t, gHudRenderHeight, 720, kVariableNonpersistent);
 
+VAR(float,    gFixedFrameRate, 0.0f, kVariableNonpersistent);
+
+VAR(uint32_t, gFramesToRender, 0/*0=loop forever*/, kVariableNonpersistent);
+VAR(bool,     gRunOnHLM, false, kVariableNonpersistent);
+VAR(int,      gHLMDumpFrame, -1, kVariableNonpersistent);       // start dumping on this frame
+VAR(int,      gHLMDumpFrameCount, 1, kVariableNonpersistent );  // dump for this number of frames
+VAR(char*,    gHLMDumpFile, "output", kVariableNonpersistent);
+
+VAR(bool,     gFifoPresentMode, false, kVariableNonpersistent); // enable to use FIFO present mode (locks app to refresh rate)
+
 
 //#########################################################
 // Config options - End
@@ -41,13 +61,20 @@ FrameworkApplicationBase::FrameworkApplicationBase()
 {
     m_vulkan = std::make_unique<Vulkan>();
     m_AssetManager = std::make_unique<AssetManager>();
+    m_ConfigFilename = "app_config.txt";
 
-    // FPS Handling
+    // FPS and frametime Handling
     m_CurrentFPS = 0.0f;
     m_FpsFrameCount = 0;
-    m_LastFpsCalcTime = OS_GetTimeMS();
-    m_LastFpsLogTime = m_LastFpsCalcTime;
-    m_LastUpdateTime = m_LastFpsCalcTime;
+    m_FrameCount = 0;
+    m_LastUpdateTimeUS = OS_GetTimeUS();
+    m_LastFpsCalcTimeMS = (uint32_t) (m_LastUpdateTimeUS / 1000);
+    m_LastFpsLogTimeMS = m_LastFpsCalcTimeMS;
+
+    m_WindowWidth = 0;
+    m_WindowHeight = 0;
+
+    LOGI("Application build time: %s", sm_BuildTimestamp);
 }
 
 //-----------------------------------------------------------------------------
@@ -65,15 +92,30 @@ void FrameworkApplicationBase::SetAndroidAssetManager(AAssetManager* pAAssetMana
 }
 
 //-----------------------------------------------------------------------------
+void FrameworkApplicationBase::SetAndroidExternalFilesDir(const std::string& androidExternalFilesDir)
+//-----------------------------------------------------------------------------
+{
+    m_AssetManager->SetAndroidExternalFilesDir(androidExternalFilesDir);
+}
+
+//-----------------------------------------------------------------------------
+void FrameworkApplicationBase::SetConfigFilename(const std::string& filename)
+//-----------------------------------------------------------------------------
+{
+    m_ConfigFilename = filename;
+}
+
+//-----------------------------------------------------------------------------
 bool FrameworkApplicationBase::LoadConfigFile()
 //-----------------------------------------------------------------------------
 {
-    const char* pConfigFilePath = "app_config.txt";
-    LOGI("Loading Configuation File: %s", pConfigFilePath);
+    const std::string ConfigFileFallbackPath = std::string("Media\\") + m_ConfigFilename;
+    LOGI("Loading Configuration File: %s", m_ConfigFilename.c_str());
     std::string configFile;
-    if (!m_AssetManager->LoadFileIntoMemory( pConfigFilePath, configFile ))
+    if (!m_AssetManager->LoadFileIntoMemory(m_ConfigFilename, configFile ) &&
+        !m_AssetManager->LoadFileIntoMemory(ConfigFileFallbackPath, configFile))
     {
-        LOGE("Error loading Configuration file: %s", pConfigFilePath);
+        LOGE("Error loading Configuration file: %s (and fallback: %s)", m_ConfigFilename.c_str(), ConfigFileFallbackPath.c_str());
     }
     else
     {
@@ -93,12 +135,35 @@ int FrameworkApplicationBase::PreInitializeSelectSurfaceFormat(tcb::span<const V
 }
 
 //-----------------------------------------------------------------------------
-void FrameworkApplicationBase::PreInitializeSetVulkanConfiguration(Vulkan::AppConfiguration&)
+void FrameworkApplicationBase::PreInitializeSetVulkanConfiguration(Vulkan::AppConfiguration& config)
 //-----------------------------------------------------------------------------
-{}
+{
+    if (gFifoPresentMode)
+    {
+        config.PresentMode = VK_PRESENT_MODE_FIFO_KHR;
+    }
+}
 
 //-----------------------------------------------------------------------------
 bool FrameworkApplicationBase::Initialize(uintptr_t windowHandle)
+//-----------------------------------------------------------------------------
+{
+    gSurfaceWidth = m_vulkan->m_SurfaceWidth; // Sync with the actual swapchain size
+    gSurfaceHeight = m_vulkan->m_SurfaceHeight; // Sync with the actual swapchain size
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FrameworkApplicationBase::PostInitialize()
+//-----------------------------------------------------------------------------
+{
+    m_LastUpdateTimeUS = OS_GetTimeUS();
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool FrameworkApplicationBase::ReInitialize(uintptr_t windowHandle)
 //-----------------------------------------------------------------------------
 {
     return true;
@@ -111,14 +176,19 @@ void FrameworkApplicationBase::Destroy()
 }
 
 //-----------------------------------------------------------------------------
-bool FrameworkApplicationBase::SetSize(uint32_t width, uint32_t height)
+bool FrameworkApplicationBase::SetWindowSize(uint32_t width, uint32_t height)
 //-----------------------------------------------------------------------------
 {
+    LOGI("SetWindowSize: window size %u x %u", width, height);
+
+    m_WindowWidth = width;
+    m_WindowHeight = height;
+
     return true;
 }
 
 //-----------------------------------------------------------------------------
-void FrameworkApplicationBase::Render()
+bool FrameworkApplicationBase::Render()
 //-----------------------------------------------------------------------------
 {
     //
@@ -126,18 +196,24 @@ void FrameworkApplicationBase::Render()
     //
     m_FpsFrameCount++;
 
-    uint32_t TimeNow = OS_GetTimeMS();
-    float DiffTime = (float)(TimeNow - m_LastFpsCalcTime) * 0.001f;     // Time in seconds
-    if (DiffTime > m_FpsEvaluateInterval)
+    uint64_t TimeNowUS = OS_GetTimeUS();
+    uint32_t TimeNowMS = (uint32_t) (TimeNowUS / 1000);
     {
-        m_CurrentFPS = (float)m_FpsFrameCount / DiffTime;
+        float DiffTime = (float)(TimeNowMS - m_LastFpsCalcTimeMS) * 0.001f;     // Time in seconds
+        if (DiffTime > m_FpsEvaluateInterval)
+        {
+            m_CurrentFPS = (float)m_FpsFrameCount / DiffTime;
 
-        m_FpsFrameCount = 0;
-        m_LastFpsCalcTime = OS_GetTimeMS();
+            m_FpsFrameCount = 0;
+            m_LastFpsCalcTimeMS = TimeNowMS;
+        }
     }
 
-    float fltDiffTime = (float)(TimeNow - m_LastUpdateTime) * 0.001f;
-    m_LastUpdateTime = OS_GetTimeMS();
+    float fltDiffTime = (float)(TimeNowUS - m_LastUpdateTimeUS) * 0.000001f;     // Time in seconds
+    m_LastUpdateTimeUS = TimeNowUS;
+
+    if (gFixedFrameRate > 0.0f)
+        fltDiffTime = 1.0f / gFixedFrameRate;
 
     //
     // Call in to the derived application class
@@ -151,13 +227,26 @@ void FrameworkApplicationBase::Render()
     {
         // Log FPS is configured
         uint32_t TimeNow = OS_GetTimeMS();
-        uint32_t DiffTime = TimeNow - m_LastFpsLogTime;
+        uint32_t DiffTime = TimeNow - m_LastFpsLogTimeMS;
         if (DiffTime > 1000)
         {
             LOGI("FPS: %0.2f", m_CurrentFPS);
-            m_LastFpsLogTime = OS_GetTimeMS();
+            m_LastFpsLogTimeMS = TimeNow;
         }
     }
+
+    m_FrameCount++;
+
+    //
+    // Determine if app should exit (reached requested number of frames)
+    //
+    if (gFramesToRender != 0 && m_FrameCount >= gFramesToRender)
+    {
+        // Exiting, the GPU is potentially still running queued jobs, wait for them to finish.
+        vkQueueWaitIdle(m_vulkan->m_VulkanQueue);
+        return false;   // Exit
+    }
+    return true;        // Ok
 }
 
 //-----------------------------------------------------------------------------

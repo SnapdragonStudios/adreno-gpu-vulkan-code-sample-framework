@@ -1,11 +1,17 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "instanceGenerator.hpp"
-#include "vulkan/MeshObject.h"
+#include "mesh/meshObjectIntermediate.hpp"
 #include "system/crc32c.hpp"
 #include <glm/gtx/norm.hpp>
 #define EIGEN_INITIALIZE_MATRICES_BY_ZERO
+#define EIGEN_MPL2_ONLY
 #include <eigen/Eigen/Dense>
 #include <map>
 #include <algorithm>
@@ -90,9 +96,11 @@ std::vector<MeshInstance> MeshInstanceGenerator::NullFindInstances(std::vector<M
     std::vector<MeshInstance> out;
     for (auto& object : objects)
     {
-        out.push_back( { std::move( object ), {} } );
+        glm::mat3x4 instanceTransform = glm::transpose(object.m_Transform);
+        object.m_Transform = glm::identity<glm::mat4>();
+        out.push_back({ std::move(object), {{instanceTransform, object.m_NodeId}} });
     }
-    return std::move(out);
+    return out;
 }
 
 std::vector<MeshInstance> MeshInstanceGenerator::FindInstances(std::vector<MeshObjectIntermediate> objects)
@@ -148,12 +156,13 @@ std::vector<MeshInstance> MeshInstanceGenerator::FindInstances(std::vector<MeshO
 
                 TransformToCenter( object.m_VertexBuffer, center );
 
-                glm::mat3x4 m = glm::identity<glm::mat3x4>();
-                m[0].w = center.x;
-                m[1].w = center.y;
-                m[2].w = center.z;
+                glm::mat4 m = glm::identity<glm::mat4>();
+                m[3].x = center.x;
+                m[3].y = center.y;
+                m[3].z = center.z;
+                m = object.m_Transform * m;
 
-                instances.push_back( { std::move( object ), {m} } );
+                instances.push_back({ std::move(object), {{glm::transpose(m), -1}} });
                 it = matchingSets.erase(it);
             }
             else
@@ -193,12 +202,23 @@ std::vector<MeshInstance> MeshInstanceGenerator::FindInstances(std::vector<MeshO
                 else
                 {
                     // Transform looks good.  Add this as a new instance of the current instances set.
-                    instances.rbegin()->instances.push_back( glm::transpose(transform) );
+                    glm::mat4 m = object.m_Transform * transform;
+                    instances.rbegin()->instances.push_back({ glm::transpose(m), -1 });
                     it = matchingSets.erase(it);
                 }
             }
         }
     }
 
-    return std::move(instances);
+    // Clear out the mesh transforms now they have all been applied in to the instance transforms.
+    // Also clear the nodeId for the root mesh...
+    ///TODO: store m_NodeId for each of the instances and calculate transform that allows the instance node to be animated correctly.
+    ///NOTE: we could keep the m_NodeId for any meshes that have a unique instance, at the cost of potential confusion when there is a mix of instanced and non instanced geometry.
+    for (auto& instance : instances)
+    {
+        instance.mesh.m_Transform = glm::identity<glm::mat4>();
+        instance.mesh.m_NodeId = -1;
+    }
+
+    return instances;
 }

@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//=============================================================================
+//
+//
+//                  Copyright (c) 2020 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
+//
+//==============================================================================
 #pragma once
 
 #include "../imguiPlatform.hpp"

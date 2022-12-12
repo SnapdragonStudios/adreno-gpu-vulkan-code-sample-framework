@@ -1,0 +1,69 @@
+//=============================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//=============================================================================================
+
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+//
+// VarianceShadowMap Filter
+// First pass generates the depth & depth squared values, and uses LDS memory to grab a line of data and blur horizontally (separable blur).
+// Workgroup size limit (and hardcoded values) require that the input is a 1024x1024 depth texture!
+//
+
+#define WORKGROUP_SIZE_X 1024
+#define WORKGROUP_SIZE_Y 1
+
+layout (local_size_x = WORKGROUP_SIZE_X, local_size_y = WORKGROUP_SIZE_Y, local_size_z = 1 ) in;
+//layout(set = 0, binding = 0, r32f) uniform readonly image2D imageSrc;
+layout(set = 0, binding = 0/*, r32f*/) uniform sampler2D imageSrc;
+layout(set = 0, binding = 1, rg32f) uniform image2D imageDest;
+
+
+//const int cFilterWidth = 4;
+//const float coefficients[] = {0.0162162162, 0.0540540541, 0.1216216216, 0.1945945946, 0.2270270270, 0.1945945946, 0.1216216216, 0.0540540541, 0.0162162162};
+const int cFilterWidth = 10;
+const float coefficients[] = {0.000539, 0.001533, 0.003908, 0.008925, 0.018255, 0.033446, 0.054891, 0.080693, 0.106259, 0.125337, 0.132429, 0.125337, 0.106259, 0.080693, 0.054891, 0.033446, 0.018255, 0.008925, 0.003908, 0.001533, 0.000539};
+
+const int cMaxLinePizels = WORKGROUP_SIZE_X;
+const int cMaxLinePixels = cMaxLinePizels + cFilterWidth*2;
+shared float sDepthLine[cMaxLinePixels];
+
+void main() {
+    // read pixel (depth), write to cache and wait for all the pixels in this line to finish
+    //vec4 depth = imageLoad(imageSrc, ivec2(gl_GlobalInvocationID.x,gl_GlobalInvocationID.y));
+    vec4 depth = texture(imageSrc, vec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y)/1024.0f );
+    sDepthLine[gl_GlobalInvocationID.x + cFilterWidth] = depth.x;
+
+    // mirrror the edge values
+    if (gl_GlobalInvocationID.x < cFilterWidth)
+    {
+        sDepthLine[cFilterWidth - 1 - gl_GlobalInvocationID.x] = depth.x;
+    }
+    else if (gl_GlobalInvocationID.x >= cMaxLinePixels - cFilterWidth)
+    {
+        sDepthLine[cFilterWidth + cMaxLinePixels*2 - 1 - gl_GlobalInvocationID.x] = depth.x;
+    }
+
+    barrier();
+
+    // Now do the averaging for our pixel
+#if 1
+    vec2 sum = vec2(0.0f);
+    for(int i=0;i<=cFilterWidth*2;++i)
+    {
+        float c = coefficients[i];
+        float d = sDepthLine[gl_GlobalInvocationID.x + i];
+        sum.x += c * d;     // sum depth
+        sum.y += c * d * d; // sum depth squared
+    }
+#else
+    float d = sDepthLine[gl_GlobalInvocationID.x + cFilterWidth];
+    vec2 sum = vec2(d, d*d);
+#endif
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x,gl_GlobalInvocationID.y), vec4(sum, 0.0, 0.0));
+}

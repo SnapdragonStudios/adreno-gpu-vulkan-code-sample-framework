@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <vulkan/vulkan.h>
@@ -7,6 +12,7 @@
 #include <map>
 #include <string>
 #include <memory>//TEMP
+#include "tcb/span.hpp"
 
 // Forward declares
 class DescriptorSetDescription;
@@ -28,6 +34,9 @@ public:
     bool Init(Vulkan& vulkan, const DescriptorSetDescription&);
     void Destroy(Vulkan& vulkan);
 
+    static VkDescriptorSetLayout CreateVkDescriptorSetLayout(Vulkan& vulkan, const tcb::span<const VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings);
+    static void CalculatePoolSizes(const tcb::span<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings, std::vector<VkDescriptorPoolSize>& descriptorPoolSizes/*output*/);
+
     const auto& GetVkDescriptorSetLayoutBinding() const { return m_descriptorSetLayoutBindings; }
     const auto& GetVkDescriptorSetLayout() const { return m_descriptorSetLayout; }
     const auto& GetNameToBinding() const { return m_nameToBinding; }
@@ -36,12 +45,14 @@ public:
     struct BindingTypeAndIndex {
         VkDescriptorType type;
         uint32_t index;
+        bool isArray;
+        bool isReadOnly;
     };
 private:
     std::map<std::string, BindingTypeAndIndex> m_nameToBinding; ///< For each named descriptor slot store the relevant binding index (one name per binding for simplicity) ///< @TODO should this be in here, or in the materialPass.
 
     // Vulkan objects
-    VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;   ///< Vulkan descriptor set layout object.  Can be VK_NULL_HANDLE after Init if there are bindings with 'dynamic' descriptorCount (0)
     std::vector<VkDescriptorSetLayoutBinding > m_descriptorSetLayoutBindings;
     std::vector<VkDescriptorPoolSize> m_descriptorPoolSizes;
 };

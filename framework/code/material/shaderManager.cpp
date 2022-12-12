@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "shaderManager.hpp"
 #include "shaderDescription.hpp"
@@ -39,17 +44,17 @@ void ShaderManager::RegisterRenderPassNames(const tcb::span<const char*const> pa
     }
 }
 
-bool ShaderManager::AddShader(Vulkan& vulkan, AssetManager& assetManager, const std::string& shaderName, const std::string& filename)
+bool ShaderManager::AddShader(AssetManager& assetManager, const std::string& shaderName, const std::string& filename)
 {
     auto shaderDescription = ShaderDescriptionLoader::Load(assetManager, filename);
     if (!shaderDescription)
     {
         return false;
     }
-    return AddShader(vulkan, assetManager, shaderName, std::move(*shaderDescription));
+    return AddShader(assetManager, shaderName, std::move(*shaderDescription));
 }
 
-bool ShaderManager::AddShader(Vulkan & vulkan, AssetManager & assetManager, const std::string & shaderName, ShaderDescription shaderDescription)
+bool ShaderManager::AddShader(AssetManager & assetManager, const std::string & shaderName, ShaderDescription shaderDescription)
 {
     bool success = true;
     // Create the ShaderDescription
@@ -104,7 +109,7 @@ bool ShaderManager::AddShader(Vulkan & vulkan, AssetManager & assetManager, cons
             else
             {
                 // Load the physical shader file
-                if (!vertShader.first->second.Load(vulkan, assetManager, shaderPassDescription, ShaderModule::ShaderType::Vertex))
+                if (!vertShader.first->second.Load(m_vulkan, assetManager, shaderPassDescription, ShaderModule::ShaderType::Vertex))
                 {
                     // Failed to load, remove the unloaded Shader class!
                     m_shaderModulesByName.erase(shaderPassDescription.m_vertexName);
@@ -128,10 +133,11 @@ bool ShaderManager::AddShader(Vulkan & vulkan, AssetManager & assetManager, cons
                 else
                 {
                     // Load the physical shader file
-                    if (!fragShader.first->second.Load(vulkan, assetManager, shaderPassDescription, ShaderModule::ShaderType::Fragment))
+                    if (!fragShader.first->second.Load(m_vulkan, assetManager, shaderPassDescription, ShaderModule::ShaderType::Fragment))
                     {
                         // Failed to load, remove the unloaded Shader class!
                         m_shaderModulesByName.erase(shaderPassDescription.m_fragmentName);
+                        m_shaderModulesByName.erase(shaderPassDescription.m_vertexName);
                         success = false;
                         break;
                     }
@@ -150,7 +156,7 @@ bool ShaderManager::AddShader(Vulkan & vulkan, AssetManager & assetManager, cons
             else
             {
                 // Load the physical shader file
-                if (!computeShader.first->second.Load(vulkan, assetManager, shaderPassDescription, ShaderModule::ShaderType::Compute))
+                if (!computeShader.first->second.Load(m_vulkan, assetManager, shaderPassDescription, ShaderModule::ShaderType::Compute))
                 {
                     // Failed to load, remove the unloaded Shader class!
                     m_shaderModulesByName.erase(shaderPassDescription.m_computeName);
@@ -180,7 +186,7 @@ bool ShaderManager::AddShader(Vulkan & vulkan, AssetManager & assetManager, cons
         //std::vector<DescriptorSetDescription> dsd;
         for (const auto& set : shaderPassDescription.m_sets)
         {
-            if (!descriptorSetLayouts.emplace_back().Init(vulkan, set))
+            if (!descriptorSetLayouts.emplace_back().Init(m_vulkan, set))
             {
                 // Error
                 return false;
@@ -191,10 +197,9 @@ bool ShaderManager::AddShader(Vulkan & vulkan, AssetManager & assetManager, cons
         // Create the pipeline layout (for the ShaderPass)
         //
         PipelineLayout pipelineLayout;
-        if (!pipelineLayout.Init(vulkan, descriptorSetLayouts))
+        if (!pipelineLayout.Init(m_vulkan, descriptorSetLayouts))
         {
-            // Error
-            return false;
+            // Error. Is ok (just means we didnt have a valid descriptor set layout yet)
         }
 
         PipelineVertexInputState pipelineVertexInputState{ *pShaderDescription, shaderPassDescription.m_vertexFormatBindings };

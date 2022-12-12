@@ -4,20 +4,25 @@
 buildscript {
     
     repositories {
+        mavenCentral()
         google()
         jcenter()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.4.0'
+        classpath 'com.android.tools.build:gradle:7.1.1'
         // No application dependencies here; they belong in the individual module build.gradle files
     }
 }
 
 allprojects {
     repositories {
+        mavenCentral()
         google()
         jcenter()
     }
+
+    // Default ndk version (should be picked up in app specific build.gradle files)
+    project.ext.set("ndkVersionDefault", "24.0.8215888")
 
     // Put all build related files into a single top level build dir.
     buildDir = file("${rootDir.absolutePath}/../../build/android/${project.name}")

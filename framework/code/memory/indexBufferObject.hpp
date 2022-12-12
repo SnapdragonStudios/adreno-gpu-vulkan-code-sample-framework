@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include "bufferObject.hpp"
@@ -18,13 +23,19 @@ public:
     ~IndexBufferObject();
 
     /// Initialization
-    template<typename T> bool Initialize(MemoryManager* pManager, size_t numIndices, const T* initialData, const bool dspUsable = false, const VkBufferUsageFlags usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    template<typename T> bool Initialize( MemoryManager* pManager, size_t numIndices, const T* initialData, const bool dspUsable = false, const VkBufferUsageFlags usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT );
+
+    /// Initialization
+    bool Initialize( MemoryManager* pManager, size_t numIndices, const bool dspUsable = false, const VkBufferUsageFlags usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT );
 
     /// destroy buffer and leave in a state where it could be re-initialized
     void Destroy();
 
-    /// create a copy of this vertex buffer (including a new copy of the data)
+    /// create a copy of this index buffer (including a new copy of the data)
     IndexBufferObject Copy();
+
+    /// Create a copy of this buffer with (potentially) different usage.  Will add vkCmdCopyBuffer commands to the provided 'copy' command buffer (caller's resposibility to execute this command list before either of the BufferObjects are destroyed).
+    IndexBufferObject Copy(VkCommandBuffer copyCommandBuffer, VkBufferUsageFlags bufferUsage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemoryManager::MemoryUsage memoryUsage = MemoryManager::MemoryUsage::GpuExclusive ) const;
 
     /// get number of bytes allocated
     size_t GetAllocationSize() const { return GetIndexTypeBytes() * mNumIndices; }
@@ -33,7 +44,7 @@ public:
     template<typename T> MapGuard<T> Map();
 
     VkIndexType GetIndexType() const { return mIndexType; }
-    uint32_t GetIndexTypeBytes() const { assert(mIndexType == VK_INDEX_TYPE_UINT16 || mIndexType == VK_INDEX_TYPE_UINT32); return (mIndexType == VK_INDEX_TYPE_UINT32 ? 4 : 2); }
+    uint32_t GetIndexTypeBytes() const { switch (mIndexType) { case VK_INDEX_TYPE_UINT8_EXT: return 1; case VK_INDEX_TYPE_UINT16: return 2; case VK_INDEX_TYPE_UINT32: return 4; default: assert(0); return 1; } }
     auto GetNumIndices() const { return mNumIndices; }
 
 protected:
@@ -54,6 +65,11 @@ bool IndexBufferObject::Initialize(MemoryManager* pManager, size_t numIndices, c
 {
     assert(sizeof(T) == GetIndexTypeBytes());
     return Initialize(pManager, numIndices, (const void*)initialData, dspUsable, usage);
+}
+
+inline bool IndexBufferObject::Initialize(MemoryManager* pManager, size_t numIndices, const bool dspUsable, const VkBufferUsageFlags usage)
+{
+    return Initialize(pManager, numIndices, (const void*)nullptr, dspUsable, usage);
 }
 
 template<typename T>

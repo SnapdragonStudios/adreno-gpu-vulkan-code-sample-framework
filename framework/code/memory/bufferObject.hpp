@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <vulkan/vulkan.h>
@@ -20,10 +25,12 @@ protected:
 public:
     BufferObject();
     virtual ~BufferObject();
-	BufferObject(BufferObject&&);
-	BufferObject& operator=(BufferObject&&);
+	BufferObject(BufferObject&&) noexcept;
+	BufferObject& operator=(BufferObject&&) noexcept;
 
-    bool Initialize( MemoryManager* pManager, VkDeviceSize size, VkBufferUsageFlags bufferUsageFlags, const void* initialData );
+    explicit operator bool() const;
+
+    bool Initialize(MemoryManager* pManager, size_t size, VkBufferUsageFlags bufferUsageFlags, const void* initialData);
 	bool Initialize(MemoryManager* pManager, size_t size, VkBufferUsageFlags bufferUsageFlags, MemoryManager::MemoryUsage memoryUsage);
 	//bool Initialize(MemoryManager* pManager, VkBufferUsageFlags usageFlags, const AHardwareBuffer_Desc& hardwareBufferDesc, const void* initialData);
     //bool Initialize(MemoryManager* pManagere, VkBufferUsageFlags usageFlags, const AHardwareBuffer* pAHardwareBuffer);

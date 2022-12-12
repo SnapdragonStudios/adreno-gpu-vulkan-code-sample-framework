@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include <optional>
@@ -14,66 +19,7 @@ class VertexFormat;
 class MeshObject;
 class AssetManager;
 class VertexBufferObject;
-
-// Under Vulkan we use uniform buffer objects in the shader. One for vert and one for frag
-#define SHADER_VERT_UBO_LOCATION            0
-#define SHADER_FRAG_UBO_LOCATION            1
-
-// Texture Locations
-#define SHADER_BASE_TEXTURE_LOC             2
-
-/// Defines a simple object for creating and holding intermediae vertex data in a 'Fat' format (all available data).
-class MeshObjectIntermediate
-{
-    MeshObjectIntermediate(const MeshObject&) = delete;
-    MeshObjectIntermediate& operator=(const MeshObject&) = delete;
-public:
-    MeshObjectIntermediate() {}
-    MeshObjectIntermediate(MeshObjectIntermediate&&) noexcept = default;
-    MeshObjectIntermediate& operator=(MeshObjectIntermediate&&) noexcept = default;
-
-    /// Clear/delete the vectors associated with the MeshObjectIntermediate
-    void Release();
-
-    /// Loads a .obj and .mtl file and builds a single vector array containing an object
-    /// for each shape that contains all vertex positions, normals, materials and colors.
-    static std::vector<MeshObjectIntermediate> LoadObj(AssetManager& assetManager, const std::string& filename);
-
-    /// Loads a .gltf file and builds a single vector array containing an object
-    /// for each shape in the gltf that contains all vertex positions, normals and colors along with an array of the materials in the gltf file.
-    static std::vector<MeshObjectIntermediate> LoadGLTF(AssetManager& assetManager, const std::string& filename);
-
-    /// This is ALL the data that could be loaded from a mesh.
-    /// Expected to be copied into one (or more) shader specific layouts
-    struct FatVertex
-    {
-        float position[3];
-        float normal[3];
-        float color[4];
-        float uv0[2];
-        float tangent[3];
-        float bitangent[3];
-        int   material;     ///< indexc in to m_Materials
-    };
-
-    /// High level description of a material attached to the vertexbuffer (and indexed by FatVertex::material)
-    struct MaterialDef
-    {
-        std::string     diffuseFilename;
-        std::string     bumpFilename;
-        std::string     emissiveFilename;
-        std::string     specMapFilename;
-        bool            alphaCutout = false;
-        bool            transparent = false;
-    };
-
-public:
-    std::vector<FatVertex>      m_VertexBuffer;
-    /// Index buffer can be 16bit or 32bit (or not exist; in which case every 3 vertices in m_VertexBuffer are the verts of a triangle).
-    std::variant<std::monostate, std::vector<uint32_t>, std::vector<uint16_t>> m_IndexBuffer;
-    std::vector<MaterialDef>    m_Materials;
-};
-
+class MeshObjectIntermediate;
 
 /// Defines a simple object for creating and holding Vulkan state corresponding to a single mesh.
 class MeshObject
@@ -86,10 +32,8 @@ public:
     MeshObject& operator=(MeshObject&&) noexcept;
     ~MeshObject();
     
-    /// Create a MeshObject for a single .obj file (no materials)
-    /// @returns true on success
-    static bool LoadObj(Vulkan* pVulkan, AssetManager&, const std::string& objFilename, uint32_t binding, MeshObject* meshObject);
-    /// Create a MeshObject for the first shape in a .gltf file (no materials)
+    /// Create a MeshObject for the first shape in a .gltf file (no materials).
+    /// Returned MeshObject does not have an index buffer (3 verts per triangle) and data is in the MeshObject::vertex_layout format.
     /// @returns true on success
     static bool LoadGLTF(Vulkan* pVulkan, AssetManager&, const std::string& filename, uint32_t binding, MeshObject* meshObject);
 
@@ -109,10 +53,6 @@ public:
     /// @param pVertexFormat format of the vertex data being output
     /// @returns true on success
     static bool CreateMesh(Vulkan* pVulkan, const MeshObjectIntermediate& meshObject, uint32_t binding, const tcb::span<const VertexFormat> pVertexFormat, MeshObject* meshObjectOut);
-
-    /// Creates a 'raw' array of data from a 'fat' MeshObjectIntermediate object, with the returned data being formatted in the way described by vertexFormat
-    /// @returns data in the requested vertexFormat
-    static std::vector<uint32_t> CopyFatToFormattedBuffer(const tcb::span<const MeshObjectIntermediate::FatVertex>& fatVertexBuffer, const VertexFormat& vertexFormat);
 
     virtual bool Destroy();
 

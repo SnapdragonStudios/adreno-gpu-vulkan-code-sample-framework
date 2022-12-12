@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 /// @file androidMain.cpp
 /// @brief Android 'android_main' application entry point and event handler.
@@ -54,46 +59,90 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd)
     // These commands are defined in "android_native_app_glue.h"
     switch (cmd)
     {
-        case APP_CMD_INPUT_CHANGED:
-            LOGE("Processing APP_CMD_INPUT_CHANGED");
+        case APP_CMD_START:
+            LOGE("Processing APP_CMD_START");
+            break;
+        case APP_CMD_STOP:
+            LOGE("Processing APP_CMD_STOP");
+            break;
+        case APP_CMD_PAUSE:
+            LOGE("Processing APP_CMD_PAUSE");
+            break;
+        case APP_CMD_RESUME:
+            LOGE("Processing APP_CMD_RESUME");
             break;
         case APP_CMD_INIT_WINDOW:
         {
             LOGE("Processing APP_CMD_INIT_WINDOW");
-            assert(!engine->initialized);
+            //assert(!engine->initialized);
 
             // InitializeVulkan
-            const int iDesiredMSAA = 4;   // 0 = off, -1 = best available, [2|4|8|16] = specified
             assert(engine->application);
             assert(engine->application->GetVulkan());
             assert(engine->app->window);
 
-            if (!engine->application->GetVulkan()->Init( (uintptr_t)(void*)engine->app->window,
-                                                   0,
-                                                   iDesiredMSAA,
-                                                   [engine](tcb::span<const VkSurfaceFormatKHR> x) { return engine->application->PreInitializeSelectSurfaceFormat(x); },
-                                                   [engine](Vulkan::AppConfiguration& x) { return engine->application->PreInitializeSetVulkanConfiguration(x); }))
+            if (engine->application)
+                engine->application->SetWindowSize(ANativeWindow_getWidth(engine->app->window), ANativeWindow_getHeight(engine->app->window));
+
+            if (engine->initialized)
             {
-                LOGE("Unable to initialize Vulkan!!");
-                engine->initialized = false;    //assert above already checked this, but set anyhow
+                // Already initialized (app resuming)
+                if (!engine->application->GetVulkan()->ReInit((uintptr_t)(void*)engine->app->window))
+                {
+                    LOGE("Unable to re-initialize Vulkan!!");
+                    engine->application->Destroy();
+                    engine->initialized = false;
+                }
+                else if (!engine->application->ReInitialize((uintptr_t)(void*)engine->app->window))
+                {
+                    LOGE("VkSample::ReInitialize Error");
+                    engine->initialized = false;    // do tear-down?
+                }
+                else if (!engine->application->PostInitialize())
+                {
+                    LOGE("VkSample::PostInitialize Error");
+                    engine->initialized = false;    // do tear-down?
+                }
+                else
+                {
+                    LOGI("VkSample::Initialize Success");
+                    engine->initialized = true;
+                }
             }
-            else if(!engine->application->Initialize( (uintptr_t)(void*)engine->app->window) )
+
+            if (!engine->initialized)
             {
-                LOGE("VkSample::Initialize Error");
-                engine->initialized = false;    //assert above already checked this, but set anyhow
-            }
-            else
-            {
-                LOGI("VkSample::Initialize Success");
-                engine->initialized = true;
+                if (!engine->application->GetVulkan()->Init((uintptr_t)(void*)engine->app->window,
+                    0,
+                    [engine](tcb::span<const VkSurfaceFormatKHR> x) { return engine->application->PreInitializeSelectSurfaceFormat(x); },
+                    [engine](Vulkan::AppConfiguration& x) { return engine->application->PreInitializeSetVulkanConfiguration(x); }))
+                {
+                    LOGE("Unable to initialize Vulkan!!");
+                    engine->initialized = false;    //assert above already checked this, but set anyhow
+                }
+                else if (!engine->application->Initialize((uintptr_t)(void*)engine->app->window))
+                {
+                    LOGE("VkSample::Initialize Error");
+                    engine->initialized = false;    //assert above already checked this, but set anyhow
+                }
+                else if (!engine->application->PostInitialize())
+                {
+                    LOGE("VkSample::PostInitialize Error");
+                    engine->initialized = false;    //assert above already checked this, but set anyhow
+                }
+                else
+                {
+                    LOGI("VkSample::Initialize Success");
+                    engine->initialized = true;
+                }
             }
             engine->animating = true;
             break;
         }
         case APP_CMD_TERM_WINDOW:
             LOGE("Processing APP_CMD_TERM_WINDOW");
-            engine->application->Destroy();
-            engine->initialized = false;
+            //engine->application->Destroy();
+            //engine->initialized = false;
             break;
         case APP_CMD_WINDOW_RESIZED:
             LOGE("Processing APP_CMD_WINDOW_RESIZED");
@@ -103,6 +152,9 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd)
             break;
         case APP_CMD_CONTENT_RECT_CHANGED:
             LOGE("Processing APP_CMD_CONTENT_RECT_CHANGED");
+            break;
+        case APP_CMD_INPUT_CHANGED:
+            LOGE("Processing APP_CMD_INPUT_CHANGED");
             break;
         case APP_CMD_GAINED_FOCUS:
             LOGE("Processing APP_CMD_GAINED_FOCUS");
@@ -118,26 +170,16 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd)
         case APP_CMD_LOW_MEMORY:
             LOGE("Processing APP_CMD_LOW_MEMORY");
             break;
-        case APP_CMD_START:
-            LOGE("Processing APP_CMD_START");
-            break;
-        case APP_CMD_RESUME:
-            LOGE("Processing APP_CMD_RESUME");
-            break;
         case APP_CMD_SAVE_STATE:
             LOGE("Processing APP_CMD_SAVE_STATE");
             // Teardown, and recreate each time
             engine->animating = false;
-            engine->application->Destroy();
-            engine->initialized = false;
-            break;
-        case APP_CMD_PAUSE:
-            LOGE("Processing APP_CMD_PAUSE");
-            break;
-        case APP_CMD_STOP:
-            LOGE("Processing APP_CMD_STOP");
+            //engine->application->Destroy();
+            //engine->initialized = false;
             break;
         case APP_CMD_DESTROY:
+            engine->application->Destroy();
+            engine->initialized = false;
             LOGE("Processing APP_CMD_DESTROY");
             break;
 
@@ -270,16 +312,31 @@ void android_main(struct android_app* state)
     jobject result = env->CallObjectMethod(activity->clazz, methodID);
 
     jboolean isCopy;
-    std::string res = env->GetStringUTFChars((jstring)result, &isCopy);
-    LOGI("Looked up package name: %s", res.c_str());
+    std::string appName = env->GetStringUTFChars((jstring)result, &isCopy);
+    LOGI("Looked up package name: %s", appName.c_str());
 
-    OS_SetApplicationName(res.c_str());
+    OS_SetApplicationName(appName.c_str());
+
+
+    // Get File object for the external storage directory.
+    jclass envClass = env->FindClass("android/app/NativeActivity");
+    jmethodID getExternalFilesDirMID = env->GetMethodID(envClass, "getExternalFilesDir", "(Ljava/lang/String;)Ljava/io/File;");
+    jobject fileDirObj = env->CallObjectMethod(activity->clazz, getExternalFilesDirMID, NULL);
+
+    jclass fileClass = env->FindClass("java/io/File");
+    jmethodID getPathMID = env->GetMethodID(fileClass, "getPath", "()Ljava/lang/String;");
+    jstring pathJString = (jstring)env->CallObjectMethod(fileDirObj, getPathMID);
+
+    std::string externalFilesDir = env->GetStringUTFChars((jstring)pathJString, &isCopy);
+    LOGI("Looked up external files dir: %s", externalFilesDir.c_str());
 
     activity->vm->DetachCurrentThread();
 
 
     // Give the assetManager instance to the application so we can load assets from the apk file.
     engine.application->SetAndroidAssetManager(state->activity->assetManager);
+    // And let the assetManager know where the external files are (if there are any).
+    engine.application->SetAndroidExternalFilesDir(externalFilesDir);
 
     // Load the config file.
     engine.application->LoadConfigFile();

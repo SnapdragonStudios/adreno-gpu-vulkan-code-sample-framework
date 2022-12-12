@@ -1,0 +1,2 @@
+gUseExtension = true
+gBlurFilterSize = 7

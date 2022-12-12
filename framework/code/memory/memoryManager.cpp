@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "memoryManager.hpp"
 #include "vulkan/vulkan.hpp"
@@ -10,10 +15,6 @@
 #define VMA_IMPLEMENTATION
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #include <vulkan/vulkan.h>
-#if OS_WINDOWS
-// Include Beta on Windows (does not currently exist on Android)
-#include <vulkan/vulkan_beta.h>
-#endif // OS_WINDOWS
 #include "VulkanMemoryAllocator/src/vk_mem_alloc.h"
 
 
@@ -33,12 +34,12 @@ MemoryManager::MemoryManager()
 
 MemoryManager::~MemoryManager()
 {
-	vmaDestroyAllocator(mVmaAllocator);	// safe to pass nullptr
+	Destroy();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool MemoryManager::Initialize(VkPhysicalDevice vkPhysicalDevice, VkDevice vkDevice, VkInstance vkInstance, bool )
+bool MemoryManager::Initialize(VkPhysicalDevice vkPhysicalDevice, VkDevice vkDevice, VkInstance vkInstance, bool EnableBufferDeviceAddress)
 {
 	assert(!mVmaAllocator);
 	mGpuDevice = vkDevice;
@@ -47,7 +48,7 @@ bool MemoryManager::Initialize(VkPhysicalDevice vkPhysicalDevice, VkDevice vkDev
 	allocatorInfo.physicalDevice = vkPhysicalDevice;
 	allocatorInfo.device = vkDevice;
 	allocatorInfo.instance = vkInstance;
-	allocatorInfo.flags = 0;
+	allocatorInfo.flags = EnableBufferDeviceAddress ? VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT : 0;
 
 	VkResult result = vmaCreateAllocator(&allocatorInfo, &mVmaAllocator);
 	if (result != VK_SUCCESS)
@@ -72,6 +73,14 @@ bool MemoryManager::Initialize(VkPhysicalDevice vkPhysicalDevice, VkDevice vkDev
 		}
 	}
 	return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void MemoryManager::Destroy()
+{
+	vmaDestroyAllocator(mVmaAllocator);	// safe to pass nullptr
+	mVmaAllocator = nullptr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -127,6 +136,18 @@ MemoryVmaAllocatedBuffer<VkImage> MemoryManager::CreateImage(const VkImageCreate
 
 ///////////////////////////////////////////////////////////////////////////////
 
+bool MemoryManager::CopyData( VkCommandBuffer vkCommandBuffer, const MemoryVmaAllocatedBuffer<VkBuffer>& src, MemoryVmaAllocatedBuffer<VkBuffer>& dst, size_t copySize, size_t srcOffset, size_t dstOffset)
+{
+    VkBufferCopy copyRegion {};
+    copyRegion.srcOffset = srcOffset;
+    copyRegion.dstOffset = dstOffset;
+    copyRegion.size = copySize;
+    mVmaAllocator->GetVulkanFunctions().vkCmdCopyBuffer( vkCommandBuffer, src.buffer, dst.buffer, 1, &copyRegion );
+    return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 void MemoryManager::Destroy(MemoryVmaAllocatedBuffer<VkBuffer> vmaAllocatedBuffer)
 {
 	assert(mVmaAllocator);
@@ -136,6 +157,8 @@ void MemoryManager::Destroy(MemoryVmaAllocatedBuffer<VkBuffer> vmaAllocatedBuffe
 	vmaAllocatedBuffer.buffer = VK_NULL_HANDLE;
 	// no error code from vmaDestroyBuffer so assume it worked (is also safe to pass an empty vmaAllocatedBuffer)
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 void MemoryManager::Destroy(MemoryVmaAllocatedBuffer<VkImage> vmaAllocatedImage)
 {
@@ -147,13 +170,19 @@ void MemoryManager::Destroy(MemoryVmaAllocatedBuffer<VkImage> vmaAllocatedImage)
 	// no error code from vmaDestroyImage so assume it worked (is also safe to pass an empty vmaAllocatedImage)
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
 VkDeviceAddress MemoryManager::GetBufferDeviceAddressInternal(VkBuffer buffer) const
 {
+	assert(mFpGetBufferDeviceAddress != nullptr);	// need EnableBufferDeviceAddress parameter to be set on Initialize
+
 	VkBufferDeviceAddressInfoEXT bufferAddressInfo = {};
 	bufferAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_EXT;
 	bufferAddressInfo.buffer = buffer;
 	return mFpGetBufferDeviceAddress(mGpuDevice, &bufferAddressInfo);
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 void MemoryManager::MapInternal(void* vmaAllocation, void** outCpuLocation)
 {
@@ -166,6 +195,8 @@ void MemoryManager::MapInternal(void* vmaAllocation, void** outCpuLocation)
 		assert(0);
 	}
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 void MemoryManager::UnmapInternal(void* vmaAllocation, void* cpuLocation)
 {

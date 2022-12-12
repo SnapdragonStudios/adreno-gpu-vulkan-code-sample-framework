@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 #pragma once
 
 #include "bufferObject.hpp"
@@ -20,15 +25,18 @@ public:
     VertexBufferObject& operator=(VertexBufferObject&&) noexcept;
     virtual ~VertexBufferObject();
 
-    bool Initialize(MemoryManager* pManager, size_t span, size_t numVerts, const void* initialData, const bool dspUsable = false);
+    bool Initialize(MemoryManager* pManager, size_t span, size_t numVerts, const void* initialData, const bool dspUsable = false, const VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT );
     template<typename T>
-    bool Initialize(MemoryManager* pManager, size_t numVerts, const T* initialData, const bool dspUsable = false);
+    bool Initialize(MemoryManager* pManager, size_t numVerts, const T* initialData, const bool dspUsable = false, const VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT );
 
     /// destroy buffer and leave in a state where it could be re-initialized
     virtual void Destroy() override;
 
     /// create a copy of this vertex buffer (including a new copy of the data)
     VertexBufferObject Copy();
+
+    /// create a copy of this vertex buffer (using vkCmdCopyBuffer)
+    VertexBufferObject Copy( VkCommandBuffer vkCommandBuffer, VkBufferUsageFlags bufferUsage, MemoryManager::MemoryUsage memoryUsage ) const;
 
     /// get number of bytes allocated
     size_t GetAllocationSize() const { return GetSpan() * GetNumVertices(); }
@@ -66,7 +74,7 @@ protected:
 };
 
 template<typename T>
-bool VertexBufferObject::Initialize(MemoryManager* pManager, size_t numVerts, const T* initialData, const bool dspUsable)
+bool VertexBufferObject::Initialize(MemoryManager* pManager, size_t numVerts, const T* initialData, const bool dspUsable, const VkBufferUsageFlags usage )
 {
-    return Initialize(pManager, sizeof(T), numVerts, initialData, dspUsable);
+    return Initialize(pManager, sizeof(T), numVerts, initialData, dspUsable, usage);
 }

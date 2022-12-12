@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "bufferObject.hpp"
 #include "memoryManager.hpp"
@@ -14,20 +19,22 @@ BufferObject::BufferObject()
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BufferObject::BufferObject(BufferObject&& other)
+BufferObject::BufferObject(BufferObject&& other) noexcept
 {
     *this = std::move(other);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BufferObject& BufferObject::operator=(BufferObject&& other)
+BufferObject& BufferObject::operator=(BufferObject&& other) noexcept
 {
     if (this != &other)
     {
         mManager = other.mManager;
         other.mManager = nullptr;
         mVmaBuffer = std::move(other.mVmaBuffer);
+        mBufferUsageFlags = other.mBufferUsageFlags;
+        other.mBufferUsageFlags = 0;
     }
     return *this;
 }
@@ -41,9 +48,19 @@ BufferObject::~BufferObject()
 
 ///////////////////////////////////////////////////////////////////////////////
 
+BufferObject::operator bool() const
+{
+    return !!mVmaBuffer;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 bool BufferObject::Initialize(MemoryManager* pManager, size_t size, VkBufferUsageFlags bufferUsageFlags, const void* initialData)
 {
     MemoryManager::MemoryUsage memoryUsage = initialData ? MemoryManager::MemoryUsage::CpuToGpu : MemoryManager::MemoryUsage::GpuExclusive;
+    if ((bufferUsageFlags & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) != 0)
+        memoryUsage = MemoryManager::MemoryUsage::CpuToGpu;
+
     if (!Initialize(pManager, size, bufferUsageFlags, memoryUsage))
     {
         return false;

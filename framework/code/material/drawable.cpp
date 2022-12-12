@@ -1,5 +1,10 @@
-// Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
 
 #include "drawable.hpp"
 #include "material.hpp"
@@ -8,6 +13,7 @@
 #include "shaderModule.hpp"
 #include "system/os_common.h"
 #include "mesh/instanceGenerator.hpp"
+#include "vulkan/extensionHelpers.hpp"
 #include <cassert>
 #include <utility>
 
@@ -40,7 +46,8 @@ Drawable::Drawable(Drawable&& other) noexcept
     , mPasses(std::move(other.mPasses))
     , mPassNameToIndex(std::move(other.mPassNameToIndex))
     , mPassMask(other.mPassMask)
-    , mVertexInstanceBuffer( std::move(other.mVertexInstanceBuffer))
+    , mVertexInstanceBuffer(std::move(other.mVertexInstanceBuffer))
+    , mDrawIndirectBuffer(std::move(other.mDrawIndirectBuffer))
 {
     other.mPassMask = 0;
 }
@@ -75,17 +82,21 @@ static VkBlendFactor BlendFactorToVk( ShaderPassDescription::BlendFactor bf)
     return VK_BLEND_FACTOR_ZERO;
 }
 
-bool Drawable::Init(VkRenderPass vkRenderPass, const char* passName, MeshObject meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses)
+bool Drawable::Init(VkRenderPass vkRenderPass, const char* passName, MeshObject meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses, int nodeId)
 {
     mMeshObject = std::move(meshObject);
     mVertexInstanceBuffer = std::move(vertexInstanceBuffer);
+    mDrawIndirectBuffer = std::move(drawIndirectBuffer);
+    mNodeId = nodeId;
     return ReInit( vkRenderPass, passName, passMultisample, subpasses );
 }
 
-bool Drawable::Init(tcb::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, MeshObject meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, tcb::span<const VkSampleCountFlagBits> passMultisample, tcb::span<const uint32_t> subpasses)
+bool Drawable::Init(tcb::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, MeshObject meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, tcb::span<const VkSampleCountFlagBits> passMultisample, tcb::span<const uint32_t> subpasses, int nodeId)
 {
     mMeshObject = std::move(meshObject);
     mVertexInstanceBuffer = std::move(vertexInstanceBuffer);
+    mDrawIndirectBuffer = std::move(drawIndirectBuffer);
+    mNodeId = nodeId;
     return ReInit(vkRenderPasses, passNames, passMask, passMultisample, subpasses);
 }
 
@@ -115,7 +126,7 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
     {
         if (passMask & (1 << passIdx))
         {
-            LOGI("Creating Mesh Object PipelineState and Pipeline for pass... %s", passNames[passIdx]);
+            // LOGI("Creating Mesh Object PipelineState and Pipeline for pass... %s", passNames[passIdx]);
             const MaterialPass* pMaterialPass = mMaterial.GetMaterialPass(passNames[passIdx]);
             if (!pMaterialPass)
             {
@@ -157,11 +168,11 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
                     cb.srcColorBlendFactor = BlendFactorToVk(outputSetting.srcColorBlendFactor);
                     cb.dstColorBlendFactor = BlendFactorToVk(outputSetting.dstColorBlendFactor);
                     cb.colorBlendOp = VK_BLEND_OP_ADD;
-                    cb.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-                    cb.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+                    cb.srcAlphaBlendFactor = BlendFactorToVk(outputSetting.srcAlphaBlendFactor);
+                    cb.dstAlphaBlendFactor = BlendFactorToVk(outputSetting.dstAlphaBlendFactor);
                     cb.alphaBlendOp = VK_BLEND_OP_ADD;
                 }
-                cb.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+                cb.colorWriteMask = outputSetting.colorWriteMask & (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
             }
 
             VkPipelineColorBlendStateCreateInfo cb = {};
@@ -276,10 +287,22 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
                 indexCount = mMeshObject.m_IndexBuffer->GetNumIndices();
             }
 
+            // Indirect Draw buffer is optional
+            VkBuffer drawIndirectBuffer = mDrawIndirectBuffer.has_value() ? mDrawIndirectBuffer->GetVkBuffer() : VK_NULL_HANDLE;
+            uint32_t drawIndirectCount = mDrawIndirectBuffer.has_value() ? (uint32_t)mDrawIndirectBuffer->GetNumDraws() : 0;
+            uint32_t drawIndirectOffset = mDrawIndirectBuffer.has_value() ? mDrawIndirectBuffer->GetBufferOffset() : 0;
+            // Indirect Draw Count (count buffer) set to be the beginning of the drawIndirectBuffer IF there is an offset in the mDrawIndirectBuffer.
+            VkBuffer drawIndirectCountBuffer = drawIndirectOffset>0 ? drawIndirectBuffer : VK_NULL_HANDLE;
+
+            // Pipeline layout may come from the shaderPass or (if that fails) from the materialPass (if it was created late because of 'dynamic' descriptor set layout).
+            VkPipelineLayout pipelineLayout = shaderPass.GetPipelineLayout().GetVkPipelineLayout();
+            if (pipelineLayout == VK_NULL_HANDLE)
+                pipelineLayout = pMaterialPass->GetPipelineLayout().GetVkPipelineLayout();
+
             // add the DrawablePass
             DrawablePass& pass = mPasses.emplace_back(DrawablePass{ *pMaterialPass,
                                                                     VK_NULL_HANDLE,
-                                                                    shaderPass.GetPipelineLayout().GetVkPipelineLayout(),
+                                                                    pipelineLayout,
                                                                     pMaterialPass->GetVkDescriptorSets(),
                                                                     shaderPass.GetPipelineVertexInputState(),
                                                                     //std::move(passVertexBufferLookup),
@@ -287,8 +310,12 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
                                                                     std::move(passVertexBufferOffsets),
                                                                     indexBuffer,
                                                                     indexBufferType,
+                                                                    drawIndirectBuffer,
+                                                                    drawIndirectCountBuffer,
                                                                     (uint32_t)mMeshObject.m_NumVertices,
                                                                     (uint32_t)indexCount,
+                                                                    (uint32_t)drawIndirectCount,
+                                                                    (uint32_t)drawIndirectOffset,
                                                                     passIdx
                                                       });
             VkShaderModule vkVertShader = VK_NULL_HANDLE;
@@ -312,7 +339,7 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
                 }
             }, shaderPass.m_shaders.m_modules );
 
-            if (!mVulkan.CreatePipeline(VK_NULL_HANDLE,
+            if (!mVulkan.CreatePipeline(mVulkan.GetPipelineCache(),
                 &pass.mPipelineVertexInputState.GetVkPipelineVertexInputStateCreateInfo(),
                 pass.mPipelineLayout,
                 vkRenderPasses[passIdx],
@@ -332,33 +359,47 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
                 // Error
                 return false;
             }
+            mVulkan.SetDebugObjectName(pass.mPipeline, pMaterialPass->mShaderPass.m_shaderPassDescription.m_vertexName.c_str());
         }
     }
     return true;
 }
 
-void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawablePass, uint32_t bufferIdx) const
+void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawablePass, uint32_t bufferIdx, const tcb::span<DrawablePassVertexBuffers> vertexBufferOverrides) const
 {
     // Bind the pipeline for this material
     vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, drawablePass.mPipeline);
 
     // Bind everything the shader needs
-    VkDescriptorSet vkDescriptorSet = drawablePass.mDescriptorSet.size() >= 1 ? drawablePass.mDescriptorSet[bufferIdx] : drawablePass.mDescriptorSet[0];
-    vkCmdBindDescriptorSets(cmdBuffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        drawablePass.mPipelineLayout,
-        0,
-        1,
-        &vkDescriptorSet,
-        0,
-        NULL);
+    if (!drawablePass.mDescriptorSet.empty())
+    {
+        VkDescriptorSet vkDescriptorSet = drawablePass.mDescriptorSet.size() >= 1 ? drawablePass.mDescriptorSet[bufferIdx] : drawablePass.mDescriptorSet[0];
+        vkCmdBindDescriptorSets(cmdBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            drawablePass.mPipelineLayout,
+            0,
+            1,
+            &vkDescriptorSet,
+            0,
+            NULL);
+    }
 
-    // Bind our mesh vertex buffer
-    vkCmdBindVertexBuffers(cmdBuffer,
-        0,
-        (uint32_t)drawablePass.mVertexBuffers.size(),
-        drawablePass.mVertexBuffers.data(),
-        drawablePass.mVertexBufferOffsets.data());
+    const auto& vertexBuffers = vertexBufferOverrides.empty() ? drawablePass.mVertexBuffers : vertexBufferOverrides[bufferIdx % vertexBufferOverrides.size()];
+
+    if (!vertexBuffers.mVertexBuffers.empty())
+    {
+        // Bind mesh vertex/instance buffer(s)
+        vkCmdBindVertexBuffers(cmdBuffer,
+            0,
+            (uint32_t)vertexBuffers.mVertexBuffers.size(),
+            vertexBuffers.mVertexBuffers.data(),
+            vertexBuffers.mVertexBufferOffsets.data());
+    }
+    if (!vertexBufferOverrides.empty())
+    {
+        assert(vertexBuffers.mVertexBuffers.size() == vertexBuffers.mVertexBufferOffsets.size());
+        assert(vertexBufferOverrides.empty() || vertexBuffers.mVertexBuffers.size() == drawablePass.mVertexBuffers.mVertexBuffers.size());
+    }
 
     if (drawablePass.mIndexBuffer != VK_NULL_HANDLE)
     {
@@ -370,17 +411,49 @@ void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawableP
             0,
             drawablePass.mIndexBufferType);
 
-        // Everything is set up, draw the mesh
-        vkCmdDrawIndexed(cmdBuffer, drawablePass.mNumIndices, GetInstances() ? (uint32_t)GetInstances()->GetNumVertices() : 1, 0, 0, 0);
+        if (drawablePass.mDrawIndirectBuffer != VK_NULL_HANDLE)
+        {
+            if (drawablePass.mDrawIndirectCountBuffer != VK_NULL_HANDLE)
+            {
+                // Draw the mesh using draw indirect cont buffer (VkDrawIndexedIndirectCount command)
+                const auto* drawIndirectCountExt = mVulkan.GetExtension<ExtensionHelper::Ext_VK_KHR_draw_indirect_count>();
+                assert( drawIndirectCountExt != nullptr && drawIndirectCountExt->m_vkCmdDrawIndexedIndirectCountKHR != nullptr);
+                drawIndirectCountExt->m_vkCmdDrawIndexedIndirectCountKHR(cmdBuffer, drawablePass.mDrawIndirectBuffer, drawablePass.mDrawIndirectOffset, drawablePass.mDrawIndirectCountBuffer, 0, drawablePass.mNumDrawIndirect, sizeof(VkDrawIndexedIndirectCommand));
+            }
+            else
+                // Draw the mesh using draw indirect buffer (VkDrawIndexedIndirectCommand)
+                vkCmdDrawIndexedIndirect(cmdBuffer, drawablePass.mDrawIndirectBuffer, drawablePass.mDrawIndirectOffset, drawablePass.mNumDrawIndirect, sizeof(VkDrawIndexedIndirectCommand));
+        }
+        else
+        {
+            // Everything is set up, draw the mesh
+            vkCmdDrawIndexed(cmdBuffer, drawablePass.mNumIndices, GetInstances() ? (uint32_t)GetInstances()->GetNumVertices() : 1, 0, 0, 0);
+        }
     }
     else
     {
-        // Draw the mesh without index buffer
-        vkCmdDraw(cmdBuffer, drawablePass.mNumVertices, GetInstances() ? (uint32_t)GetInstances()->GetNumVertices() : 1, 0, 0);
+        if (drawablePass.mDrawIndirectBuffer != VK_NULL_HANDLE)
+        {
+            if (drawablePass.mDrawIndirectCountBuffer != VK_NULL_HANDLE)
+            {
+                // Draw the mesh using draw indirect buffer (VkDrawIndirectCommand - no index buffer)
+                const auto* drawIndirectCountExt = mVulkan.GetExtension<ExtensionHelper::Ext_VK_KHR_draw_indirect_count>();
+                assert( drawIndirectCountExt != nullptr && drawIndirectCountExt->m_vkCmdDrawIndexedIndirectCountKHR != nullptr );
+                drawIndirectCountExt->m_vkCmdDrawIndexedIndirectCountKHR(cmdBuffer, drawablePass.mDrawIndirectBuffer, drawablePass.mDrawIndirectOffset, drawablePass.mDrawIndirectCountBuffer, 0, drawablePass.mNumDrawIndirect, sizeof(VkDrawIndirectCommand));
+            }
+            else
+                // Draw the mesh using draw indirect buffer (VkDrawIndirectCommand - no index buffer)
+                vkCmdDrawIndirect(cmdBuffer, drawablePass.mDrawIndirectBuffer, drawablePass.mDrawIndirectOffset, drawablePass.mNumDrawIndirect, sizeof(VkDrawIndirectCommand));
+        }
+        else
+        {
+            // Draw the mesh without index buffer
+            vkCmdDraw(cmdBuffer, drawablePass.mNumVertices, GetInstances() ? (uint32_t)GetInstances()->GetNumVertices() : 1, 0, 0);
+        }
     }
 }
 
-bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, tcb::span<VkRenderPass> vkRenderPasses, const char* const* renderPassNames, const std::string& meshFilename, const std::function<std::optional<Material> (const MeshObjectIntermediate::MaterialDef&)>& materialLoader, std::vector<Drawable>& drawables, tcb::span<const VkSampleCountFlagBits> renderPassMultisample, bool useInstancing, tcb::span<const uint32_t> renderPassSubpasses )
+bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, tcb::span<VkRenderPass> vkRenderPasses, const char* const* renderPassNames, const std::string& meshFilename, const std::function<std::optional<Material>(const MeshObjectIntermediate::MaterialDef&)>& materialLoader, std::vector<Drawable>& drawables, tcb::span<const VkSampleCountFlagBits> renderPassMultisample, /*DrawableLoader::LoaderFlags*/uint32_t loaderFlags, tcb::span<const uint32_t> renderPassSubpasses, const glm::vec3 globalScale)
 {
     LOGI("Loading Object mesh: %s...", meshFilename.c_str());
 
@@ -393,17 +466,30 @@ bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, t
     else
     {
         // Load .gltf file
-        fatObjects = MeshObjectIntermediate::LoadGLTF(assetManager, meshFilename);
+        fatObjects = MeshObjectIntermediate::LoadGLTF(assetManager, meshFilename, (loaderFlags & DrawableLoader::LoaderFlags::IgnoreHierarchy) != 0, globalScale);
     }
     if (fatObjects.size() == 0)
     {
         LOGE("Error loading Object mesh: %s", meshFilename.c_str());
-        return {};
+        return false;
     }
+    // Print some debug
+    DrawableLoader::PrintStatistics(fatObjects);
 
-    // See if we can find instances, assuming we have no instance information in the gltf (ie Bistro scene)!
-    auto instancedFatObjects = useInstancing ? MeshInstanceGenerator::FindInstances(std::move(fatObjects)) : MeshInstanceGenerator::NullFindInstances(std::move(fatObjects));
-    fatObjects.clear();
+    // Turn the intermediate mesh objects into Drawables (and load the materials)
+    if (!CreateDrawables(vulkan, std::move(fatObjects), vkRenderPasses, renderPassNames, materialLoader, drawables, renderPassMultisample, loaderFlags, renderPassSubpasses))
+    {
+        LOGE("Error initializing Drawable: %s", meshFilename.c_str());
+        return false;
+    }
+    return true;    // success
+}
+
+bool DrawableLoader::CreateDrawables(Vulkan & vulkan, std::vector<MeshObjectIntermediate>&&intermediateMeshObjects, tcb::span<VkRenderPass> vkRenderPasses, const char* const* renderPassNames, const std::function<std::optional<Material>(const MeshObjectIntermediate::MaterialDef&)>&materialLoader, std::vector<Drawable>&drawables, const tcb::span<const VkSampleCountFlagBits> renderPassMultisample, /*DrawableLoader::LoaderFlags*/uint32_t loaderFlags, const tcb::span<const uint32_t> renderPassSubpasses)
+{
+    // See if we can find instances, we assume there is no instance information in the gltf!
+    auto instancedFatObjects = (loaderFlags & LoaderFlags::FindInstances) ? MeshInstanceGenerator::FindInstances(std::move(intermediateMeshObjects)) : MeshInstanceGenerator::NullFindInstances(std::move(intermediateMeshObjects));
+    intermediateMeshObjects.clear();
 
     drawables.reserve(instancedFatObjects.size() );
     for (auto& [fatObject, instances] : instancedFatObjects)
@@ -453,6 +539,33 @@ bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, t
         {
             ///TODO: implement having different bindings and packing for different passes
 
+            // Do the (optional) transform baking before creating the device mesh.
+            if (true && (loaderFlags & LoaderFlags::BakeTransforms) != 0)
+            {
+                if ((instances.size() > 1) || ((loaderFlags & LoaderFlags::FindInstances) != 0))
+                {
+                    // When we are using instancing dont bake the transform into the mesh - apply the transform to each of the instance transforms.
+                    // It is quite likely the fatObject.m_Transform matrix will be 'identity' as it should have already been applied while instances were being found.
+                    glm::mat4x3 objectTransform4x3 = fatObject.m_Transform; // convert 4x4 to 4x3 (keeps rotation and translation, lost column is unimportant if the transform is a simple TRS (translation/rotation/scale) matrix
+                    for (MeshObjectIntermediate::FatInstance& instance : instances)
+                    {
+                        instance.transform = instance.transform * objectTransform4x3;
+                    }
+                    fatObject.m_Transform = glm::identity<glm::mat4>();
+                    fatObject.m_NodeId = -1;    // object (may) point to multiple instances so m_NodeId is likely not valid at the mesh level
+                }
+                else
+                {
+                    // Bake the object transform down into the mesh (instances[0] may well be identity but apply it to the transform incase it is not).
+                    glm::mat4x3 combinedTransform = glm::transpose(instances[0].transform * glm::mat4x3(fatObject.m_Transform));
+                    fatObject.m_Transform = combinedTransform;
+                    instances[0].transform = glm::identity<MeshObjectIntermediate::FatInstance::tInstanceTransform>();
+                    fatObject.BakeTransform();
+                }
+            }
+
+            const auto nodeId = fatObject.m_NodeId; // grab the nodeId before it goes away!
+
             MeshObject meshObject;
             const auto& vertexFormats = shader.m_shaderDescription->m_vertexFormats;
             MeshObject::CreateMesh(&vulkan, fatObject, (uint32_t)pFirstPass->m_shaderPassDescription.m_vertexFormatBindings[0], vertexFormats, &meshObject);
@@ -473,22 +586,23 @@ bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, t
                 }
                 // Create the instance data
                 auto instancesSpan = tcb::make_span(instances);
-                MeshInstance::tInstanceTransform identityTransform[1] { glm::identity<glm::mat3x4>() };
                 if( instancesSpan.empty() )
                 {
-                    // If there are no 'instances' then the mesh occurs once and is at the origin (identity matrix).
-                    // Since the shader assumes/requires an instance lets make an identity matrix.
-                    instancesSpan = tcb::make_span( identityTransform );
+                    // Even if we are not instancing there should be one instance per mesh
+                    LOGE("  Drawable loader expected mesh to have (at least) one instance matrix");
+                    return false;
                 }
-                assert(instanceFormatIt->span == sizeof(decltype(instancesSpan)::element_type)); ///TODO: be more flexible with what can go in the vertexInstanceBuffer
-                if (!vertexInstanceBuffer.emplace().Initialize(&vulkan.GetMemoryManager(), instanceFormatIt->span, instancesSpan.size(), instancesSpan.data()))
+
+                const std::vector<uint32_t> formattedVertexData = MeshObjectIntermediate::CopyFatInstanceToFormattedBuffer(instancesSpan, *instanceFormatIt);
+
+                if (!vertexInstanceBuffer.emplace().Initialize(&vulkan.GetMemoryManager(), instanceFormatIt->span, instancesSpan.size(), formattedVertexData.data()))
                 {
                     return false;
                 }
             }
             else
             {
-                if( !instances.empty() )
+                if( instances.size() > 1)
                 {
                     LOGE("  Drawable loader found instances - expects shaders vertex layout to have instance data support");
                     return false;
@@ -496,11 +610,48 @@ bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, t
             }
 
             // Create the drawable
-            if (!drawables.emplace_back(vulkan, std::move(material.value())).Init(vkRenderPasses, renderPassNames, passMask, std::move(meshObject), std::move(vertexInstanceBuffer), renderPassMultisample, renderPassSubpasses))
+            if (!drawables.emplace_back(vulkan, std::move(material.value())).Init(vkRenderPasses, renderPassNames, passMask, std::move(meshObject), std::move(vertexInstanceBuffer), std::nullopt, renderPassMultisample, renderPassSubpasses, nodeId))
             {
-                LOGE("Error initializing Drawable: %s", meshFilename.c_str());
+                return false;
             }
         }
     }
     return true;
+}
+
+DrawableLoader::MeshStatistics DrawableLoader::GatherStatistics(const tcb::span<MeshObjectIntermediate> meshObjects)
+{
+    MeshStatistics stats;
+    stats.totalVerts = 0;
+    stats.boundingBoxMin = glm::vec3(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max());
+    stats.boundingBoxMax = glm::vec3(std::numeric_limits<float>::min(), std::numeric_limits<float>::min(), std::numeric_limits<float>::min());
+    for (const auto& mesh : meshObjects)
+    {
+        stats.totalVerts += mesh.m_VertexBuffer.size();
+
+        for (const auto& OneFat : mesh.m_VertexBuffer)
+        {
+            stats.boundingBoxMin[0] = std::min(stats.boundingBoxMin[0], OneFat.position[0]);
+            stats.boundingBoxMin[1] = std::min(stats.boundingBoxMin[1], OneFat.position[1]);
+            stats.boundingBoxMin[2] = std::min(stats.boundingBoxMin[2], OneFat.position[2]);
+
+            stats.boundingBoxMax[0] = std::max(stats.boundingBoxMax[0], OneFat.position[0]);
+            stats.boundingBoxMax[1] = std::max(stats.boundingBoxMax[1], OneFat.position[1]);
+            stats.boundingBoxMax[2] = std::max(stats.boundingBoxMax[2], OneFat.position[2]);
+        }
+    }
+    if (stats.totalVerts == 0)
+    {
+        stats.boundingBoxMin = glm::vec3(0.0f, 0.0f, 0.0f);
+        stats.boundingBoxMax = glm::vec3(0.0f, 0.0f, 0.0f);
+    }
+    return stats;
+}
+
+void DrawableLoader::PrintStatistics(const tcb::span<MeshObjectIntermediate> meshObjects)
+{
+    MeshStatistics stats = GatherStatistics(meshObjects);
+    LOGI("Model total Vertices: %zu", stats.totalVerts);
+    LOGI("Model Bounding Box: (%0.2f, %0.2f, %0.2f) -> (%0.2f, %0.2f, %0.2f)", stats.boundingBoxMin[0], stats.boundingBoxMin[1], stats.boundingBoxMin[2], stats.boundingBoxMax[0], stats.boundingBoxMax[1], stats.boundingBoxMax[2]);
+    LOGI("Model Extent: (%0.2f, %0.2f, %0.2f)", stats.boundingBoxMax[0] - stats.boundingBoxMin[0], stats.boundingBoxMax[1] - stats.boundingBoxMin[1], stats.boundingBoxMax[2] - stats.boundingBoxMin[2]);
 }
