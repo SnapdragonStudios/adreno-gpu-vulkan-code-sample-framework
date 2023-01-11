@@ -215,7 +215,6 @@ target_include_directories(frameworkBase PUBLIC external/json/single_include)
 target_include_directories(frameworkBase PUBLIC external/span/include)
 
 target_include_directories(framework PUBLIC code)
-target_include_directories(framework PRIVATE Vulkan::Vulkan)
 target_include_directories(framework PUBLIC external)
 target_include_directories(framework PUBLIC external/glm)  # so code can do #include "glm/mat3x3.hpp" etc
 target_include_directories(framework PUBLIC external/json/single_include)
@@ -224,6 +223,8 @@ target_include_directories(framework PUBLIC external/span/include)
 
 # Vulkan library
 find_package(Vulkan REQUIRED)
+set_target_properties(Vulkan::Vulkan PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "")   # remove the Vulkan incude paths from the local VulkanSDK 
+target_include_directories(framework PUBLIC external/Vulkan-Headers/include)        # point the framework to the Vulkan includes that we have as a submodule
 target_link_libraries(framework Vulkan::Vulkan)
 
 if(ANDROID)

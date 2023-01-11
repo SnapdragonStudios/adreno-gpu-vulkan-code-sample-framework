@@ -111,3 +111,8 @@ debug/
 # imgui config
 imgui.ini
 project/buildtimestamp.h
+samples/hdrSwapchain/assets_tmp/
+samples/hello-gltf/assets_tmp/
+samples/rotatedCopy/assets_tmp/
+samples/shaderResolveTonemap/assets_tmp/
+samples/SubPass/assets_tmp/

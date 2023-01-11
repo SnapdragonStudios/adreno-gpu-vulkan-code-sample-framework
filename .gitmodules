@@ -27,3 +27,6 @@
 [submodule "assets"]
 	path = assets
 	url = https://github.com/quic/game-assets-for-adreno-gpu-code-samples
+[submodule "framework/external/Vulkan-Headers"]
+	path = framework/external/Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers.git
