@@ -28,7 +28,7 @@ Extension may/will need enabling on older Qualcomm Vulkan drivers. Sample does n
 ShaderResolveTonemap Uses VK_QCOM_render_pass_shader_resolve to perform a filmic tonemapping operator (on a simple forward rendered scene) as part of the MSAA resolve.
 Optionally runs the tonemap/resolve as a subpass of the main scene pass.  Has onscreen UI controls to modify MSAA sample counts and to enable/disable the shader resolve and use of subpasses (for measuring GPU subpass/shader-resolve efficiency).
 
-## [SubPass](SubpPass)
+## [SubPass](SubPass)
 SubPass sample demos the use of vulkan subpasses to perform a filmic tonemapping operator (on a simple forward rendered scene) and the impact on bandwidth and performance with subpass.
 
 ## [BloomImageProcessing](BloomImageProcessing)
