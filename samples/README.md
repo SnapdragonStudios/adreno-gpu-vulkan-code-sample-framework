@@ -34,4 +34,4 @@ SubPass sample demos the use of vulkan subpasses to perform a filmic tonemapping
 ## [BloomImageProcessing](BloomImageProcessing)
 
 This sample demonstrates how to use the VK_QCOM_Image_Processing extension in a simple bloom shader.
-The extension provides support for high order filtering and general advanced image processing, features in high demand as screenn sizes get larger and more and more post-processing techniques are developed. For more information, please visit https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VK_QCOM_image_processing.html
+The extension provides support for high order filtering and general advanced image processing, features in high demand as screen sizes get larger and more and more post-processing techniques are developed. For more information, please visit https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VK_QCOM_image_processing.html
