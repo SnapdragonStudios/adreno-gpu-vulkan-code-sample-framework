@@ -1,32 +1,28 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "bloom-image-processing.hpp"
-
-// framework
+#include "main/applicationEntrypoint.hpp"
 #include "camera/cameraController.hpp"
 #include "camera/cameraControllerTouch.hpp"
 #include "camera/cameraData.hpp"
 #include "camera/cameraGltfLoader.hpp"
-#include "helper/postProcessSMAA.hpp"
-#include "helper/postProcessStandard.hpp"
-#include "main/applicationEntrypoint.hpp"
-#include "memory/memoryManager.hpp"
-#include "memory/bufferObject.hpp"
-#include "memory/indexBufferObject.hpp"
-#include "memory/vertexBufferObject.hpp"
+#include "gui/imguiVulkan.hpp"
+#include "material/drawable.hpp"
+#include "material/vulkan/shaderModule.hpp"
+#include "material/shaderManagerT.hpp"
+#include "material/materialManager.hpp"
+#include "material/vulkan/specializationConstantsLayout.hpp"
+#include "mesh/meshHelper.hpp"
+#include "mesh/meshLoader.hpp"
 #include "system/math_common.hpp"
-#include "system/config.h"
-
-// vulkan
-#include "vulkan/vulkan.hpp"
-#include "vulkan/vulkan_support.hpp"
-#include "vulkan/TextureFuncts.h"
+#include "texture/textureManager.hpp"
+#include "imgui.h"
 
 VAR(bool, gUseExtension, true, kVariableNonpersistent);
 VAR(unsigned, gBlurFilterSize, 7, kVariableNonpersistent);
@@ -85,22 +81,22 @@ void  BloomImageprocessing::PreInitializeSetVulkanConfiguration(Vulkan::AppConfi
 }
 
 //-----------------------------------------------------------------------------
-bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
+bool BloomImageprocessing::Initialize(uintptr_t windowHandle, uintptr_t hInstance)
 //-----------------------------------------------------------------------------
 {
-    if (!FrameworkApplicationBase::Initialize(windowHandle))
+    if (!ApplicationHelperBase::Initialize(windowHandle, hInstance))
     {
         return false;
     }
 
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     memset(m_passes, 0, sizeof(m_passes));
 
     //--------------------------------------------------------------------------
     // Setup Render Targets
     {
-        const VkFormat bloomFormat[] = { k_RtFormat };
+        const TextureFormat bloomFormat[] = { k_RtFormat };
 
         for (uint32_t ii = 0; ii < Pass_Count; ++ii)
         {
@@ -121,7 +117,7 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
             char rtNames[256];
             snprintf(rtNames, 256, "Bloom RT %d %dx%d", ii, w, h);
 
-            if (!m_IntermediateRts[ii].Initialize(pVulkan, w, h, bloomFormat, VK_FORMAT_UNDEFINED, VK_SAMPLE_COUNT_1_BIT, rtNames))
+            if (!m_IntermediateRts[ii].Initialize(pVulkan, w, h, bloomFormat, TextureFormat::UNDEFINED, VK_SAMPLE_COUNT_1_BIT, rtNames))
             {
                 LOGE("Unable to create main render target");
             }
@@ -157,7 +153,7 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
         for (uint32_t ii = 0; ii < NumWeightImages; ++ii)
         {
             VkImageUsageFlags usageFlags = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLE_WEIGHT_BIT_QCOM;
-            const VkFormat weightFormat = VK_FORMAT_R16_SFLOAT;
+            const TextureFormat weightFormat = TextureFormat::R16_SFLOAT;
 
             VkImageViewSampleWeightCreateInfoQCOM weightViewInfo = {};
             weightViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_SAMPLE_WEIGHT_CREATE_INFO_QCOM;
@@ -181,7 +177,7 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
 
             if (ii == 1) // H
             {
-                m_weightTextures[ii] = LoadTextureFromBuffer(pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16), gBlurFilterSize, 1, 1, weightFormat, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_FILTER_NEAREST, usageFlags, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                m_weightTextures[ii] = apiCast<Vulkan>(m_TextureManager->CreateTextureFromBuffer(*pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16), gBlurFilterSize, 1, 1, weightFormat, SamplerAddressMode::ClampEdge, SamplerFilter::Nearest/*, usageFlags, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL*/, nullptr));
 
                 weightViewInfo.filterCenter.x = gBlurFilterSize / 2;
                 weightViewInfo.filterCenter.y = 0;
@@ -190,7 +186,7 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
             }
             else // V
             {
-                m_weightTextures[ii] = LoadTextureFromBuffer(pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16), 1, gBlurFilterSize, 1, weightFormat, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_FILTER_NEAREST, usageFlags, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                m_weightTextures[ii] = apiCast<Vulkan>(m_TextureManager->CreateTextureFromBuffer(*pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16), 1, gBlurFilterSize, 1, weightFormat, SamplerAddressMode::ClampEdge, SamplerFilter::Nearest/*, usageFlags, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL*/, nullptr));
 
                 weightViewInfo.filterCenter.x = 0;
                 weightViewInfo.filterCenter.y = gBlurFilterSize / 2;
@@ -198,8 +194,8 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
                 weightViewInfo.filterSize.height = gBlurFilterSize;
             }
 
-            viewInfo.image = m_weightTextures[ii].GetVkImage();
-            viewInfo.format = m_weightTextures[ii].Format;
+            viewInfo.image = m_weightTextures[ii]->GetVkImage();
+            viewInfo.format = TextureFormatToVk(m_weightTextures[ii]->Format);
 
             if (!CheckVkError("vkCreateImageView()", vkCreateImageView(pVulkan->m_VulkanDevice, &viewInfo, NULL, &m_weightTextureViews[ii])))
             {
@@ -207,14 +203,14 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
             }
         }
     }
-
-    if (pVulkan->IsTextureFormatSupported(VK_FORMAT_ASTC_4x4_UNORM_BLOCK))
+    
+    if (pVulkan->IsTextureFormatSupported(TextureFormat::ASTC_4x4_UNORM_BLOCK))
     {
-        m_sourceTexture = LoadKTXTexture(pVulkan, *m_AssetManager, TEXTUREFILE("Bloom-Source-Texture-astc.ktx"), VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+        m_sourceTexture = apiCast<Vulkan>(m_TextureManager->GetOrLoadTexture(*m_AssetManager, TEXTUREFILE("painting_astc.ktx"), SamplerAddressMode::ClampEdge));
     }
     else
     {
-        m_sourceTexture = LoadKTXTexture(pVulkan, *m_AssetManager, TEXTUREFILE("Bloom-Source-Texture.ktx"), VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+        m_sourceTexture = apiCast<Vulkan>(m_TextureManager->GetOrLoadTexture(*m_AssetManager, TEXTUREFILE("painting.ktx"), SamplerAddressMode::ClampEdge));
     }
     //--------------------------------------------------------------------------
 
@@ -277,7 +273,7 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
             switch (m_passes[pp]->pPassInfo->shaderPair)
             {
             case ShaderPair_Downsample:
-                m_passes[pp]->vInputViews.push_back(m_sourceTexture.GetVkImageView());
+                m_passes[pp]->vInputViews.push_back(m_sourceTexture->GetVkImageView());
                 break;
             case ShaderPair_Blur_Horizontal:
             {
@@ -304,7 +300,7 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
                 m_passes[pp]->pRt = NULL; // &m_IntermediateRts[Pass_Display];
                 m_passes[pp]->renderArea.width = pVulkan->m_SurfaceWidth; // k_FullImageWidth;
                 m_passes[pp]->renderArea.height = pVulkan->m_SurfaceHeight; // k_FullImageHeight;
-                m_passes[pp]->vInputViews.push_back(m_sourceTexture.GetVkImageView());
+                m_passes[pp]->vInputViews.push_back(m_sourceTexture->GetVkImageView());
                 m_passes[pp]->vInputViews.push_back((*m_passes[pp -1]->pRt)[0].m_ColorAttachments[0].GetVkImageView());
                 break;
             }
@@ -333,26 +329,27 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle)
 void BloomImageprocessing::Destroy()
 //-----------------------------------------------------------------------------
 {
-    vkDeviceWaitIdle(m_vulkan.get()->m_VulkanDevice);
+    Vulkan* pVulkan = GetVulkan();
+
+    vkDeviceWaitIdle(pVulkan->m_VulkanDevice);
 
     // Textures
     for (uint32_t ii = 0; ii < NumWeightImages; ++ii)
     {
-        ReleaseTexture(m_vulkan.get(), &m_weightTextures[ii]);
-        vkDestroyImageView(m_vulkan.get()->m_VulkanDevice, m_weightTextureViews[ii], NULL);
+        m_weightTextures[ii] = nullptr;
+        vkDestroyImageView(pVulkan->m_VulkanDevice, m_weightTextureViews[ii], NULL);
     }
-    ReleaseTexture(m_vulkan.get(), &m_sourceTexture);
 
     // Shaders
     for (uint32_t ss = 0; ss < ShaderPair_Count; ++ss)
     {
-        ReleaseShader(m_vulkan.get(), &m_shaders[ss]);
+        ReleaseShader(pVulkan, &m_shaders[ss]);
     }
 
     // Uniform Buffers
     for (uint32_t ii = 0; ii < Pass_Count; ++ii)
     {
-        ReleaseUniformBuffer(m_vulkan.get(), &m_uniforms[ii]);
+        ReleaseUniformBuffer(pVulkan, &m_uniforms[ii]);
     }
 
     for (uint32_t pp = 0; pp < Pass_Count; ++pp)
@@ -366,7 +363,7 @@ void BloomImageprocessing::Destroy()
 void BloomImageprocessing::Render(float fltDiffTime)
 {
     // Grab the vulkan wrapper
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     // Obtain the next swap chain image for the next frame.
     auto currentBuffer = pVulkan->SetNextBackBuffer();
@@ -380,7 +377,7 @@ void BloomImageprocessing::Render(float fltDiffTime)
 
 void BloomImageprocessing::FinalizePass(PassInfo* pPass)
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     if (pPass->pRt == NULL)
     {
@@ -614,7 +611,7 @@ void BloomImageprocessing::FinalizePass(PassInfo* pPass)
     ds.depthTestEnable = VK_FALSE;
     ds.depthWriteEnable = VK_FALSE;
 
-    m_vulkan->CreatePipeline(VK_NULL_HANDLE,
+    pVulkan->CreatePipeline(VK_NULL_HANDLE,
         &visci,
         pPass->pLayout,
         pPass->renderpass,
@@ -628,15 +625,15 @@ void BloomImageprocessing::FinalizePass(PassInfo* pPass)
         nullptr,
         pPass->pShaderInfo->VertShaderModule.GetVkShaderModule(),
         pPass->pShaderInfo->FragShaderModule.GetVkShaderModule(),
+        nullptr,
         false,
         VK_NULL_HANDLE,
         & pPass->pipeline);
-
 }
 
 void BloomImageprocessing::DrawPass(Wrap_VkCommandBuffer* cmd, const PassInfo* pPass, uint32_t idx)
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     // When starting the render pass, we can set clear values.
     VkClearColorValue clear_color = {};
@@ -656,7 +653,17 @@ void BloomImageprocessing::DrawPass(Wrap_VkCommandBuffer* cmd, const PassInfo* p
     Scissor.extent.width = pPass->renderArea.width;
     Scissor.extent.height = pPass->renderArea.height;
 
-    cmd->BeginRenderPass(Scissor, 0.0f, 1.0f, { &clear_color,1 }, 1, pPass->pRt == NULL ? true : false, pPass->renderpass, pPass->pRt == NULL ? true : false, pPass->pRt == NULL ? pVulkan->m_pSwapchainFrameBuffers[idx] : pPass->fbo, VK_SUBPASS_CONTENTS_INLINE);
+    cmd->BeginRenderPass(
+        Scissor, 
+        0.0f, 
+        1.0f, 
+        { &clear_color,1 }, 
+        1, 
+        pPass->pRt == NULL ? true : false, 
+        pPass->renderpass, 
+        pPass->pRt == NULL ? true : false, 
+        pPass->pRt == NULL ? pVulkan->m_SwapchainBuffers[idx].framebuffer : pPass->fbo,
+        VK_SUBPASS_CONTENTS_INLINE);
 
     vkCmdSetViewport(cmd->m_VkCommandBuffer, 0, 1, &Viewport);
     vkCmdSetScissor(cmd->m_VkCommandBuffer, 0, 1, &Scissor);
@@ -683,7 +690,7 @@ void BloomImageprocessing::BuildCmdBuffer(uint32_t idx)
 {
     Wrap_VkCommandBuffer* pCmdBuf = &m_commandBuffers[idx];
 
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     if (!pCmdBuf->Initialize(pVulkan))
     {

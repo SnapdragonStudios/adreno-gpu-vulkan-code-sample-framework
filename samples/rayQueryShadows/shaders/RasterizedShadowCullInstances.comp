@@ -1,0 +1,83 @@
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
+
+//
+// Instance Culling shader for rasterized shadow pass.
+// Takes an array of instance matrixes and outputs visibility for each one!
+// Output data is -1 (for culled) or the running tally of the number of visible instances, will be used to crunch the instance data down.
+//
+
+#version 460
+
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
+#extension GL_EXT_shader_8bit_storage : enable
+
+// Uniform buffer locations
+#define CAMERA_UBO_LOCATION                 0
+// Texture Locations
+// Storage Locations
+#define UNCULLED_INSTANCES_STORAGE_LOCATION 1
+#define CULLED_INSTANCES_STORAGE_LOCATION   2
+
+// Compute workgroup layout
+#define WORKGROUP_SIZE (64)
+layout (local_size_x = WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1 ) in;
+
+// Inputs layout
+layout(std140, set = 0, binding = CAMERA_UBO_LOCATION) uniform CameraUniformBuff
+{
+    mat4 MVPMatrix;
+    vec4 CullPlanes[6];
+} CameraUB;
+
+layout(std430, set = 0, binding = UNCULLED_INSTANCES_STORAGE_LOCATION) readonly buffer UnculledInstancesInput
+{
+    uint       numInstances;        // number of instances in the centerAndRadius array
+    uint       _pad1,_pad2,_pad3;
+    vec4       centerAndRadius[];   // Instance centers and radii.  Unbounded size, must be last item in buffer.
+} UnculledInstancesInputSB;
+
+// Outputs
+layout(std430, set = 0, binding = CULLED_INSTANCES_STORAGE_LOCATION) buffer CulledInstancesOutput
+{
+    int        numVisibleInstances;     // tally of things marked as visible in visibleInstances[] (atomic)
+    uint       _pad1,_pad2,_pad3;
+    int        visibleInstances[];      // -1 (not visible) or current value of numVisibleInstances (if visible).
+} CulledInstancesOutputSB;
+
+
+//-----------------------------------------------------------------------------
+void main() 
+//-----------------------------------------------------------------------------
+{
+    uint instanceIdx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * WORKGROUP_SIZE;
+
+    if (instanceIdx < UnculledInstancesInputSB.numInstances)
+    {
+        vec4 CenterAndRadius = UnculledInstancesInputSB.centerAndRadius[instanceIdx];
+
+        // Cull using seperable planes method
+        for( int i=0; i<6; i++ )
+        {
+            if (dot( CameraUB.CullPlanes[i], vec4(CenterAndRadius.xyz, 1.0f)) < -CenterAndRadius.w )
+            {
+                // Not visible (outside this plane)
+                CulledInstancesOutputSB.visibleInstances[instanceIdx] = -1;
+                return;
+            }
+        }
+        // If all tests passed sphere is PROBABLY visible (there is a fringe case where the sphere should be culled and isn't, implement extra checks if it is seen as a problem!)
+        
+        // Write the instance as being visible
+        int visibleInstanceCount = atomicAdd( CulledInstancesOutputSB.numVisibleInstances, 1 );
+        CulledInstancesOutputSB.visibleInstances[instanceIdx] = visibleInstanceCount;
+    }
+}

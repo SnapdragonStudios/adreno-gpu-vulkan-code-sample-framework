@@ -1,25 +1,25 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "shadowVsm.hpp"
 #include "shadow.hpp"
+#include "shadowVulkan.hpp"
 #include "material/computable.hpp"
 #include "material/materialManager.hpp"
 #include "material/shaderManager.hpp"
-#include "vulkan/TextureFuncts.h"
-#include "vulkan/vulkan_support.hpp"
+#include "vulkan/commandBuffer.hpp"
 #include <cassert>
 
 ShadowVSM::ShadowVSM()
 {
 }
 
-bool ShadowVSM::Initialize(Vulkan& vulkan, const ShaderManager& shaderManager, const MaterialManager& materialManager, const Shadow& shadow )
+bool ShadowVSM::Initialize(GraphicsApiBase& gfxApi, const ShaderManager& shaderManager, const MaterialManager& materialManager, const Shadow& shadow )
 {
     // Variant Shadow Map Computable
     // Computables
@@ -31,25 +31,26 @@ bool ShadowVSM::Initialize(Vulkan& vulkan, const ShaderManager& shaderManager, c
         return false;
     }
 
+    const auto& shadowVulkan = static_cast<const ShadowT<Vulkan>&>(shadow);
+    auto& vulkan = static_cast<Vulkan&>(gfxApi);
+
     uint32_t width, height;
-    shadow.GetTargetSize(width, height);
+    shadowVulkan.GetTargetSize(width, height);
 
     // Create the render target
-    VulkanTexInfo vsmTarget = CreateTextureObject(&vulkan, width, height, VK_FORMAT_R16G16_SFLOAT, TEXTURE_TYPE::TT_COMPUTE_TARGET, "VSM");
-    m_VsmTarget = std::make_unique<VulkanTexInfo>(std::move(vsmTarget));
-    // Create the intermediate render target (result of 1st pass), width is half of output width (xy and zw channels hold alternating columns)
-    VulkanTexInfo vsmTargetIntermediate = CreateTextureObject(&vulkan, width / 2, height, VK_FORMAT_R16G16B16A16_SFLOAT, TEXTURE_TYPE::TT_COMPUTE_TARGET, "VSM Intermediate");
-    m_VsmTargetIntermediate = std::make_unique<VulkanTexInfo>(std::move(vsmTargetIntermediate));
+    auto vsmTarget = CreateTextureObject(vulkan, width, height, TextureFormat::R16G16_SFLOAT, TEXTURE_TYPE::TT_COMPUTE_TARGET, "VSM");
+    //// Create the intermediate render target (result of 1st pass), width is half of output width (xy and zw channels hold alternating columns)
+    auto vsmTargetIntermediate = CreateTextureObject(vulkan, width / 2, height, TextureFormat::R16G16B16A16_SFLOAT, TEXTURE_TYPE::TT_COMPUTE_TARGET, "VSM Intermediate");
 
     // Make a material (from the vsm shader)
-    auto material = materialManager.CreateMaterial(vulkan, *pComputeShader, 1,
-        [this, &shadow](const std::string& texName) -> MaterialPass::tPerFrameTexInfo {
+    auto material = materialManager.CreateMaterial(gfxApi, *pComputeShader, 1,
+        [this, &shadowVulkan, &vsmTarget, &vsmTargetIntermediate](const std::string& texName) -> MaterialPass::tPerFrameTexInfo {
             if (texName == "ShadowDepth")
-                return { &shadow.GetDepthTexture(0) };
+                return { &shadowVulkan.GetDepthTexture(0) };
             else if (texName == "VarianceShadowMap")
-                return { m_VsmTarget.get() };
+                return { &vsmTarget };
             else if (texName == "VarianceShadowMapIntermediate")
-                return { m_VsmTargetIntermediate.get() };
+                return { &vsmTargetIntermediate };
             assert(0);
             return {};
         }, nullptr);
@@ -63,29 +64,32 @@ bool ShadowVSM::Initialize(Vulkan& vulkan, const ShaderManager& shaderManager, c
     }
     else
     {
-        m_Computable->SetDispatchThreadCount(0, { m_VsmTarget->Width, m_VsmTarget->Height, 1 });
-        m_Computable->SetDispatchThreadCount(1, { m_VsmTarget->Width, m_VsmTarget->Height, 1 });
+        m_Computable->SetDispatchThreadCount(0, { vsmTarget.Width, vsmTarget.Height, 1 });
+        m_Computable->SetDispatchThreadCount(1, { vsmTarget.Width, vsmTarget.Height, 1 });
     }
-       return true;
+    m_VsmTarget = std::make_unique<TextureVulkan>( std::move(vsmTarget) );
+    m_VsmTargetIntermediate = std::make_unique<TextureVulkan>( std::move(vsmTargetIntermediate) );
+
+    return true;
 }
 
-void ShadowVSM::Release(Vulkan* vulkan)
+void ShadowVSM::Release(GraphicsApiBase& gfxApi)
 {
-    assert(vulkan);
     m_Computable.reset();
     if (m_VsmTarget)
-        ReleaseTexture(vulkan, m_VsmTarget.get());
+        m_VsmTarget->Release(&gfxApi);
     m_VsmTarget.reset();
     if (m_VsmTargetIntermediate)
-        ReleaseTexture(vulkan, m_VsmTargetIntermediate.get());
+        m_VsmTargetIntermediate->Release(&gfxApi);
     m_VsmTargetIntermediate.reset();
 }
 
-void ShadowVSM::AddComputableToCmdBuffer(Wrap_VkCommandBuffer& cmdBuffer)
+void ShadowVSM::AddComputableToCmdBuffer(CommandList& cmdBuffer)
 {
     const auto& computable = *m_Computable;
     for (const auto& computablePass : computable.GetPasses())
     {
-        computable.DispatchPass(cmdBuffer.m_VkCommandBuffer, computablePass, 0);
+        auto& cmdBufferVulkan = apiCast<Vulkan>(cmdBuffer);
+        computable.DispatchPass(cmdBufferVulkan.m_VkCommandBuffer, computablePass, 0);
     }
 }

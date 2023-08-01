@@ -29,6 +29,22 @@
             "Compute": {
               "type": "string",
               "description": "filename of the spir-v compute shader"
+            },
+            "RayGeneration": {
+              "type": "string",
+              "description": "filename of the spir-v ray generation shader"
+            },
+            "RayClosestHit": {
+              "type": "string",
+              "description": "filename of the spir-v ray closest hit shader"
+            },
+            "RayAnyHit": {
+              "type": "string",
+              "description": "filename of the spir-v ray 'any' hit shader"
+            },
+            "RayMiss": {
+              "type": "string",
+              "description": "filename of the spir-v ray miss shader"
             }
           },
           "minProperties": 1,
@@ -50,7 +66,7 @@
                     "Type": {
                       "type": "string",
                       "description": "Descriptor set(s) type",
-                      "enum": [ "ImageSampler", "UniformBuffer", "StorageBuffer", "ImageStorage", "InputAttachment" ]
+                      "enum": [ "ImageSampler", "UniformBuffer", "Texture", "Sampler", "StorageBuffer", "ImageStorage", "InputAttachment", "AccelerationStructure" ]
                     },
                     "Stages": {
                       "type": "array",
@@ -58,7 +74,7 @@
                       "items": {
                         "type": "string",
                         "description": "Stage name",
-                        "enum": [ "Vertex", "Fragment", "Compute" ]
+                        "enum": [ "Vertex", "Fragment", "Compute", "RayGeneration", "RayClosestHit", "RayAnyHit", "RayMiss" ]
                       },
                       "uniqueItems": true,
                       "minItems": 1,
@@ -72,7 +88,7 @@
                     },
                     "ReadOnly": {
                       "type": "boolean",
-                      "description": "Buffer is not written to (by this Pass).  Implied 'true' for ImageSampler, UniformBuffer, InputAttachment."
+                      "description": "Buffer is not written to (by this Pass).  Implied 'true' for ImageSampler, ImageSampled, Sampler, UniformBuffer, InputAttachment, AccelerationStructure."
                     },
                     "Names": {
                       "type": "array",
@@ -114,6 +130,27 @@
           "additionalProperties": false,
           "minItems": 1
         },
+        "SpecializationConstants": {
+          "type": "array",
+          "description": "Specialization Constants",
+          "items": {
+            "type": "object",
+            "description": "Specialization Constant.  Passed to the shader creation in the order listed here (first item is slot 0).",
+            "properties": {
+              "Name": {
+                "type": "string"
+              },
+              "Type": {
+                "type": "string",
+                "enum": [ "Int32", "Float", "Boolean" ],
+                "description": "Constant data type"
+              }
+            },
+            "additionalProperties": false
+          },
+          "additionalProperties": false,
+          "minItems": 0
+        },
         "FixedFunction": {
           "type": "object",
           "description": "fixedFunction settings",
@@ -122,6 +159,9 @@
               "type": "boolean"
             },
             "DepthWriteEnable": {
+              "type": "boolean"
+            },
+            "DepthClampEnable": {
               "type": "boolean"
             },
             "DepthBiasEnable": {
@@ -200,6 +240,20 @@
             }
           },
           "required": [ "LocalSize" ],
+          "additionalProperties": false
+        },
+        "RayTracing": {
+          "type": "object",
+          "description": "ray tracing settings",
+          "properties": {
+            "MaxRecursionDepth": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "Maximum depth of ray recursion"
+            }
+          },
+          "required": [ "MaxRecursionDepth" ],
           "additionalProperties": false
         }
       },

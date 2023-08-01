@@ -1,0 +1,227 @@
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
+
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
+
+//
+// VarianceShadowMap Filter
+// Second pass filters vertically (separable blur).
+//
+
+#define WORKGROUP_SIZE_X (8)
+#define WORKGROUP_SIZE_Y (8)
+
+precision mediump float;
+precision mediump int;  // removing this causes Adreno compiler to optimize out all but one texelFetchOffset (as of June2021)
+
+layout (local_size_x = WORKGROUP_SIZE_X, local_size_y = WORKGROUP_SIZE_Y, local_size_z = 1 ) in;
+//layout(set = 0, binding = 0, rg32f) uniform image2D image;
+layout(set = 0, binding = 0) uniform mediump sampler2D imageIntemediateSrc;
+layout(set = 0, binding = 1, rg16f) uniform mediump image2D imageDest;
+
+const int cFilterWidth = 4;
+const float cfFilterWidth = 4.0;
+const mediump float coefficients[] = {0.0162162162HF, 0.0540540541HF, 0.1216216216HF, 0.1945945946HF, 0.2270270270HF, 0.1945945946HF, 0.1216216216HF, 0.0540540541HF, 0.0162162162HF};
+//const int cFilterWidth = 10;
+//const float cfFilterWidth = 10.0;
+//const float coefficients[] = {0.000539, 0.001533, 0.003908, 0.008925, 0.018255, 0.033446, 0.054891, 0.080693, 0.106259, 0.125337, 0.132429, 0.125337, 0.106259, 0.080693, 0.054891, 0.033446, 0.018255, 0.008925, 0.003908, 0.001533, 0.000539};
+
+//const int cMaxLinePixels = WORKGROUP_SIZE_Y;
+//const int cNumPixelsCache = cMaxLinePixels + cFilterWidth*2;
+//shared vec2 sDepthLine[cNumPixelsCache];
+
+void main() {
+
+#if 1
+    //
+    // Brute texture reads of packed format (using texelFetch)
+    //
+
+    // RGBA is such that AB (WZ) are horizontally adjacent pairs of (filtered) depth values on top line, RG (XY) are horizontally adjacent pairs of (filtered) depth^2 values on top line
+    // So we filter 2 pixels at a time!
+
+    ivec2 inTexCoord = ivec2(gl_GlobalInvocationID.xy);
+
+    // Read and average (vertically) for our two (horizontal) pixels
+    vec4 sum = texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,0 - cfFilterWidth)) * coefficients[0];
+    sum += texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,1 - cfFilterWidth)) * coefficients[1];
+    sum += texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,2 - cfFilterWidth)) * coefficients[2];
+    sum += texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,3 - cfFilterWidth)) * coefficients[3];
+    sum += texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,4 - cfFilterWidth)) * coefficients[4];
+    sum += texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,5 - cfFilterWidth)) * coefficients[3];
+    sum += texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,6 - cfFilterWidth)) * coefficients[2];
+    sum += texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,7 - cfFilterWidth)) * coefficients[1];
+    sum += texelFetchOffset(imageIntemediateSrc, inTexCoord, 0, ivec2(0,8 - cfFilterWidth)) * coefficients[0];
+
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*2, gl_GlobalInvocationID.y),   vec4(sum.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*2+1,   gl_GlobalInvocationID.y),   vec4(sum.zw, 0.0, 0.0));
+#elif 1
+    //
+    // Brute texture reads of packed format (using textureGather)
+    //
+
+    // textureGather gets one channel of data for a square of 4 pixels.
+    // Channel 0: pixel (0,0)
+    // Channel 1: pixel (0,1)
+    // Channel 2: pixel (1,0)
+    // Channel 3: pixel (1,1)
+    // Gather RGBA is such that AB (WZ) are horizontally adjacent pairs of (filtered) depth values on top line, RG (XY) are horizontally adjacent pairs of (filtered) depth^2 values on top line
+
+    vec4 gatheredDepth0[2*(cFilterWidth+1)];
+    vec4 gatheredDepth1[2*(cFilterWidth+1)];
+    for(int i=0;i<=cFilterWidth;++i)
+    {
+        vec2 inTexCoord = vec2((gl_GlobalInvocationID.x*2 + 0.5)/512.0, ((gl_GlobalInvocationID.y+i)*2 - cfFilterWidth + 0.5)/1024.0);
+        vec4 d0  = textureGather(imageIntemediateSrc, inTexCoord, 0);
+        vec4 d1 = textureGather(imageIntemediateSrc, inTexCoord, 1);
+        vec4 d2  = textureGather(imageIntemediateSrc, inTexCoord, 2);
+        vec4 d3 = textureGather(imageIntemediateSrc, inTexCoord, 3);
+
+        gatheredDepth0[i*2+0] = vec4(d0.w, d0.x, d1.w, d1.x);   // depth, depth^2 for pixel and x+1 pixel
+        gatheredDepth1[i*2+0] = vec4(d0.z, d0.y, d1.z, d1.y);   // depth, depth^2 for x+2 and x+3 pixel
+
+        gatheredDepth0[i*2+1] = vec4(d2.w, d2.x, d3.w, d3.x);   // depth, depth^2 for x,y+1 and x+1,y+1 pixel
+        gatheredDepth1[i*2+1] = vec4(d2.z, d2.y, d3.z, d3.y);   // depth, depth^2 for x+2,y+1 and x+3,y+1 pixel
+    }
+
+    // Now do the averaging for our pixel
+    vec4 sum00 = vec4(0.0f);
+    vec4 sum01 = vec4(0.0f);
+    vec4 sum10 = vec4(0.0f);
+    vec4 sum11 = vec4(0.0f);
+    for(int i=0;i<=cFilterWidth*2;++i)
+    {
+        sum00 += gatheredDepth0[i] * coefficients[i];
+        sum10 += gatheredDepth0[i+1] * coefficients[i];
+        sum01 += gatheredDepth1[i] * coefficients[i];
+        sum11 += gatheredDepth1[i+1] * coefficients[i];
+    }
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4,   gl_GlobalInvocationID.y*2),   vec4(sum00.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+1, gl_GlobalInvocationID.y*2),   vec4(sum00.zw, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+2,   gl_GlobalInvocationID.y*2), vec4(sum01.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+3, gl_GlobalInvocationID.y*2),   vec4(sum01.zw, 0.0, 0.0));
+
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4,   gl_GlobalInvocationID.y*2+1),   vec4(sum10.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+1, gl_GlobalInvocationID.y*2+1), vec4(sum10.zw, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+2, gl_GlobalInvocationID.y*2+1),   vec4(sum11.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+3, gl_GlobalInvocationID.y*2+1), vec4(sum11.zw, 0.0, 0.0));
+#elif 1
+    //
+    // Brute force texture gathers
+    //
+
+    // textureGather gets one channel of data for a square of 4 pixels.
+    // Channel 0: pixel (0,0)
+    // Channel 1: pixel (0,1)
+    // Channel 2: pixel (1,0)
+    // Channel 3: pixel (1,1)
+    // Gather RGBA is such that AB (WZ) are horizontally adjacent pairs of (filtered) depth values on top line, RG (XY) are horizontally adjacent pairs of (filtered) depth^2 values on top line
+
+    vec4 gatheredDepth0[2*(cFilterWidth+1)];
+    vec4 gatheredDepth1[2*(cFilterWidth+1)];
+    for(int i=0;i<=cFilterWidth;++i)
+    {
+        vec2 inTexCoord = vec2((gl_GlobalInvocationID.x*2 + 0.5)/512.0, ((gl_GlobalInvocationID.y+i)*2 - cfFilterWidth + 0.5)/1024.0);
+        vec4 d0  = textureGather(imageIntemediateSrc, inTexCoord, 0);
+        vec4 d1 = textureGather(imageIntemediateSrc, inTexCoord, 1);
+        vec4 d2  = textureGather(imageIntemediateSrc, inTexCoord, 2);
+        vec4 d3 = textureGather(imageIntemediateSrc, inTexCoord, 3);
+
+        gatheredDepth0[i*2+0] = vec4(d0.w, d0.x, d1.w, d1.x);   // depth, depth^2 for pixel and x+1 pixel
+        gatheredDepth1[i*2+0] = vec4(d0.z, d0.y, d1.z, d1.y);   // depth, depth^2 for x+2 and x+3 pixel
+
+        gatheredDepth0[i*2+1] = vec4(d2.w, d2.x, d3.w, d3.x);   // depth, depth^2 for x,y+1 and x+1,y+1 pixel
+        gatheredDepth1[i*2+1] = vec4(d2.z, d2.y, d3.z, d3.y);   // depth, depth^2 for x+2,y+1 and x+3,y+1 pixel
+    }
+
+    // Now do the averaging for our pixel
+    vec4 sum00 = vec4(0.0f);
+    vec4 sum01 = vec4(0.0f);
+    vec4 sum10 = vec4(0.0f);
+    vec4 sum11 = vec4(0.0f);
+    for(int i=0;i<=cFilterWidth*2;++i)
+    {
+        sum00 += gatheredDepth0[i] * coefficients[i];
+        sum10 += gatheredDepth0[i+1] * coefficients[i];
+        sum01 += gatheredDepth1[i] * coefficients[i];
+        sum11 += gatheredDepth1[i+1] * coefficients[i];
+    }
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4,   gl_GlobalInvocationID.y*2),   vec4(sum00.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+1, gl_GlobalInvocationID.y*2),   vec4(sum00.zw, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+2,   gl_GlobalInvocationID.y*2), vec4(sum01.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+3, gl_GlobalInvocationID.y*2),   vec4(sum01.zw, 0.0, 0.0));
+
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4,   gl_GlobalInvocationID.y*2+1),   vec4(sum10.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+1, gl_GlobalInvocationID.y*2+1), vec4(sum10.zw, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+2, gl_GlobalInvocationID.y*2+1),   vec4(sum11.xy, 0.0, 0.0));
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x*4+3, gl_GlobalInvocationID.y*2+1), vec4(sum11.zw, 0.0, 0.0));
+
+#elif 1
+    //
+    // Brute force texture reads (intermediate input packed)
+    //
+
+    // Now do the averaging for our pixel
+    vec2 sum = vec2(0.0f);
+    for(int i=0;i<=cFilterWidth*2;++i)
+    {
+        vec2 depth = texture(imageSrc, vec2(gl_GlobalInvocationID.x + 0.5,gl_GlobalInvocationID.y - cfFilterWidth + i + 0.5)/1024.0).xy;
+        sum += depth * coefficients[i];
+    }
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x,gl_GlobalInvocationID.y), vec4(sum, 0.0, 0.0));
+
+#elif 1
+    //
+    // Brute force texture reads
+    //
+
+    // Now do the averaging for our pixel
+    vec2 sum = vec2(0.0f);
+    for(int i=0;i<=cFilterWidth*2;++i)
+    {
+        vec2 depth = texture(imageSrc, vec2(gl_GlobalInvocationID.x + 0.5,gl_GlobalInvocationID.y - cfFilterWidth + i + 0.5)/1024.0).xy;
+        sum += depth * coefficients[i];
+    }
+    imageStore(imageDest, ivec2(gl_GlobalInvocationID.x,gl_GlobalInvocationID.y), vec4(sum, 0.0, 0.0));
+#else
+    //
+    // Barrier/group-shared memory version
+    //
+
+    // read pixel (depth and depth squared), write to cache and wait for all the pixels in this line to finish
+    vec4 depth = imageLoad(image, ivec2(gl_GlobalInvocationID.x,gl_GlobalInvocationID.y));
+    sDepthLine[gl_GlobalInvocationID.y + cFilterWidth] = depth.xy;
+    // mirrror the edge values
+    if (gl_GlobalInvocationID.y < cFilterWidth)
+    {
+        sDepthLine[cFilterWidth - 1 - gl_GlobalInvocationID.y] = depth.xy;
+    }
+    else if (gl_GlobalInvocationID.y >= cMaxLinePixels - cFilterWidth)
+    {
+        sDepthLine[cFilterWidth + cMaxLinePixels*2 - 1 - gl_GlobalInvocationID.y] = depth.xy;
+    }
+
+    // wait for all workgroup threads to be finished
+    barrier();
+
+    // Now do the averaging for our pixel
+#if 1
+    vec2 sum = vec2(0.0f);
+    for(int i=0;i<=cFilterWidth*2;++i)
+    {
+        sum += sDepthLine[gl_GlobalInvocationID.y + i] * coefficients[i];
+    }
+#else
+    vec2 sum = sDepthLine[gl_GlobalInvocationID.y + cFilterWidth];
+#endif
+    imageStore(image, ivec2(gl_GlobalInvocationID.x,gl_GlobalInvocationID.y), vec4(sum, 0.0, 0.0));
+#endif
+}

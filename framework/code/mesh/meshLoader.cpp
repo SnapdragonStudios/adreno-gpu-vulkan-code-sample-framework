@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -51,7 +51,7 @@ bool MeshLoader::LoadGlftModel(AssetManager& assetManager, const std::string& fi
     std::string err;
     std::string warn;
 
-    printf("\nLoading GLTF: %s...", filename.c_str());
+    LOGI("Loading GLTF: %s...", filename.c_str());
 
     // Load the glft model.
     {

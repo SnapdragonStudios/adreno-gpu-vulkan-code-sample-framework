@@ -1,16 +1,16 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "system/assetManager.hpp"
 #include "system/os_common.h"
-#include "memory/memoryManager.hpp"
 #include "vulkan_support.hpp"
 #include "renderTarget.hpp"
+#include "timerPool.hpp"
 
 //-----------------------------------------------------------------------------
 bool LoadShader(Vulkan* pVulkan, AssetManager& assetManager, ShaderInfo* pShader, const std::string& VertFilename, const std::string& FragFilename)
@@ -40,90 +40,6 @@ void ReleaseShader( Vulkan* pVulkan, ShaderInfo* pShader )
 {
     pShader->FragShaderModule.Destroy( *pVulkan );
     pShader->VertShaderModule.Destroy( *pVulkan );
-}
-
-//-----------------------------------------------------------------------------
-bool CreateUniformBuffer(Vulkan* pVulkan, Uniform* pNewUniform, size_t dataSize, const void* const pData, VkBufferUsageFlags usage)
-//-----------------------------------------------------------------------------
-{
-    MemoryManager& memoryManager = pVulkan->GetMemoryManager();
-
-    // Create the memory buffer...
-    pNewUniform->buf = memoryManager.CreateBuffer(dataSize, usage, MemoryManager::MemoryUsage::CpuToGpu, &pNewUniform->bufferInfo);
-
-    // If we have initial data, add it now
-    if (pData != nullptr)
-    {
-        UpdateUniformBuffer(pVulkan, pNewUniform, dataSize, pData);
-    }
-
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-void UpdateUniformBuffer(Vulkan* pVulkan, Uniform* pUniform, size_t dataSize, const void* const pNewData)
-//-----------------------------------------------------------------------------
-{
-    MemoryCpuMapped<uint8_t> mapped = pVulkan->GetMemoryManager().Map<uint8_t>(pUniform->buf);
-    if (mapped.data()==nullptr)
-    {
-        return;
-    }
-
-    memcpy(mapped.data(), pNewData, dataSize);
-
-    pVulkan->GetMemoryManager().Unmap(pUniform->buf, std::move(mapped));
-}
-
-//-----------------------------------------------------------------------------
-void ReleaseUniformBuffer(Vulkan* pVulkan, Uniform* pUniform)
-//-----------------------------------------------------------------------------
-{
-    if (pUniform->buf)
-    {
-        pVulkan->GetMemoryManager().Destroy(std::move(pUniform->buf));
-    }
-}
-
-
-//-----------------------------------------------------------------------------
-bool CreateUniformBuffer(Vulkan* pVulkan, MemoryVmaAllocatedBuffer<VkBuffer> &rNewUniformBuffer, size_t dataSize, const void* const pData, VkBufferUsageFlags usage)
-//-----------------------------------------------------------------------------
-{
-    MemoryManager& memoryManager = pVulkan->GetMemoryManager();
-
-    // Create the memory buffer...
-    rNewUniformBuffer = memoryManager.CreateBuffer(dataSize, usage, MemoryManager::MemoryUsage::CpuToGpu, nullptr);
-
-    // If we have initial data, add it now
-    if (pData != nullptr)
-    {
-        UpdateUniformBuffer(pVulkan, rNewUniformBuffer, dataSize, pData);
-    }
-
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-void UpdateUniformBuffer(Vulkan* pVulkan, MemoryVmaAllocatedBuffer<VkBuffer>& rUniform, size_t dataSize, const void* const pNewData)
-//-----------------------------------------------------------------------------
-{
-    MemoryCpuMapped<uint8_t> mapped = pVulkan->GetMemoryManager().Map<uint8_t>(rUniform);
-    if (mapped.data() == nullptr)
-    {
-        return;
-    }
-
-    memcpy(mapped.data(), pNewData, dataSize);
-
-    pVulkan->GetMemoryManager().Unmap(rUniform, std::move(mapped));
-}
-
-//-----------------------------------------------------------------------------
-void ReleaseUniformBuffer(Vulkan* pVulkan, MemoryVmaAllocatedBuffer<VkBuffer>& rUniform)
-//-----------------------------------------------------------------------------
-{
-    pVulkan->GetMemoryManager().Destroy(std::move(rUniform));
 }
 
 
@@ -188,43 +104,357 @@ void VulkanSetBlendingType(BLENDING_TYPE WhichType, VkPipelineColorBlendAttachme
     }
 }
 
-//=============================================================================
-// Uniform
-//=============================================================================
-Uniform::Uniform( Uniform&& other) noexcept
-    : buf(std::move(other.buf))
-    , bufferInfo( other.bufferInfo )
+//-----------------------------------------------------------------------------
+bool DumpImagePixelData(
+    Vulkan& vulkan,
+    VkImage targetImage,
+    TextureFormat targetFormat,
+    uint32_t targetWidth,
+    uint32_t targetHeight,
+    bool dumpColor,
+    uint32_t mipLevel,
+    uint32_t arrayLayer,
+    const Vulkan::tDumpSwapChainOutputFn& outputFunction)
+    //-----------------------------------------------------------------------------
 {
-    other.bufferInfo = {};
+#if OS_WINDOWS
+
+    TextureFormat format;
+    VkImageAspectFlags aspectFlags;
+    if (dumpColor)
+    {
+        format = FormatIsSrgb(targetFormat) ? TextureFormat::R8G8B8A8_SRGB : TextureFormat::R8G8B8A8_UNORM;
+        aspectFlags = VK_IMAGE_ASPECT_COLOR_BIT;
+    }
+    else
+    {
+        format = TextureFormat::D24_UNORM_S8_UINT;
+        aspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+    
+    const uint32_t width = targetWidth >> mipLevel;
+    const uint32_t height = targetHeight >> mipLevel;
+
+    const VkFormat vkTargetFormat = TextureFormatToVk(format);
+    const VkFormatProperties& targetFormatProps = vulkan.GetFormatProperties(vkTargetFormat);
+
+    const bool blitSupportLinear = targetFormatProps.linearTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT;
+    const bool blitSupportOptimal = targetFormatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT;
+    const bool useTemporaryImage = !blitSupportLinear || !blitSupportOptimal;
+
+    MemoryAllocatedBuffer<Vulkan, VkImage> firstImage;
+    MemoryAllocatedBuffer<Vulkan, VkImage> secondImage;
+
+    auto Cleanup = [&]()
+    {
+        if (firstImage) vulkan.GetMemoryManager().Destroy(std::move(firstImage));
+        if (secondImage) vulkan.GetMemoryManager().Destroy(std::move(secondImage));
+    };
+
+    auto CreateImageAndSetupMemory = [&vulkan](
+        VkCommandBuffer command_buffer,
+        const VkImageCreateInfo& imageInfo,
+        VkImageAspectFlags aspectFlags,
+        MemoryUsage memoryUsage,
+        MemoryAllocatedBuffer<Vulkan, VkImage>& targetImage) -> bool
+    {
+        targetImage = vulkan.GetMemoryManager().CreateImage(imageInfo, memoryUsage);
+        if (!targetImage)
+        {
+            return false;
+        }
+
+        // Put the image on a layout we can work with
+
+        VkImageMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        memoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        memoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        memoryBarrier.image = targetImage.GetVkBuffer();
+        memoryBarrier.subresourceRange.aspectMask = aspectFlags;
+        memoryBarrier.subresourceRange.baseMipLevel = 0;
+        memoryBarrier.subresourceRange.levelCount = 1;
+        memoryBarrier.subresourceRange.baseArrayLayer = 0;
+        memoryBarrier.subresourceRange.layerCount = 1;
+        memoryBarrier.srcAccessMask = 0;
+        memoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        memoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        memoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+        vkCmdPipelineBarrier(
+            command_buffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &memoryBarrier);
+
+        return true;
+    };
+
+    VkImageCreateInfo imageInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    imageInfo.flags = 0;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = vkTargetFormat;
+    imageInfo.extent.width = width;
+    imageInfo.extent.height = height;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = useTemporaryImage ? VK_IMAGE_TILING_OPTIMAL : VK_IMAGE_TILING_LINEAR;
+    imageInfo.usage = useTemporaryImage ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    auto setupCommandBuffer = vulkan.StartSetupCommandBuffer();
+
+    if (!CreateImageAndSetupMemory(
+        setupCommandBuffer,
+        imageInfo,
+        aspectFlags,
+        useTemporaryImage ? MemoryUsage::GpuExclusive : MemoryUsage::GpuToCpu,
+        firstImage))
+    {
+        Cleanup();
+        return false;
+    }
+
+    if (useTemporaryImage)
+    {
+        imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
+        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+        if (!CreateImageAndSetupMemory(
+            setupCommandBuffer,
+            imageInfo,
+            aspectFlags,
+            MemoryUsage::GpuToCpu,
+            secondImage))
+        {
+            Cleanup();
+            return false;
+        }
+    }
+
+    // Transition the swapchain image from present to transfer source
+    {
+        VkImageMemoryBarrier presentMemoryBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        presentMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        presentMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        presentMemoryBarrier.image = targetImage;
+        presentMemoryBarrier.subresourceRange.aspectMask = aspectFlags;
+        presentMemoryBarrier.subresourceRange.baseMipLevel = mipLevel;
+        presentMemoryBarrier.subresourceRange.levelCount = 1;
+        presentMemoryBarrier.subresourceRange.baseArrayLayer = arrayLayer;
+        presentMemoryBarrier.subresourceRange.layerCount = 1;
+        presentMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        presentMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        presentMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        presentMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+        vkCmdPipelineBarrier(
+            setupCommandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0,
+            NULL,
+            0,
+            NULL,
+            1,
+            &presentMemoryBarrier);
+    }
+
+    // Copy swapchain to the first image (which might be a temporary one depending if tilling/optional is supported by blit)
+    {
+        VkImageBlit blitRegion{};
+        blitRegion.srcSubresource.aspectMask = aspectFlags;
+        blitRegion.srcSubresource.baseArrayLayer = arrayLayer;
+        blitRegion.srcSubresource.layerCount = 1;
+        blitRegion.srcSubresource.mipLevel = mipLevel;
+        blitRegion.srcOffsets[1].x = width;
+        blitRegion.srcOffsets[1].y = height;
+        blitRegion.srcOffsets[1].z = 1;
+        blitRegion.dstSubresource.aspectMask = aspectFlags;
+        blitRegion.dstSubresource.baseArrayLayer = 0;
+        blitRegion.dstSubresource.layerCount = 1;
+        blitRegion.dstSubresource.mipLevel = 0;
+        blitRegion.dstOffsets[1].x = width;
+        blitRegion.dstOffsets[1].y = height;
+        blitRegion.dstOffsets[1].z = 1;
+
+        vkCmdBlitImage(
+            setupCommandBuffer,
+            targetImage,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            firstImage.GetVkBuffer(),
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &blitRegion,
+            VK_FILTER_NEAREST);
+
+        // Transition the swapchain back to the layout needed by the upstream
+
+        VkImageMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        memoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        memoryBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        memoryBarrier.image = targetImage;
+        memoryBarrier.subresourceRange.aspectMask = aspectFlags;
+        memoryBarrier.subresourceRange.baseMipLevel = 0;
+        memoryBarrier.subresourceRange.levelCount = 1;
+        memoryBarrier.subresourceRange.baseArrayLayer = 0;
+        memoryBarrier.subresourceRange.layerCount = 1;
+        memoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        memoryBarrier.dstAccessMask = 0;
+        memoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        memoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+        vkCmdPipelineBarrier(
+            setupCommandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &memoryBarrier);
+    }
+
+    // If necessary, untile the image data by copying the first image (containing the swapchain data) into the 
+    // secondary image (which we will use to read the data from)
+    if (useTemporaryImage)
+    {
+        VkImageMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        memoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        memoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        memoryBarrier.image = firstImage.GetVkBuffer();
+        memoryBarrier.subresourceRange.aspectMask = aspectFlags;
+        memoryBarrier.subresourceRange.baseMipLevel = 0;
+        memoryBarrier.subresourceRange.levelCount = 1;
+        memoryBarrier.subresourceRange.baseArrayLayer = 0;
+        memoryBarrier.subresourceRange.layerCount = 1;
+        memoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        memoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        memoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+        vkCmdPipelineBarrier(
+            setupCommandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &memoryBarrier);
+
+        VkImageCopy copyRegion{};
+        copyRegion.srcSubresource.aspectMask = copyRegion.dstSubresource.aspectMask = aspectFlags;
+        copyRegion.srcSubresource.mipLevel = copyRegion.dstSubresource.mipLevel = 0;
+        copyRegion.srcSubresource.baseArrayLayer = copyRegion.dstSubresource.baseArrayLayer = 0;
+        copyRegion.srcSubresource.layerCount = copyRegion.dstSubresource.layerCount = 1;
+        copyRegion.srcOffset = copyRegion.dstOffset = { 0, 0, 0 };
+        copyRegion.extent.width = width;
+        copyRegion.extent.height = height;
+        copyRegion.extent.depth = 1;
+
+        vkCmdCopyImage(
+            setupCommandBuffer,
+            firstImage.GetVkBuffer(),
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            secondImage.GetVkBuffer(),
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &copyRegion);
+    }
+
+    // Transition whatever image we are going to read the screenshot data to general layout
+    {
+        VkImageMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+        memoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        memoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        memoryBarrier.image = useTemporaryImage ? secondImage.GetVkBuffer() : firstImage.GetVkBuffer();
+        memoryBarrier.subresourceRange.aspectMask = aspectFlags;
+        memoryBarrier.subresourceRange.baseMipLevel = 0;
+        memoryBarrier.subresourceRange.levelCount = 1;
+        memoryBarrier.subresourceRange.baseArrayLayer = 0;
+        memoryBarrier.subresourceRange.layerCount = 1;
+        memoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        memoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        memoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+        vkCmdPipelineBarrier(
+            setupCommandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &memoryBarrier);
+    }
+
+    vulkan.FinishSetupCommandBuffer(setupCommandBuffer);
+
+    // Now ready the image data by mapping it
+    {
+        auto mappedData = vulkan.GetMemoryManager().Map<const char>(useTemporaryImage ? secondImage : firstImage);
+        const char* data = mappedData.data();
+
+        VkImageSubresource imageSubresource{};
+        imageSubresource.aspectMask = aspectFlags;
+
+        VkSubresourceLayout subresourceLayout;
+        vkGetImageSubresourceLayout(
+            vulkan.m_VulkanDevice,
+            useTemporaryImage ? secondImage.GetVkBuffer() : firstImage.GetVkBuffer(),
+            &imageSubresource,
+            &subresourceLayout);
+
+        data += subresourceLayout.offset;
+        outputFunction(width, height, format, static_cast<uint32_t>(subresourceLayout.rowPitch), data);
+
+        vulkan.GetMemoryManager().Unmap(useTemporaryImage ? secondImage : firstImage, std::move(mappedData));
+    }
+
+    Cleanup();
+    return true;
+
+#else
+    return false;
+#endif // OS_WINDOWS
 }
 
-
+#if 0
 //=============================================================================
 // Wrap_VkImage
 //=============================================================================
+
 //-----------------------------------------------------------------------------
 Wrap_VkImage::Wrap_VkImage()
-    : m_pVulkan(nullptr)
-    , m_ImageInfo()
-    , m_Usage(MemoryManager::MemoryUsage::Unknown)
 //-----------------------------------------------------------------------------
 {
-    m_Name = "Wrap_VkImage";
 }
 
 //-----------------------------------------------------------------------------
 Wrap_VkImage::~Wrap_VkImage()
 //-----------------------------------------------------------------------------
 {
-    if (m_pVulkan)
-    {
-        MemoryManager& memoryManager = m_pVulkan->GetMemoryManager();
-        memoryManager.Destroy( std::move(m_VmaImage) );
-    }
+    Release();
 }
 
 //-----------------------------------------------------------------------------
-bool Wrap_VkImage::Initialize(Vulkan* pVulkan, const VkImageCreateInfo& ImageInfo, MemoryManager::MemoryUsage Usage, const char* pName)
+bool Wrap_VkImage::Initialize(Vulkan* pVulkan, const VkImageCreateInfo& ImageInfo, MemoryUsage Usage, const char* pName)
 //-----------------------------------------------------------------------------
 {
     // If we have a name, save it
@@ -238,7 +468,7 @@ bool Wrap_VkImage::Initialize(Vulkan* pVulkan, const VkImageCreateInfo& ImageInf
     m_ImageInfo = ImageInfo;
     m_Usage = Usage;
 
-    MemoryManager& memoryManager = pVulkan->GetMemoryManager();
+    auto& memoryManager = pVulkan->GetMemoryManager();
     m_VmaImage = memoryManager.CreateImage(ImageInfo, Usage);
 
     if( m_VmaImage )
@@ -255,335 +485,120 @@ void Wrap_VkImage::Release()
 {
     if (m_pVulkan)
     {
-        MemoryManager& memoryManager = m_pVulkan->GetMemoryManager();
+        auto& memoryManager = m_pVulkan->GetMemoryManager();
         memoryManager.Destroy(std::move(m_VmaImage));
     }
     m_pVulkan = nullptr;
     m_ImageInfo = {};
     m_Name.clear();
 }
+#endif
+
 
 //=============================================================================
-// Wrap_VkCommandBuffer
+// Wrap_VkSemaphore
 //=============================================================================
+
 //-----------------------------------------------------------------------------
-Wrap_VkCommandBuffer::Wrap_VkCommandBuffer()
+Wrap_VkSemaphore::Wrap_VkSemaphore()
+//-----------------------------------------------------------------------------
+{}
+//-----------------------------------------------------------------------------
+Wrap_VkSemaphore::~Wrap_VkSemaphore()
 //-----------------------------------------------------------------------------
 {
-    HardReset();
+    assert(m_Semaphore == VK_NULL_HANDLE || !m_IsOwned);
 }
 
 //-----------------------------------------------------------------------------
-Wrap_VkCommandBuffer::~Wrap_VkCommandBuffer()
+Wrap_VkSemaphore& Wrap_VkSemaphore::operator=(Wrap_VkSemaphore&& other) noexcept
 //-----------------------------------------------------------------------------
 {
-    Release();
+    if (&other != this)
+    {
+        m_Name = std::move(other.m_Name);
+        assert(m_Semaphore == VK_NULL_HANDLE);
+        m_Semaphore = other.m_Semaphore;
+        other.m_Semaphore = VK_NULL_HANDLE;
+        m_TimelineSemaphore = other.m_TimelineSemaphore;
+        other.m_TimelineSemaphore = false;
+        m_IsOwned = other.m_IsOwned;
+        other.m_IsOwned = false;
+    }
+    return *this;
 }
 
 //-----------------------------------------------------------------------------
-void Wrap_VkCommandBuffer::HardReset()
+Wrap_VkSemaphore::Wrap_VkSemaphore(Wrap_VkSemaphore&& other) noexcept
 //-----------------------------------------------------------------------------
 {
-    m_Name = "CmdBuffer";
-
-    m_NumDrawCalls = 0;
-    m_NumTriangles = 0;
-
-    m_IsPrimary = true;
-    m_VkCommandBuffer = VK_NULL_HANDLE;
-
-    m_pVulkan = nullptr;
+    *this = std::move(other);
 }
 
 //-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::Initialize(Vulkan* pVulkan, const std::string& Name, VkCommandBufferLevel CmdBuffLevel, bool UseComputeCmdPool)
+bool Wrap_VkSemaphore::Initialize(Vulkan& rVulkan, const char* pName)
 //-----------------------------------------------------------------------------
 {
-    VkResult RetVal;
+    assert(m_Semaphore == VK_NULL_HANDLE);
+    VkSemaphoreTypeCreateInfo TimelineInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                            .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+                                            .initialValue = 0 };
+    VkSemaphoreCreateInfo BinarySemaphoreInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
 
-    m_Name = Name;
-
-    // Reset draw counts
-    m_NumDrawCalls = 0;
-    m_NumTriangles = 0;
-
-    // Need Vulkan objects to release ourselves
-    m_pVulkan = pVulkan;
-
-    // What type of command buffer are we dealing with
-    if (CmdBuffLevel == VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+    auto RetVal = vkCreateSemaphore(rVulkan.m_VulkanDevice, &BinarySemaphoreInfo, NULL, &m_Semaphore);
+    if (!CheckVkError("vkCreateSemaphore()", RetVal))
     {
-        m_IsPrimary = true;
-    }
-    else if (CmdBuffLevel == VK_COMMAND_BUFFER_LEVEL_SECONDARY)
-    {
-        m_IsPrimary = false;
-    }
-    else
-    {
-        LOGE("Command Buffer initialization with unknown level! (%d)", CmdBuffLevel);
-    }
-
-    // If we have an independant compute pool indicate this command list is using it (and must be submitted to the associated device queue).
-    m_UseComputeCmdPool = UseComputeCmdPool && pVulkan->m_VulkanComputeCmdPool;
-
-    // Allocate the command buffer from the pool
-    VkCommandBufferAllocateInfo AllocInfo {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    AllocInfo.commandPool = m_UseComputeCmdPool ? pVulkan->m_VulkanComputeCmdPool : pVulkan->m_VulkanCmdPool;
-    AllocInfo.level = CmdBuffLevel;
-    AllocInfo.commandBufferCount = 1;
-
-    RetVal = vkAllocateCommandBuffers(pVulkan->m_VulkanDevice, &AllocInfo, &m_VkCommandBuffer);
-    if (!CheckVkError("vkAllocateCommandBuffers()", RetVal))
-    {
-        LOGE("Unable to allocate command buffer: %s", m_Name.c_str());
         return false;
     }
-    pVulkan->SetDebugObjectName(m_VkCommandBuffer, m_Name.c_str());
-
+    m_TimelineSemaphore = false;
+    m_IsOwned = true;
+    if (pName != nullptr)
+        m_Name.assign(pName);
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::Reset()
+bool Wrap_VkSemaphore::InitializeTimeline(Vulkan& rVulkan, uint64_t initialValue, const char* pName)
 //-----------------------------------------------------------------------------
 {
-    VkResult RetVal;
+    assert(m_Semaphore == VK_NULL_HANDLE);
+    VkSemaphoreTypeCreateInfo TimelineInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                            .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+                                            .initialValue = initialValue };
+    VkSemaphoreCreateInfo TimelineSemaphoreInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+                                                 .pNext = &TimelineInfo };
 
-    if (m_VkCommandBuffer == VK_NULL_HANDLE)
+    auto RetVal = vkCreateSemaphore(rVulkan.m_VulkanDevice, &TimelineSemaphoreInfo, NULL, &m_Semaphore);
+    if (!CheckVkError("vkCreateSemaphore()", RetVal))
     {
-        LOGE("Error! Trying to reset command buffer before it has been initialized: %s", m_Name.c_str());
         return false;
     }
-
-    // vkBeginCommandBuffer should reset the command buffer, but Reset can be called
-    // to make it more explicit.
-    RetVal = vkResetCommandBuffer(m_VkCommandBuffer, 0);
-    if (!CheckVkError("vkResetCommandBuffer()", RetVal))
-    {
-        LOGE("Unable to reset command buffer: %s", m_Name.c_str());
-        return false;
-    }
-
-    // Reset draw counts
-    m_NumDrawCalls = 0;
-    m_NumTriangles = 0;
-
-    return true;
-}
-
-
-//-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::Begin(VkCommandBufferUsageFlags CmdBuffUsage)
-//-----------------------------------------------------------------------------
-{
-    assert(m_IsPrimary);
-    if (!m_IsPrimary)
-    {
-        LOGE("Error! Trying to begin secondary command buffer without Framebuffer or RenderPass: %s", m_Name.c_str());
-        return false;
-    }
-
-    return Begin(VK_NULL_HANDLE, VK_NULL_HANDLE, false, 0, CmdBuffUsage);
-}
-
-//-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::Begin( VkFramebuffer FrameBuffer, VkRenderPass RenderPass, bool IsSwapChainRenderPass, uint32_t SubPass, VkCommandBufferUsageFlags CmdBuffUsage)
-//-----------------------------------------------------------------------------
-{
-    VkResult RetVal;
-
-    if (m_VkCommandBuffer == VK_NULL_HANDLE)
-    {
-        LOGE("Error! Trying to begin command buffer before it has been initialized: %s", m_Name.c_str());
-        return false;
-    }
-
-    VkCommandBufferBeginInfo CmdBeginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    CmdBeginInfo.flags = CmdBuffUsage;
-
-    VkCommandBufferInheritanceInfo InheritanceInfo {VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO};
-    VkCommandBufferInheritanceRenderPassTransformInfoQCOM InheritanceInfoRenderPassTransform = {};
-
-    // If this is a secondary command buffer it has inheritance information.
-    // If primary, the inheritance stuff is ignored.
-    if (!m_IsPrimary)
-    {
-        InheritanceInfo.framebuffer = FrameBuffer;
-        InheritanceInfo.occlusionQueryEnable = VK_FALSE;
-        InheritanceInfo.queryFlags = 0;
-        InheritanceInfo.pipelineStatistics = 0;
-
-        // If this is a secondary command buffer it MAY BE inside another render pass (compute can be in a secondary buffer and not have/inherit a renderder pass)
-        if (RenderPass != VK_NULL_HANDLE)
-        {
-            CmdBeginInfo.flags |= VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
-
-            InheritanceInfo.renderPass = RenderPass;
-            InheritanceInfo.subpass = SubPass;
-
-            // We may also have to pass the inherited render pass transform down to the secondary buffer
-            if (IsSwapChainRenderPass && m_pVulkan->FillCommandBufferInheritanceRenderPassTransformInfoQCOM(InheritanceInfoRenderPassTransform))
-            {
-                LOGI("VkCommandBufferInheritanceRenderPassTransformInfoQCOM (%s): Extents = (%d x %d)", m_Name.c_str(), InheritanceInfoRenderPassTransform.renderArea.extent.width, InheritanceInfoRenderPassTransform.renderArea.extent.height);
-                InheritanceInfo.pNext = &InheritanceInfoRenderPassTransform;
-            }
-        }
-        CmdBeginInfo.pInheritanceInfo = &InheritanceInfo;
-    }
-
-    // By calling vkBeginCommandBuffer, cmdBuffer is put into the recording state.
-    RetVal = vkBeginCommandBuffer(m_VkCommandBuffer, &CmdBeginInfo);
-    if (!CheckVkError("vkBeginCommandBuffer()", RetVal))
-    {
-        LOGE("Unable to begin command buffer: %s", m_Name.c_str());
-        return false;
-    }
-
-    // Reset draw counts
-    m_NumDrawCalls = 0;
-    m_NumTriangles = 0;
-
+    m_TimelineSemaphore = true;
+    m_IsOwned = true;
+    if (pName != nullptr)
+        m_Name.assign(pName);
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::BeginRenderPass(VkRect2D RenderExtent, float MinDepth, float MaxDepth, const tcb::span<const VkClearColorValue> ClearColors, uint32_t NumColorBuffers, bool HasDepth, VkRenderPass RenderPass, bool IsSwapChainRenderPass, VkFramebuffer FrameBuffer, VkSubpassContents SubContents)
+bool Wrap_VkSemaphore::InitializeExternal(VkSemaphore externalBinarySemaphore, const char* pName)
 //-----------------------------------------------------------------------------
 {
-    VkResult RetVal = VK_SUCCESS;
-
-    // ... set Viewport and Scissor for this pass ...
-    VkViewport Viewport = {};
-    Viewport.x = (float)RenderExtent.offset.x;
-    Viewport.y = (float)RenderExtent.offset.y;
-    Viewport.width = (float)RenderExtent.extent.width;
-    Viewport.height = (float)RenderExtent.extent.height;
-    Viewport.minDepth = MinDepth;
-    Viewport.maxDepth = MaxDepth;
-
-    vkCmdSetViewport(m_VkCommandBuffer, 0, 1, &Viewport);
-    vkCmdSetScissor(m_VkCommandBuffer, 0, 1, &RenderExtent);
-
-    // ... set clear values ...
-    std::array<VkClearValue, 9> ClearValues;
-    uint32_t ClearValuesCount = 0;
-
-    for (uint32_t i=0; i< NumColorBuffers; ++i)
-    {
-        ClearValues[ClearValuesCount].color = ClearColors[ClearColors.size() > NumColorBuffers ? ClearValuesCount : 0];
-        ++ClearValuesCount;
-    }
-    if (HasDepth)
-    {
-        ClearValues[ClearValuesCount].depthStencil.depth = MaxDepth;
-        ClearValues[ClearValuesCount].depthStencil.stencil = 0;
-        ++ClearValuesCount;
-    }
-
-    // ... begin render pass ...
-    VkRenderPassBeginInfo RPBeginInfo = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    RPBeginInfo.renderPass = RenderPass;
-    RPBeginInfo.renderArea = RenderExtent;
-    RPBeginInfo.clearValueCount = ClearValuesCount;
-    RPBeginInfo.pClearValues = ClearValues.data();
-    VkRenderPassTransformBeginInfoQCOM RPTransformBeginInfoQCOM = {};
-
-    RPBeginInfo.framebuffer = FrameBuffer;
-
-    if (IsSwapChainRenderPass && m_pVulkan->FillRenderPassTransformBeginInfoQCOM(RPTransformBeginInfoQCOM))
-    {
-        //LOGI("RPTransformBeginInfoQCOM(%s): Pre swap Extents = (%d x %d) transform = %d", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, RPTransformBeginInfoQCOM.transform);
-        RPBeginInfo.pNext = &RPTransformBeginInfoQCOM;
-    }
-
-    //LOGI("BeginRenderPass(%s): Extents = (%d x %d) %s", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, (RPBeginInfo.pNext == &RPTransformBeginInfoQCOM) ? " (transformed)" : "");
-
-    vkCmdBeginRenderPass(m_VkCommandBuffer, &RPBeginInfo, SubContents);
+    assert(m_Semaphore == VK_NULL_HANDLE);
+    m_Semaphore = externalBinarySemaphore;
+    m_TimelineSemaphore = false;
+    m_IsOwned = false;
+    if (pName != nullptr)
+        m_Name.assign(pName);
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::BeginRenderPass(const CRenderTarget& renderTarget, VkRenderPass RenderPass, VkSubpassContents SubContents)
+void Wrap_VkSemaphore::Release(Vulkan& vulkan)
 //-----------------------------------------------------------------------------
 {
-    VkRect2D Scissor = {};
-    Scissor.offset.x = 0;
-    Scissor.offset.y = 0;
-    Scissor.extent.width = renderTarget.m_Width;
-    Scissor.extent.height = renderTarget.m_Height;
-
-    return BeginRenderPass(Scissor, 0.0f, 1.0f, { renderTarget.m_ClearColorValues.data(), renderTarget.m_ClearColorValues.size() }, renderTarget.GetNumColorLayers(), renderTarget.m_DepthFormat != VK_FORMAT_UNDEFINED, RenderPass, false, renderTarget.m_FrameBuffer, SubContents);
-}
-
-//-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::NextSubpass( VkSubpassContents SubContents )
-//-----------------------------------------------------------------------------
-{
-    vkCmdNextSubpass(m_VkCommandBuffer, SubContents);
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::EndRenderPass()
-//-----------------------------------------------------------------------------
-{
-    vkCmdEndRenderPass(m_VkCommandBuffer);
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool Wrap_VkCommandBuffer::End()
-//-----------------------------------------------------------------------------
-{
-    VkResult RetVal;
-
-    if (m_VkCommandBuffer == VK_NULL_HANDLE)
-    {
-        LOGE("Error! Trying to end command buffer before it has been initialized: %s", m_Name.c_str());
-        return false;
-    }
-
-    // By ending the command buffer, it is put out of record mode.
-    RetVal = vkEndCommandBuffer(m_VkCommandBuffer);
-    if (!CheckVkError("vkEndCommandBuffer()", RetVal))
-    {
-        LOGE("Unable to end command buffer: %s", m_Name.c_str());
-        return false;
-    }
-
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-void Wrap_VkCommandBuffer::QueueSubmit( const tcb::span<const VkSemaphore> WaitSemaphores, const tcb::span<const VkPipelineStageFlags> WaitDstStageMasks, const tcb::span<const VkSemaphore> SignalSemaphores, VkFence CompletionFence ) const
-//-----------------------------------------------------------------------------
-{
-    assert( m_VkCommandBuffer != VK_NULL_HANDLE );
-    m_pVulkan->QueueSubmit( { &m_VkCommandBuffer, 1 }, WaitSemaphores, WaitDstStageMasks, SignalSemaphores, m_UseComputeCmdPool, CompletionFence );
-}
-
-//-----------------------------------------------------------------------------
-void Wrap_VkCommandBuffer::QueueSubmit( const Vulkan::BufferIndexAndFence& CurrentVulkanBuffer, VkSemaphore renderCompleteSemaphore ) const
-//-----------------------------------------------------------------------------
-{
-    assert( m_VkCommandBuffer != VK_NULL_HANDLE );
-    QueueSubmit( CurrentVulkanBuffer.semaphore, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, renderCompleteSemaphore, CurrentVulkanBuffer.fence );
-}
-
-
-//-----------------------------------------------------------------------------
-void Wrap_VkCommandBuffer::Release()
-//-----------------------------------------------------------------------------
-{
-    if (m_VkCommandBuffer != VK_NULL_HANDLE)
-    {
-        // Do not need to worry about the device or pool being NULL since we could 
-        // not have created the command buffer!
-        auto* cmdPool = m_UseComputeCmdPool ? m_pVulkan->m_VulkanComputeCmdPool : m_pVulkan->m_VulkanCmdPool;
-        vkFreeCommandBuffers(m_pVulkan->m_VulkanDevice, cmdPool, 1, &m_VkCommandBuffer);
-    }
-
-    // Clear everything back to starting state
-    HardReset();
+    if (m_IsOwned && m_Semaphore != VK_NULL_HANDLE)
+        vkDestroySemaphore(vulkan.m_VulkanDevice, m_Semaphore, nullptr);
+    m_Semaphore = VK_NULL_HANDLE;
+    m_Name.clear();
 }

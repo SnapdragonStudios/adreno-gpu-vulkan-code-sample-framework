@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,15 +9,19 @@
 
 #include <assert.h>
 #include <array>
+#include <span>
+#include <algorithm>
+#include "texture/vulkan/texture.hpp"
 #include "vulkan.hpp"
-#include "tcb/span.hpp"
-#include "vulkan/TextureFuncts.h"
-#include "material/shaderModule.hpp"
+//#include "TextureFuncts.h"
 #include "system/os_common.h"
 
 //=============================================================================
 // CRenderTarget
 //=============================================================================
+
+/// Container for a single frame render target.
+/// Contains multiple color buffers, multiple resolve buffers, and an optional depth buffer.
 class CRenderTarget
 {
     // Functions
@@ -32,59 +36,58 @@ public:
 
     uint32_t GetNumColorLayers() const { return (uint32_t)m_pLayerFormats.size(); }
 
-    void HardReset();
-    bool Initialize( Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat = VK_FORMAT_D24_UNORM_S8_UINT, tcb::span<const VkSampleCountFlagBits> Msaa = {}, const char* pName = NULL);
-    bool Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat = VK_FORMAT_D24_UNORM_S8_UINT, VkSampleCountFlagBits Msaa = VK_SAMPLE_COUNT_1_BIT, const char* pName = NULL)
+    bool Initialize( Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, TextureFormat DepthFormat = TextureFormat::D24_UNORM_S8_UINT, std::span<const VkSampleCountFlagBits> Msaa = {}, const char* pName = NULL);
+    bool Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, TextureFormat DepthFormat = TextureFormat::D24_UNORM_S8_UINT, VkSampleCountFlagBits Msaa = VK_SAMPLE_COUNT_1_BIT, const char* pName = NULL)
     {
         return Initialize(pVulkan, uiWidth, uiHeight, pLayerFormats, DepthFormat, { &Msaa,1 }, pName);
     }
 private:
     template<uint32_t T_NUM_BUFFERS> friend class CRenderTargetArray;
     bool InitializeDepth();
-    bool InitializeColor(const tcb::span<const TEXTURE_TYPE> TextureTypes);
-    bool InitializeResolve(const tcb::span<const TEXTURE_TYPE> TextureTypes);
+    bool InitializeColor(const std::span<const TEXTURE_TYPE> TextureTypes);
+    bool InitializeResolve(const std::span<const TextureFormat> ResolveTextureFormats);
 
     // Allow buffers to be initialized from the swapchain (for render target that writes to the swapchain)
     bool InitializeColor(const SwapchainBuffers& SwapchainBuffer);
     bool InitializeResolve(const SwapchainBuffers& SwapchainBuffer);
 
-    bool InitializeFrameBuffer(VkRenderPass renderPass, const tcb::span<const VulkanTexInfo> ColorAttachments, const VulkanTexInfo* pDepthAttachment, const tcb::span<const VulkanTexInfo> ResolveAttachments, const VulkanTexInfo* pVRSAttachment, VkFramebuffer* pFramebuffer);
+    bool InitializeFrameBuffer(VkRenderPass renderPass, const std::span<const TextureVulkan> ColorAttachments, const TextureVulkan* pDepthAttachment, const std::span<const TextureVulkan> ResolveAttachments, const TextureVulkan* pVRSAttachment, VkFramebuffer* pFramebuffer);
 
-    void SetClearColors(const tcb::span<const VkClearColorValue> clearColors);
+    void SetClearColors(const std::span<const VkClearColorValue> clearColors);
 
-    void Release();
+    void Release(bool bReleaseFramebuffers /*set true if we are the owner of the framebuffers (and so want to clean them up)*/);
 
     // Attributes
 public:
     std::string         m_Name;
 
-    uint32_t            m_Width;
-    uint32_t            m_Height;
+    uint32_t            m_Width = 0;
+    uint32_t            m_Height = 0;
 
-    std::vector<VkFormat> m_pLayerFormats;
+    std::vector<TextureFormat> m_pLayerFormats;
     std::vector<VkSampleCountFlagBits> m_Msaa;
-    std::vector<VkFilter> m_FilterMode;
-    VkFormat            m_DepthFormat;
+    std::vector<SamplerFilter> m_FilterMode;
+    TextureFormat            m_DepthFormat = TextureFormat::UNDEFINED;
 
     // The Color Attachments
 
-    std::vector<VulkanTexInfo> m_ColorAttachments;
+    std::vector<TextureVulkan> m_ColorAttachments;
     std::vector<VkClearColorValue> m_ClearColorValues;
 
     // The Resolve Attachments
-    std::vector<VulkanTexInfo> m_ResolveAttachments;
+    std::vector<TextureVulkan> m_ResolveAttachments;
 
     // The Depth Attachment
-    VulkanTexInfo		m_DepthAttachment;
+    TextureVulkan		m_DepthAttachment;
 
     // The Frame Buffer
-    VkFramebuffer       m_FrameBuffer;
+    VkFramebuffer       m_FrameBuffer = VK_NULL_HANDLE;
 
     // The Frame Buffer (depth only)
-    VkFramebuffer       m_FrameBufferDepthOnly;
+    VkFramebuffer       m_FrameBufferDepthOnly = VK_NULL_HANDLE;
 
 private:
-    Vulkan* m_pVulkan;
+    Vulkan* m_pVulkan = nullptr;
 };
 
 /// Fixed size array of CRenderTargets (eg one per 'frame') that share RenderPass objects
@@ -102,18 +105,19 @@ public:
     /// @brief initialize the render target array (including depth) with the given dimensions and buffer formats.
     /// Creates VkRenderPasses for color and depth only passes (for the purpose of creating the pipeline).  Creates the pipeline referencing these buffers (and one for depth only rendering).
     /// @return true if successful
-    bool Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat = VK_FORMAT_D24_UNORM_S8_UINT, VkSampleCountFlagBits Msaa = VK_SAMPLE_COUNT_1_BIT, const char* pName = NULL, const tcb::span<const TEXTURE_TYPE> ColorTypes = {}, VkFilter FilterMode = VK_FILTER_LINEAR, const VulkanTexInfo* pVRSMap = VK_NULL_HANDLE );
+    bool Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, TextureFormat DepthFormat = TextureFormat::D24_UNORM_S8_UINT, VkSampleCountFlagBits Msaa = VK_SAMPLE_COUNT_1_BIT, const char* pName = NULL, const std::span<const TEXTURE_TYPE> ColorTypes = {}, const std::span<const SamplerFilter> FilterModes = {}, const TextureVulkan* pVRSMap = VK_NULL_HANDLE, std::span<const TextureFormat> ResolveFormats = {}/*default no resolve*/);
     /// @brief initialize the render target array with the given dimensions and buffer formats.  Creates render passes for the purpose of creating the pipeline.  Pipeline is initialized with the depth buffer passed in inheritDepth parameter.  If Present is true will write output to the backbuffer (with resolve as appropriate)
     /// Creates VkRenderPasses for color and depth only passes.
     /// @return true if successful
-    bool Initialize( Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, const CRenderTargetArray<T_NUM_BUFFERS>& inheritDepth, VkSampleCountFlagBits Msaa = VK_SAMPLE_COUNT_1_BIT, const char* pName = NULL, const tcb::span<const TEXTURE_TYPE> ColorTypes = {}, VkFilter FilterMode = VK_FILTER_LINEAR, const VulkanTexInfo* pVRSMap = VK_NULL_HANDLE);
+    bool Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, const CRenderTargetArray<T_NUM_BUFFERS>& inheritDepth, VkSampleCountFlagBits Msaa = VK_SAMPLE_COUNT_1_BIT, const char* pName = NULL, const std::span<const TEXTURE_TYPE> ColorTypes = {}, const std::span<const SamplerFilter> FilterModes = {}, const TextureVulkan* pVRSMap = VK_NULL_HANDLE);
+    bool Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, const std::array<const TextureVulkan*, T_NUM_BUFFERS>& inheritDepth, VkSampleCountFlagBits Msaa = VK_SAMPLE_COUNT_1_BIT, const char* pName = NULL, const std::span<const TEXTURE_TYPE> ColorTypes = {}, const std::span<const SamplerFilter> FilterModes = {}, const TextureVulkan* pVRSMap = VK_NULL_HANDLE);
     /// @brief initialize the render target array with the given dimensions and buffer formats.  DOES take ownership of the passed in render passes.  Because render passes could have a mix of msaa settings  take a span for each color buffer.
-    bool Initialize( Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat, VkRenderPass RenderPass, VkRenderPass RenderPassDepthOnly, tcb::span<const VkSampleCountFlagBits> Msaa = {}, const char* pName = NULL, const tcb::span<const TEXTURE_TYPE> ColorTypes = {}, VkFilter FilterMode = VK_FILTER_LINEAR, const VulkanTexInfo* pVRSMap = VK_NULL_HANDLE);
+    bool Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, TextureFormat DepthFormat, VkRenderPass RenderPass, VkRenderPass RenderPassDepthOnly, std::span<const VkSampleCountFlagBits> Msaa = {}, const char* pName = NULL, const std::span<const TEXTURE_TYPE> ColorTypes = {}, const std::span<const SamplerFilter> FilterModes = {}, const TextureVulkan* pVRSMap = VK_NULL_HANDLE);
     /// @brief initialize the render target array using the vulkan swapchain pipeline and swapchain resolution/format.  Use as a helper to render to the swapchain  
     bool InitializeFromSwapchain( Vulkan* pVulkan );
 
     /// @brief Set the clear colors for all the render target buffers (all targets set to the same set of clear colors)
-    void SetClearColors(const tcb::span<const VkClearColorValue> clearColors);
+    void SetClearColors(const std::span<const VkClearColorValue> clearColors);
 
     void Release();
     const CRenderTarget& operator[](size_t idx) const { return m_RenderTargets[idx]; }
@@ -125,6 +129,8 @@ public:
     VkRenderPass  m_RenderPassDepthOnly = VK_NULL_HANDLE;
     /// The render target buffers
     std::array<CRenderTarget, T_NUM_BUFFERS> m_RenderTargets;
+    /// Set if the framebuffers in m_RenderTargets are owned (created) by CRenderTargetArray or are owned externally (eg by @Vulkan in the case of @InitializeFromSwapchain)
+    bool m_FramebufferOwner = false;
 
 private:
     Vulkan* m_pVulkan = nullptr;
@@ -144,6 +150,8 @@ CRenderTargetArray<T_NUM_BUFFERS>& CRenderTargetArray<T_NUM_BUFFERS>::operator=(
         m_RenderPassDepthOnly = src.m_RenderPassDepthOnly;
         src.m_RenderPassDepthOnly = VK_NULL_HANDLE;
         m_RenderTargets = std::move( src.m_RenderTargets );
+        m_FramebufferOwner = src.m_FramebufferOwner;
+        src.m_FramebufferOwner = false;
         m_pVulkan = src.m_pVulkan;
         src.m_pVulkan = nullptr;
     }
@@ -166,7 +174,7 @@ template<uint32_t T_NUM_BUFFERS>
 void CRenderTargetArray<T_NUM_BUFFERS>::Release()
 {
     for (int WhichBuffer = T_NUM_BUFFERS - 1; WhichBuffer >= 0; --WhichBuffer)
-        m_RenderTargets[WhichBuffer].Release();
+        m_RenderTargets[WhichBuffer].Release(m_FramebufferOwner);
     if (m_RenderPassDepthOnly != VK_NULL_HANDLE)
         vkDestroyRenderPass(m_pVulkan->m_VulkanDevice, m_RenderPassDepthOnly, NULL);
     m_RenderPassDepthOnly = VK_NULL_HANDLE;
@@ -176,14 +184,14 @@ void CRenderTargetArray<T_NUM_BUFFERS>::Release()
 }
 
 template<uint32_t T_NUM_BUFFERS>
-bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat, VkSampleCountFlagBits Msaa, const char* pName, const tcb::span<const TEXTURE_TYPE> ColorTypes, VkFilter FilterMode, const VulkanTexInfo* pVRSMap)
+bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, TextureFormat DepthFormat, VkSampleCountFlagBits Msaa, const char* pName, const std::span<const TEXTURE_TYPE> ColorTypes, const std::span<const SamplerFilter> FilterModes, const TextureVulkan* pVRSMap, std::span<const TextureFormat> ResolveFormats)
 {
     m_pVulkan = pVulkan;
 
     if (pVRSMap)
     {
         // ... create the render pass...
-        if (!pVulkan->CreateRenderPassVRS( pLayerFormats, DepthFormat, Msaa, RenderPassInputUsage::Clear, RenderPassOutputUsage::StoreReadOnly, true, RenderPassOutputUsage::StoreReadOnly, &m_RenderPass ))
+        if (!pVulkan->CreateRenderPassVRS( pLayerFormats, DepthFormat, Msaa, RenderPassInputUsage::Clear, RenderPassOutputUsage::StoreReadOnly, true, RenderPassOutputUsage::StoreReadOnly, &m_RenderPass, ResolveFormats ))
         {
             LOGE( "Unable to create render pass: %s", pName );
             return false;
@@ -200,7 +208,7 @@ bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiW
     else
     {
         // ... create the render pass...
-        if (!pVulkan->CreateRenderPass(pLayerFormats, DepthFormat, Msaa, RenderPassInputUsage::Clear, RenderPassOutputUsage::StoreReadOnly, true, RenderPassOutputUsage::StoreReadOnly, &m_RenderPass))
+        if (!pVulkan->CreateRenderPass(pLayerFormats, DepthFormat, Msaa, RenderPassInputUsage::Clear, RenderPassOutputUsage::StoreReadOnly, true, RenderPassOutputUsage::StoreReadOnly, &m_RenderPass, ResolveFormats))
         {
             LOGE("Unable to create render pass: %s", pName);
             return false;
@@ -213,7 +221,8 @@ bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiW
         }
     }
 
-    // ... create the render targets...
+    // ... create the render targets and framebuffers
+    m_FramebufferOwner = true;
     char szName[128];
     uint32_t WhichBuffer = 0;
     for (auto& RenderTarget : m_RenderTargets)
@@ -223,9 +232,14 @@ bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiW
         {
             return false;
         }
-        std::fill(RenderTarget.m_FilterMode.begin(), RenderTarget.m_FilterMode.end(), FilterMode);
+        if (FilterModes.empty())
+            std::fill(RenderTarget.m_FilterMode.begin(), RenderTarget.m_FilterMode.end(), SamplerFilter::Linear);
+        else
+            RenderTarget.m_FilterMode.assign(std::begin(FilterModes), std::end(FilterModes));
         RenderTarget.InitializeDepth();
         RenderTarget.InitializeColor(ColorTypes);
+        if (!ResolveFormats.empty())
+            RenderTarget.InitializeResolve(ResolveFormats);
         RenderTarget.InitializeFrameBuffer(m_RenderPass, RenderTarget.m_ColorAttachments, &RenderTarget.m_DepthAttachment, RenderTarget.m_ResolveAttachments, pVRSMap, &RenderTarget.m_FrameBuffer);
         RenderTarget.InitializeFrameBuffer(m_RenderPassDepthOnly, {}, &RenderTarget.m_DepthAttachment, {}, pVRSMap, &RenderTarget.m_FrameBufferDepthOnly);
         pVulkan->SetDebugObjectName(RenderTarget.m_FrameBuffer, szName);
@@ -235,13 +249,14 @@ bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiW
 }
 
 template<uint32_t T_NUM_BUFFERS>
-bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat, VkRenderPass RenderPass, VkRenderPass RenderPassDepthOnly, tcb::span<const VkSampleCountFlagBits> Msaa, const char* pName, const tcb::span<const TEXTURE_TYPE> ColorTypes, VkFilter FilterMode, const VulkanTexInfo* pVRSMap)
+bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, TextureFormat DepthFormat, VkRenderPass RenderPass, VkRenderPass RenderPassDepthOnly, std::span<const VkSampleCountFlagBits> Msaa, const char* pName, const std::span<const TEXTURE_TYPE> ColorTypes, const std::span<const SamplerFilter> FilterModes, const TextureVulkan* pVRSMap)
 {
     m_pVulkan = pVulkan;
     m_RenderPass = RenderPass;
     m_RenderPassDepthOnly = RenderPassDepthOnly;
 
-    // ... create the render targets...
+    // ... create the render targets and framebuffers
+    m_FramebufferOwner = true;
     char szName[128];
     uint32_t WhichBuffer = 0;
     for (auto& RenderTarget : m_RenderTargets)
@@ -251,7 +266,10 @@ bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiW
         {
             return false;
         }
-        std::fill(RenderTarget.m_FilterMode.begin(), RenderTarget.m_FilterMode.end(), FilterMode);
+        if (FilterModes.empty())
+            std::fill(RenderTarget.m_FilterMode.begin(), RenderTarget.m_FilterMode.end(), SamplerFilter::Linear);
+        else
+            RenderTarget.m_FilterMode.assign(std::begin(FilterModes), std::end(FilterModes));
         RenderTarget.InitializeDepth();
         RenderTarget.InitializeColor(ColorTypes);
         if( RenderPass != VK_NULL_HANDLE )
@@ -268,14 +286,22 @@ bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiW
 }
 
 template<uint32_t T_NUM_BUFFERS>
-bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, const CRenderTargetArray<T_NUM_BUFFERS>& depthBuffer, VkSampleCountFlagBits Msaa, const char* pName, const tcb::span<const TEXTURE_TYPE> ColorTypes, VkFilter FilterMode, const VulkanTexInfo* pVRSMap )
+bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, const CRenderTargetArray<T_NUM_BUFFERS>& inheritDepth, VkSampleCountFlagBits Msaa, const char* pName, const std::span<const TEXTURE_TYPE> ColorTypes, const std::span<const SamplerFilter> FilterModes, const TextureVulkan* pVRSMap)
+{
+    std::array<const TextureVulkan*, T_NUM_BUFFERS> pReferencedDepthTextures;
+    std::transform(std::begin(inheritDepth.m_RenderTargets), std::end(inheritDepth.m_RenderTargets), std::begin(pReferencedDepthTextures), [](const CRenderTarget& rt) { return &rt.m_DepthAttachment; });
+    return Initialize(pVulkan, uiWidth, uiHeight, pLayerFormats, pReferencedDepthTextures, Msaa, pName, ColorTypes, FilterModes, pVRSMap);
+}
+
+template<uint32_t T_NUM_BUFFERS>
+bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, const std::array<const TextureVulkan*, T_NUM_BUFFERS>& inheritDepth, VkSampleCountFlagBits Msaa, const char* pName, const std::span<const TEXTURE_TYPE> ColorTypes, const std::span<const SamplerFilter> FilterModes, const TextureVulkan* pVRSMap)
 {
     m_pVulkan = pVulkan;
 
     if (pVRSMap)
     {
         // ... create the render pass (color only)...
-        if (!pVulkan->CreateRenderPassVRS( pLayerFormats, depthBuffer[0].m_DepthFormat, Msaa, RenderPassInputUsage::Clear, RenderPassOutputUsage::StoreReadOnly, true, RenderPassOutputUsage::StoreReadOnly, &m_RenderPass ))
+        if (!pVulkan->CreateRenderPassVRS( pLayerFormats, inheritDepth[0]->Format, Msaa, RenderPassInputUsage::Clear, RenderPassOutputUsage::StoreReadOnly, true, RenderPassOutputUsage::StoreReadOnly, &m_RenderPass ))
         {
             LOGE( "Unable to create render pass: %s", pName );
             return false;
@@ -284,29 +310,33 @@ bool CRenderTargetArray<T_NUM_BUFFERS>::Initialize(Vulkan* pVulkan, uint32_t uiW
     else
     {
         // ... create the render pass (color only)...
-        if (!pVulkan->CreateRenderPass(pLayerFormats, depthBuffer[0].m_DepthFormat, Msaa, RenderPassInputUsage::Clear, RenderPassOutputUsage::StoreReadOnly, true, RenderPassOutputUsage::StoreReadOnly, &m_RenderPass))
+        if (!pVulkan->CreateRenderPass(pLayerFormats, inheritDepth[0]->Format, Msaa, RenderPassInputUsage::Clear, RenderPassOutputUsage::StoreReadOnly, true, RenderPassOutputUsage::StoreReadOnly, &m_RenderPass))
         {
             LOGE("Unable to create render pass: %s", pName);
             return false;
         }
     }
 
-    // Create the render targets
+    // Create the render target and framebuffers
+    m_FramebufferOwner = true;
     char szName[128];
     uint32_t WhichBuffer = 0;
     for (auto& RenderTarget : m_RenderTargets)
     {
         snprintf(szName, sizeof(szName), "%s (Buffer %d of %d)", pName, WhichBuffer + 1, T_NUM_BUFFERS);  szName[sizeof(szName) - 1] = 0;
-        if (!RenderTarget.Initialize(pVulkan, uiWidth, uiHeight, pLayerFormats, depthBuffer[WhichBuffer].m_DepthFormat, Msaa, szName))
+        if (!RenderTarget.Initialize(pVulkan, uiWidth, uiHeight, pLayerFormats, inheritDepth[WhichBuffer]->Format, Msaa, szName))
         {
             return false;
         }
-        std::fill(RenderTarget.m_FilterMode.begin(), RenderTarget.m_FilterMode.end(), FilterMode);
+        if (FilterModes.empty())
+            std::fill(RenderTarget.m_FilterMode.begin(), RenderTarget.m_FilterMode.end(), SamplerFilter::Linear);
+        else
+            RenderTarget.m_FilterMode.assign(std::begin(FilterModes), std::end(FilterModes));
         if (!RenderTarget.InitializeColor(ColorTypes))
         {
             return false;
         }
-        if (!RenderTarget.InitializeFrameBuffer(m_RenderPass, RenderTarget.m_ColorAttachments, &depthBuffer[WhichBuffer].m_DepthAttachment, RenderTarget.m_ResolveAttachments, pVRSMap, &RenderTarget.m_FrameBuffer))
+        if (!RenderTarget.InitializeFrameBuffer(m_RenderPass, RenderTarget.m_ColorAttachments, inheritDepth[WhichBuffer], RenderTarget.m_ResolveAttachments, pVRSMap, &RenderTarget.m_FrameBuffer))
         {
             return false;
         }
@@ -319,14 +349,17 @@ template<uint32_t T_NUM_BUFFERS>
 bool CRenderTargetArray<T_NUM_BUFFERS>::InitializeFromSwapchain(Vulkan* pVulkan)
 {
     m_pVulkan = pVulkan;
+    m_FramebufferOwner = false;
+    const TextureFormat surfaceFormat = pVulkan->m_SurfaceFormat;
+    const TextureFormat depthFormat = pVulkan->m_SwapchainDepth.format;
 
     size_t WhichFrame = 0;
     for (auto& RenderTarget : m_RenderTargets)
     {
-        if (!RenderTarget.Initialize(pVulkan, pVulkan->m_SurfaceWidth, pVulkan->m_SurfaceHeight, { &pVulkan->m_SurfaceFormat, 1 }, pVulkan->m_SwapchainDepth.format, VK_SAMPLE_COUNT_1_BIT, "Swapchain"))
+        if (!RenderTarget.Initialize(pVulkan, pVulkan->m_SurfaceWidth, pVulkan->m_SurfaceHeight, { &surfaceFormat, 1 }, depthFormat, VK_SAMPLE_COUNT_1_BIT, "Swapchain"))
             return false;
-        if (WhichFrame < pVulkan->m_pSwapchainFrameBuffers.size())
-            RenderTarget.m_FrameBuffer = pVulkan->m_pSwapchainFrameBuffers[WhichFrame];
+        if (WhichFrame < pVulkan->m_SwapchainBuffers.size())
+            RenderTarget.m_FrameBuffer = pVulkan->m_SwapchainBuffers[WhichFrame].framebuffer;
         else
             RenderTarget.m_FrameBuffer = VK_NULL_HANDLE;
         ++WhichFrame;
@@ -336,7 +369,7 @@ bool CRenderTargetArray<T_NUM_BUFFERS>::InitializeFromSwapchain(Vulkan* pVulkan)
 
 
 template<uint32_t T_NUM_BUFFERS>
-void CRenderTargetArray<T_NUM_BUFFERS>::SetClearColors(const tcb::span<const VkClearColorValue> clearColors)
+void CRenderTargetArray<T_NUM_BUFFERS>::SetClearColors(const std::span<const VkClearColorValue> clearColors)
 {
     for (auto& RenderTarget : m_RenderTargets)
         RenderTarget.SetClearColors(clearColors);

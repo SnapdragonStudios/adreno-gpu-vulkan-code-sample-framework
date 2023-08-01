@@ -1,38 +1,29 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
-#include <vector>
-#include <vulkan/vulkan.h>
-#include "tcb/span.hpp"
-
 // Forward declarations
-class Vulkan;
 class DescriptorSetLayout;
 
 
-/// Simple wrapper around VkPipelineLayout.
+/// Simple wrapper around VkPipelineLayout or RootSignature.
 /// Simplifies creation (and checks for leaks on destruction - is up to the owner to call Destroy)
+/// This template class expected to be specialized (if this template throws compiler errors then the code is not using the specialization classes which is an issue!)
 /// @ingroup Material
+template<typename T_GFXAPI>
 class PipelineLayout
 {
-	PipelineLayout& operator=(const PipelineLayout&) = delete;
-	PipelineLayout(const PipelineLayout&) = delete;
+	PipelineLayout& operator=(const PipelineLayout<T_GFXAPI>&) = delete;
+	PipelineLayout(const PipelineLayout<T_GFXAPI>&) = delete;
 public:
-	PipelineLayout();
-	PipelineLayout(PipelineLayout&&) noexcept;
-	~PipelineLayout();
+    PipelineLayout() noexcept = delete;
+	PipelineLayout(PipelineLayout<T_GFXAPI>&&) noexcept = delete;
+	~PipelineLayout() = delete;
 
-	bool Init(Vulkan& vulkan, const tcb::span<const DescriptorSetLayout>);
-	bool Init(Vulkan& vulkan, const tcb::span<const VkDescriptorSetLayout> vkDescriptorSetLayouts);
-	void Destroy(Vulkan& vulkan);
-
-	const auto& GetVkPipelineLayout() const { return m_pipelineLayout; }
-private:
-	VkPipelineLayout	m_pipelineLayout = VK_NULL_HANDLE;
+    static_assert(sizeof(PipelineLayout<T_GFXAPI>) >= 1);   // Ensure this class template is specialized (and not used as-is)
 };

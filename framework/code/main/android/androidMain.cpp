@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -18,7 +18,6 @@
 #include <cassert>
 #include <string>
 #include "system/os_common.h"
-#include "vulkan/vulkan.hpp"
 #include "gui/gui.hpp"
 
 
@@ -78,7 +77,7 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd)
 
             // InitializeVulkan
             assert(engine->application);
-            assert(engine->application->GetVulkan());
+            assert(engine->application->GetGraphicsApi());
             assert(engine->app->window);
 
             if (engine->application)
@@ -87,13 +86,7 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd)
             if (engine->initialized)
             {
                 // Already initialized (app resuming)
-                if (!engine->application->GetVulkan()->ReInit((uintptr_t)(void*)engine->app->window))
-                {
-                    LOGE("Unable to re-initialize Vulkan!!");
-                    engine->application->Destroy();
-                    engine->initialized = false;
-                }
-                else if (!engine->application->ReInitialize((uintptr_t)(void*)engine->app->window))
+                if (!engine->application->ReInitialize((uintptr_t)(void*)engine->app->window, (uintptr_t)0))
                 {
                     LOGE("VkSample::ReInitialize Error");
                     engine->initialized = false;    // do tear-down?
@@ -112,15 +105,7 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd)
 
             if (!engine->initialized)
             {
-                if (!engine->application->GetVulkan()->Init((uintptr_t)(void*)engine->app->window,
-                    0,
-                    [engine](tcb::span<const VkSurfaceFormatKHR> x) { return engine->application->PreInitializeSelectSurfaceFormat(x); },
-                    [engine](Vulkan::AppConfiguration& x) { return engine->application->PreInitializeSetVulkanConfiguration(x); }))
-                {
-                    LOGE("Unable to initialize Vulkan!!");
-                    engine->initialized = false;    //assert above already checked this, but set anyhow
-                }
-                else if (!engine->application->Initialize((uintptr_t)(void*)engine->app->window))
+                if (!engine->application->Initialize((uintptr_t)(void*)engine->app->window, (uintptr_t)0))
                 {
                     LOGE("VkSample::Initialize Error");
                     engine->initialized = false;    //assert above already checked this, but set anyhow
@@ -301,6 +286,8 @@ void android_main(struct android_app* state)
     state->onAppCmd = engine_handle_cmd;
     state->onInputEvent = Input_CBHandler;
 
+    OS_SleepMs( 500 );
+
     //
     // Get the application name.
     ANativeActivity* activity = state->activity;
@@ -363,7 +350,7 @@ void android_main(struct android_app* state)
             // Check if we are exiting.
             if (state->destroyRequested != 0)
             {
-                LOGI("Exiting");
+                LOGI("Destrroy Requested; Exiting");
                 engine.application->Destroy();
                 delete engine.application;
                 return;
@@ -372,7 +359,13 @@ void android_main(struct android_app* state)
 
         if (engine.animating && engine.initialized)
         {
-            engine.application->Render();
+            if (!engine.application->Render())
+            {
+                LOGI("Render returned false; Exiting");
+                engine.application->Destroy();
+                delete engine.application;
+                return;
+            }
         }
     }
 }

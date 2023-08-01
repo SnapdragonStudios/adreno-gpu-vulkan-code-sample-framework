@@ -1,10 +1,10 @@
-//===========================================================================================
+//============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
-//===========================================================================================
+//============================================================================================================
 #pragma once
 
 ///
@@ -16,22 +16,23 @@
 
 #include "main/applicationHelperBase.hpp"
 #include "materials.hpp"
+#include "vulkan/commandBuffer.hpp"
 #include "vulkan/MeshObject.h"
 #include "vulkan/vulkan_support.hpp"
 #include "vulkan/TextureFuncts.h"
-#include "system/glm_common.hpp"
 #include "camera/camera.hpp"
-#include "shadow/shadow.hpp"
+#include "memory/vulkan/uniform.hpp"
+#include "shadow/shadowVulkan.hpp"
+#include "system/glm_common.hpp"
 
 #include <memory>
 #include <map>
 #include <string>
-#include "tcb/span.hpp" // replace with c++20 <span>
+#include <span>
 
 // Forward declarations
 class ShaderManager;
-class MaterialManager;
-class VulkanTexInfo;
+template<typename T_GFXAPI> class MaterialManagerT;
 class MaterialPass;
 class Material;
 class Computable;
@@ -57,8 +58,8 @@ public:
     ~Application() override;
 
     // Override FrameworkApplicationBase
-    int     PreInitializeSelectSurfaceFormat(tcb::span<const VkSurfaceFormatKHR>) override;
-    bool    Initialize(uintptr_t windowHandle) override;
+    int     PreInitializeSelectSurfaceFormat(std::span<const SurfaceFormat>) override;
+    bool    Initialize(uintptr_t windowHandle, uintptr_t instanceHandle) override;
     void    Destroy() override;
     void    Render(float fltDiffTime) override;
 
@@ -88,19 +89,17 @@ public:
     void    UpdateLighting(float ElapsedTime);
     void    UpdateShadowMap(float ElapsedTime);
 
-    bool    ChangeSurfaceFormat(VkSurfaceFormatKHR newSurfaceFormat);
+    bool    ChangeSurfaceFormat(SurfaceFormat newSurfaceFormat);
 
     void    BeginRenderPass(RENDER_PASS WhichPass);
     void    AddPassCommandBuffers(RENDER_PASS WhichPass);
-    void    AddPassCommandBuffers(RENDER_PASS WhichPass, tcb::span<VkCommandBuffer> SubCommandBuffers);
+    void    AddPassCommandBuffers(RENDER_PASS WhichPass, std::span<VkCommandBuffer> SubCommandBuffers);
     void    AddPassCommandBuffer(RENDER_PASS WhichPass, Wrap_VkCommandBuffer& SubCommandBuffer)
     {
         AddPassCommandBuffers(WhichPass, {&SubCommandBuffer.m_VkCommandBuffer, 1});
     }
     void    EndRenderPass(RENDER_PASS WhichPass);
-    void    SubmitRenderPass(RENDER_PASS WhichPass, const tcb::span<const VkSemaphore> WaitSemaphores, const tcb::span<const VkPipelineStageFlags> WaitDstStageMasks, const tcb::span<const VkSemaphore> SignalSemaphores, VkFence CompletionFence = VK_NULL_HANDLE);
-
-    VulkanTexInfo* GetOrLoadTexture(const char* textureName);
+    void    SubmitRenderPass(RENDER_PASS WhichPass, const std::span<const VkSemaphore> WaitSemaphores, const std::span<const VkPipelineStageFlags> WaitDstStageMasks, const std::span<const VkSemaphore> SignalSemaphores, VkFence CompletionFence = VK_NULL_HANDLE);
 
 private:
     // Private variable to hold which "swapchain" we are on
@@ -111,11 +110,12 @@ private:
     uint32_t            m_TotalTriangles;
 
     // Requested surface format (for changing formats)
-    VkSurfaceFormatKHR  m_RequestedSurfaceFormat;
+    SurfaceFormat       m_RequestedSurfaceFormat;
     // sRGB output (done in blit shader) on/off
     bool                m_bEncodeSRGB;
 
     // Drawables
+    std::unique_ptr<Drawable>   m_SkyboxDrawable;
     std::vector<Drawable>       m_SceneObject;
     std::unique_ptr<Drawable>   m_LightDrawable;
     std::unique_ptr<Drawable>   m_BlitDrawable;
@@ -126,22 +126,15 @@ private:
     std::unique_ptr<Computable> m_NNAOComputable;
 
     // Textures
-    std::map<std::string, VulkanTexInfo> m_loadedTextures;
-    VulkanTexInfo                        m_TexWhite;
-    VulkanTexInfo                        m_DefaultNormal;
-
-    // Shaders
-    std::unique_ptr<ShaderManager> m_shaderManager;
-
-    // Materials
-    std::unique_ptr<MaterialManager> m_MaterialManager;
+    TextureVulkan           m_TexWhite;
+    TextureVulkan           m_DefaultNormal;
 
     // Light Stuff
     glm::vec4               m_LightColor;
 
     // Shadow Map stuff
     static const int        cNumShadows = 1;
-    std::array<Shadow, cNumShadows> m_Shadows;
+    std::array<ShadowVulkan, cNumShadows> m_Shadows;
 
     // **********************
     // The Object
@@ -157,11 +150,20 @@ private:
     Wrap_VkCommandBuffer    m_ObjectCmdBuffer[NUM_VULKAN_BUFFERS][NUM_RENDER_PASSES];
 
     // **********************
+    // The Skybox
+    // **********************
+    float                   m_SkyboxScale;
+    glm::vec3               m_SkyboxWorldPos;
+
+    UniformVulkan           m_SkyboxVertUniform[NUM_RENDER_PASSES][NUM_VULKAN_BUFFERS];
+    SkyboxVertUB            m_SkyboxVertUniformData;
+
+    // **********************
     // Deferred Lighting
     // **********************
     Wrap_VkCommandBuffer    m_LightCmdBuffer[NUM_VULKAN_BUFFERS];
     struct LightFragCtrl {
-        static const int cNUM_LIGHTS = 5;
+        static const int cNUM_LIGHTS = 8;
         glm::mat4 ProjectionInv;
         glm::mat4 ViewInv;
         glm::mat4 ViewProjectionInv; // ViewInv * ProjectionInv
@@ -179,7 +181,7 @@ private:
         int Height;
 
     } m_LightFragUniformData;
-    UniformT<LightFragCtrl>  m_LightFragUniform[NUM_VULKAN_BUFFERS];
+    UniformArrayT<LightFragCtrl, NUM_VULKAN_BUFFERS> m_LightFragUniform;
 
     // **********************
     // Post/Blit
@@ -189,7 +191,7 @@ private:
         float Diffuse = 1.0f;   // 0 to 2 range (dark to white)
         int sRGB = 0;           // 1 - apply srgb conversion in output blit shader, 0 passthrough color
     } m_BlitFragUniformData;
-    UniformT<BlitFragCtrl>  m_BlitFragUniform[NUM_VULKAN_BUFFERS];
+    UniformArrayT<BlitFragCtrl, NUM_VULKAN_BUFFERS> m_BlitFragUniform;
     Wrap_VkCommandBuffer    m_BlitCmdBuffer[NUM_VULKAN_BUFFERS];
 
     // **********************
@@ -216,16 +218,16 @@ private:
     UniformT<ComputeCtrl>   m_ComputeCtrlUniform;
     UniformT<ComputeCtrl>   m_ComputeCtrlUniformHalf;
     UniformT<ComputeCtrl>   m_ComputeCtrlUniformQuarter;
-    UniformT<NNAOCtrl>      m_NNAOCtrlUniform[NUM_RENDER_PASSES];
-    VulkanTexInfo           m_VsmTarget;
-    VulkanTexInfo           m_ComputeIntermediateHalfTarget;
-    VulkanTexInfo           m_ComputeIntermediateHalf2Target;
-    VulkanTexInfo           m_ComputeIntermediateQuarterTarget;
-    VulkanTexInfo           m_ComputeIntermediateQuarter2Target;
-    VulkanTexInfo           m_ComputeRenderTarget;
-    VulkanTexInfo           m_BloomRenderTarget;
-    VulkanTexInfo           m_NNAORenderTarget;
-    VulkanTexInfo           m_NNAOTempTarget;
+    UniformArrayT<NNAOCtrl, NUM_VULKAN_BUFFERS> m_NNAOCtrlUniform;
+    TextureVulkan           m_VsmTarget;
+    TextureVulkan           m_ComputeIntermediateHalfTarget;
+    TextureVulkan           m_ComputeIntermediateHalf2Target;
+    TextureVulkan           m_ComputeIntermediateQuarterTarget;
+    TextureVulkan           m_ComputeIntermediateQuarter2Target;
+    TextureVulkan           m_ComputeRenderTarget;
+    TextureVulkan           m_BloomRenderTarget;
+    TextureVulkan           m_NNAORenderTarget;
+    TextureVulkan           m_NNAOTempTarget;
 
     Wrap_VkCommandBuffer    m_VsmComputeCmdBuffer[NUM_VULKAN_BUFFERS];      // Command buffer to run VSM compute commands on the (regular) graphics queue 
     Wrap_VkCommandBuffer    m_VsmAsyncComputeCmdBuffer[NUM_VULKAN_BUFFERS]; // Command buffer for VSM on Async Compute queue (needs separate command buffer since command pool is tied to the destination queue)
@@ -241,8 +243,8 @@ private:
     // **********************
     struct PassSetup {
 
-        std::vector<VkFormat>   ColorFormats;
-        VkFormat                DepthFormat;
+        std::vector<TextureFormat> ColorFormats;
+        TextureFormat           DepthFormat;
         RenderPassInputUsage    ColorInputUsage;
         bool                    ClearDepthRenderPass;
         RenderPassOutputUsage   ColorOutputUsage;

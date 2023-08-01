@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -16,16 +16,22 @@
 
 using Json = nlohmann::json;
 
-ShaderPassDescription::ShaderPassDescription(std::vector<DescriptorSetDescription> setDescriptions, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, ShaderPassDescription::FixedFunctionSettings fixedFunctionSettings, ShaderPassDescription::SampleShadingSettings sampleShadingSettings, ShaderPassDescription::WorkGroupSettings workGroupSettings, std::vector<uint32_t> vertexFormatBindings)
+ShaderPassDescription::ShaderPassDescription(std::vector<DescriptorSetDescription> setDescriptions, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, std::string rayGenerationName, std::string rayClosestHitName, std::string rayAnyHitName, std::string rayMissName, ShaderPassDescription::FixedFunctionSettings fixedFunctionSettings, ShaderPassDescription::SampleShadingSettings sampleShadingSettings, ShaderPassDescription::WorkGroupSettings workGroupSettings, ShaderPassDescription::RayTracingSettings rayTracingSettings, std::vector<uint32_t> vertexFormatBindings, std::vector<SpecializationConstantDescription> specializationConstants )
     : m_sets(std::move(setDescriptions))
     , m_outputs(std::move(outputs))
     , m_computeName(std::move(computeName))
     , m_vertexName(std::move(vertexName))
     , m_fragmentName(std::move(fragmentName))
+    , m_rayGenerationName(std::move(rayGenerationName))
+    , m_rayClosestHitName(std::move(rayClosestHitName))
+    , m_rayAnyHitName(std::move(rayAnyHitName))
+    , m_rayMissName(std::move(rayMissName))
     , m_fixedFunctionSettings(std::move(fixedFunctionSettings))
     , m_sampleShadingSettings(std::move(sampleShadingSettings))
     , m_workGroupSettings(std::move(workGroupSettings))
+    , m_rayTracingSettings(std::move(rayTracingSettings))
     , m_vertexFormatBindings(std::move(vertexFormatBindings))
+    , m_constants(std::move(specializationConstants))
 //    , m_vertexInstanceFormatBindings(std::move(vertexInstanceFormatBindings))
 {
 }
@@ -33,6 +39,7 @@ ShaderPassDescription::ShaderPassDescription(std::vector<DescriptorSetDescriptio
 const static std::map<std::string, VertexFormat::Element::ElementType> cElementTypeByName{
     {"Int32", VertexFormat::Element::ElementType::t::Int32},
     {"Float", VertexFormat::Element::ElementType::t::Float},
+    {"Boolean", VertexFormat::Element::ElementType::t::Boolean},
     {"Vec2", VertexFormat::Element::ElementType::t::Vec2},
     {"Vec3", VertexFormat::Element::ElementType::t::Vec3},
     {"Vec4", VertexFormat::Element::ElementType::t::Vec4},
@@ -53,17 +60,24 @@ struct DescriptorTypeAndReadOnly {
 };
 const static std::map<std::string, DescriptorTypeAndReadOnly> cBufferTypeByName {
     {"ImageSampler",  {DescriptorSetDescription::DescriptorType::ImageSampler, true}},
+    {"ImageSampled",  {DescriptorSetDescription::DescriptorType::ImageSampled, true}},
+    {"Sampler",  {DescriptorSetDescription::DescriptorType::Sampler, true}},
     {"UniformBuffer", {DescriptorSetDescription::DescriptorType::UniformBuffer, true}},
     {"StorageBuffer", {DescriptorSetDescription::DescriptorType::StorageBuffer, false}},
     {"ImageStorage",  {DescriptorSetDescription::DescriptorType::ImageStorage, false}},
-    {"InputAttachment",  {DescriptorSetDescription::DescriptorType::InputAttachment, true}}
+    {"InputAttachment",  {DescriptorSetDescription::DescriptorType::InputAttachment, true}},
+    {"AccelerationStructure",  {DescriptorSetDescription::DescriptorType::AccelerationStructure, true}}
 };
 
 const static std::map<std::string, DescriptorSetDescription::StageFlag> cStageFlagBitsByName{
     {"Vertex", DescriptorSetDescription::StageFlag::t::Vertex},
     {"Fragment", DescriptorSetDescription::StageFlag::t::Fragment},
     {"Geometry", DescriptorSetDescription::StageFlag::t::Geometry},
-    {"Compute", DescriptorSetDescription::StageFlag::t::Compute}
+    {"Compute", DescriptorSetDescription::StageFlag::t::Compute},
+    {"RayGeneration", DescriptorSetDescription::StageFlag::t::RayGeneration},
+    {"RayClosestHit", DescriptorSetDescription::StageFlag::t::RayClosestHit},
+    {"RayAnyHit", DescriptorSetDescription::StageFlag::t::RayAnyHit},
+    {"RayMiss", DescriptorSetDescription::StageFlag::t::RayMiss}
 };
 
 const static std::map<std::string, ShaderPassDescription::DepthCompareOp> cDepthCompareOpByName{
@@ -131,6 +145,9 @@ static void from_json(const Json& j, ShaderPassDescription::FixedFunctionSetting
     it = j.find("DepthCompareOp");
     if (it != j.end()) it->get_to(ffs.depthCompareOp);
 
+    it = j.find("DepthClampEnable");
+    if (it != j.end()) it->get_to(ffs.depthClampEnable);
+
     it = j.find("DepthBiasEnable");
     if (it != j.end()) it->get_to(ffs.depthBiasEnable);
 
@@ -162,6 +179,11 @@ static void from_json(const Json& j, ShaderPassDescription::SampleShadingSetting
 static void from_json(const Json& j, ShaderPassDescription::WorkGroupSettings& ws) {
     auto it = j.find("LocalSize");
     if (it != j.end()) it->get_to(ws.localSize);
+}
+
+static void from_json(const Json& j, ShaderPassDescription::RayTracingSettings& rts) {
+    auto it = j.find("MaxRecursionDepth");
+    if (it != j.end()) it->get_to(rts.maxRayRecursionDepth);
 }
 
 std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& assetManager, const std::string& filename)
@@ -244,6 +266,10 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
         std::string computeShader;
         std::string vertexShader;
         std::string fragmentShader;
+        std::string rayGenerationShader;
+        std::string rayClosestHitShader;
+        std::string rayAnyHitShader;
+        std::string rayMissShader;
         std::vector<DescriptorSetDescription> sets;
         std::vector<ShaderPassDescription::Output> outputs;
         std::string passname;
@@ -252,106 +278,135 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
         ShaderPassDescription::FixedFunctionSettings fixedFunctionSettings;
         ShaderPassDescription::SampleShadingSettings sampleShadingSettings;
         ShaderPassDescription::WorkGroupSettings workGroupSettings;
+        ShaderPassDescription::RayTracingSettings rayTracingSettings;
+        std::vector<SpecializationConstantDescription> specializationConstants;
 
         for (const auto& el : ar.items())
         {
-            if ( el.key().compare("Name") == 0)
+            if (el.key().compare( "Name" ) == 0)
             {
                 passname = el.value();
             }
-            else if ( el.key().compare("Shaders") == 0)
+            else if (el.key().compare( "Shaders" ) == 0)
             {
                 // Either Compute or Vertex shader has to be defined, but Fragment is optional.
-                computeShader = el.value().contains("Compute") ? (std::string) el.value()["Compute"] : std::string();
-                vertexShader = el.value().contains("Vertex") ? (std::string) el.value()["Vertex"] : std::string();
-                fragmentShader = el.value().contains("Fragment") ? (std::string) el.value()["Fragment"] : std::string();
+                // Or none of the above and Ray Generation has to be defined, but any hit, closest hit and miss are optional
+                computeShader = el.value().contains( "Compute" ) ? (std::string) el.value()["Compute"] : std::string();
+                vertexShader = el.value().contains( "Vertex" ) ? (std::string) el.value()["Vertex"] : std::string();
+                fragmentShader = el.value().contains( "Fragment" ) ? (std::string) el.value()["Fragment"] : std::string();
+                rayGenerationShader = el.value().contains( "RayGeneration" ) ? (std::string) el.value()["RayGeneration"] : std::string();
+                rayClosestHitShader = el.value().contains( "RayClosestHit" ) ? (std::string) el.value()["RayClosestHit"] : std::string();
+                rayAnyHitShader = el.value().contains( "RayAnyHit" ) ? (std::string) el.value()["RayAnyHit"] : std::string();
+                rayMissShader = el.value().contains( "RayMiss" ) ? (std::string) el.value()["RayMiss"] : std::string();
 
-                if (computeShader.empty() && vertexShader.empty())
+                if (computeShader.empty() && vertexShader.empty() && rayGenerationShader.empty())
                 {
-                    throw std::runtime_error("must have a Vertex or Compute shader name!");
+                    throw std::runtime_error( "must have a Vertex, Compute or RayGeneration shader name!" );
                 }
             }
-            else if ( el.key().compare("DescriptorSets") == 0)
+            else if (el.key().compare( "DescriptorSets" ) == 0)
             {
                 for (const auto& ar : el.value())
                 {
                     std::vector<DescriptorSetDescription::DescriptorTypeAndCount> descriptors;
-                    if (ar.contains("Buffers"))
+                    if (ar.contains( "Buffers" ))
                     {
                         auto& buffel = ar["Buffers"];
                         for (const auto& ar : buffel)
                         {
                             const std::string& bufferType = ar["Type"];
-                            uint32_t count = ar.contains("Count") ? (uint32_t)ar["Count"] : 1;
-                            bool readOnly = ar.contains("ReadOnly") ? (bool)ar["ReadOnly"] : false; // may be overridden if the 'Type' is intrinsically read-only
+                            uint32_t count = ar.contains( "Count" ) ? (uint32_t) ar["Count"] : 1;
+                            bool readOnly = ar.contains( "ReadOnly" ) ? (bool) ar["ReadOnly"] : false; // may be overridden if the 'Type' is intrinsically read-only
                             DescriptorSetDescription::StageFlag stageBindingFlags = { DescriptorSetDescription::StageFlag::t::None };
                             for (const auto& ar2 : ar["Stages"])
                             {
-                                stageBindingFlags = stageBindingFlags | cStageFlagBitsByName.find(ar2)->second;
+                                stageBindingFlags = stageBindingFlags | cStageFlagBitsByName.find( ar2 )->second;
                             }
                             std::vector<std::string> names;
-                            if (ar.contains("Names"))
+                            if (ar.contains( "Names" ))
                             {
                                 for (auto& ar2 : ar["Names"])
                                 {
-                                    names.push_back(ar2);
+                                    names.push_back( ar2 );
                                 }
                             }
-                            assert(names.size() <= 1);  ///TODO: array of names does not currently work (especially since dynmamic 'Count' was added) 
+                            assert( names.size() <= 1 );  ///TODO: array of names does not currently work (especially since dynmamic 'Count' was added) 
                             //count = std::max(count, (uint32_t)names.size());
-                            const auto& bufferTypeData = cBufferTypeByName.find(bufferType)->second;
-                            descriptors.emplace_back(DescriptorSetDescription::DescriptorTypeAndCount{ bufferTypeData.type, stageBindingFlags, names, (int)count, readOnly || bufferTypeData.readOnly });
+                            const auto& bufferTypeData = cBufferTypeByName.find( bufferType )->second;
+                            descriptors.emplace_back( DescriptorSetDescription::DescriptorTypeAndCount { bufferTypeData.type, stageBindingFlags, names, (int) count, readOnly || bufferTypeData.readOnly } );
                         }
                     }
-                    sets.push_back({ std::move(descriptors) });
+                    sets.push_back( { std::move( descriptors ) } );
                 }
             }
-            else if ( el.key().compare("Outputs") == 0)
+            else if (el.key().compare( "Outputs" ) == 0)
             {
                 for (const auto& ar2 : el.value())
                 {
-                    outputs.push_back(ar2);
+                    outputs.push_back( ar2 );
                 }
             }
-            else if (el.key().compare("FixedFunction") == 0)
+            else if (el.key().compare( "FixedFunction" ) == 0)
             {
-                el.value().get_to(fixedFunctionSettings);// <ShaderPassDescription::FixedFunctionSettings>();
+                el.value().get_to( fixedFunctionSettings );// <ShaderPassDescription::FixedFunctionSettings>();
             }
-            else if (el.key().compare("SampleShading") == 0)
+            else if (el.key().compare( "SampleShading" ) == 0)
             {
-                el.value().get_to(sampleShadingSettings);// <ShaderPassDescription::SampleShadingSettings>();
+                el.value().get_to( sampleShadingSettings );// <ShaderPassDescription::SampleShadingSettings>();
             }
-            else if (el.key().compare("WorkGroup") == 0)
+            else if (el.key().compare( "WorkGroup" ) == 0)
             {
-                el.value().get_to(workGroupSettings);// <ShaderPassDescription::WorkGroupSettings>();
+                el.value().get_to( workGroupSettings );// <ShaderPassDescription::WorkGroupSettings>();
             }
-            else if (el.key().compare("VertexBindings") == 0)
+            else if (el.key().compare( "RayTracing" ) == 0)
+            {
+                el.value().get_to( rayTracingSettings );// <ShaderPassDescription::RayTracingSettings>();
+            }
+            else if (el.key().compare( "VertexBindings" ) == 0)
             {
                 // Array of VertexBinding names
                 for (const auto& vertexFormatName : el.value())
                 {
-                    auto it = vertexFormatLookup.find(vertexFormatName);
+                    auto it = vertexFormatLookup.find( vertexFormatName );
                     if (it != vertexFormatLookup.end())
                     {
-                        vertexFormatBindings.push_back(it->second);
+                        vertexFormatBindings.push_back( it->second );
                     }
                     else
                     {
-                        throw std::runtime_error("VertexBinding does not match a Name in the Vertex array");
+                        throw std::runtime_error( "VertexBinding does not match a Name in the Vertex array" );
                     }
                 }
             }
+            else if (el.key().compare( "SpecializationConstants" ) == 0)
+            {
+                for (const auto& ar : el.value())
+                {
+                    const std::string& constantName = ar["Name"];
+                    const std::string& constantType = ar["Type"];
+                    const auto typeIt = cElementTypeByName.find( constantType );
+                    assert( typeIt != cElementTypeByName.end() );
+                    assert( typeIt->second == VertexFormat::Element::ElementType::t::Int32 || typeIt->second == VertexFormat::Element::ElementType::t::Float || typeIt->second == VertexFormat::Element::ElementType::t::Boolean );
+
+                    specializationConstants.push_back( SpecializationConstantDescription { constantName, (uint32_t) specializationConstants.size(), typeIt->second } );
+                }   
+            } 
         }
 
-        // Generate the 
-
-        // static const VertexFormat format = 
-        //     { 32, { VertexFormat::Element{ 0, VertexFormat::Element::ElementType::t::Vec3},
-        //                                         VertexFormat::Element{12, VertexFormat::Element::ElementType::t::Vec3},
-        //                                         VertexFormat::Element{24, VertexFormat::Element::ElementType::t::Vec2},
-        //     } };
-
-        descriptions.emplace_back(ShaderPassDescription( std::move(sets), std::move(outputs), std::move(computeShader), std::move(vertexShader), std::move(fragmentShader), std::move(fixedFunctionSettings), std::move(sampleShadingSettings), std::move(workGroupSettings), std::move(vertexFormatBindings)) );
+        descriptions.emplace_back(  std::move(sets),
+                                    std::move(outputs), std::move(computeShader),
+                                    std::move(vertexShader),
+                                    std::move(fragmentShader),
+                                    std::move(rayGenerationShader),
+                                    std::move(rayClosestHitShader),
+                                    std::move(rayAnyHitShader),
+                                    std::move(rayMissShader),
+                                    std::move(fixedFunctionSettings),
+                                    std::move(sampleShadingSettings),
+                                    std::move(workGroupSettings),
+                                    std::move(rayTracingSettings), 
+                                    std::move(vertexFormatBindings), 
+                                    std::move(specializationConstants) );
         passNames.push_back(passname);
     }
     return std::make_optional(ShaderDescription{ std::move(vertexFormats), std::move(descriptions), passNames });

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -20,7 +20,7 @@
 
 #include <cstdint>
 #include <string>
-#include "tcb/span.hpp"
+#include <span>
 
 inline constexpr uint32_t crc32c_lookup[256] = {
         0x00000000L, 0xF26B8303L, 0xE13B70F7L, 0x1350F3F4L,
@@ -94,7 +94,7 @@ inline constexpr uint32_t crc32c_lookup[256] = {
 /// @param crc 'starting' crc value
 /// @param data bytes to iterate over (and generate crc for)
 /// @return new crc value
-static constexpr uint32_t crc32c(uint32_t crc, const tcb::span<const uint8_t> data)
+static constexpr uint32_t crc32c(uint32_t crc, const std::span<const uint8_t> data)
 {
     for (const auto d : data)
         crc = crc32c_lookup[(crc ^ d) & 0xff] ^ (crc >> 8);
@@ -105,10 +105,46 @@ static constexpr uint32_t crc32c(uint32_t crc, const tcb::span<const uint8_t> da
 /// @param crc 'starting' crc value
 /// @param string to iterate over (and generate crc for)
 /// @return new crc value
-static /*constexpr*/ inline uint32_t crc32c(uint32_t crc, const std::string& data)
+static constexpr inline uint32_t crc32c(uint32_t crc, std::string_view data)
 {
     for (const auto d : data)
         crc = crc32c_lookup[(crc ^ d) & 0xff] ^ (crc >> 8);
     return crc;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
+// FNV hashing code (less collisions than crc32 for small runs of data)
+inline constexpr uint32_t FnvHash32(std::string_view s)
+{
+    uint32_t h = 0x811c9dc5;
+    constexpr uint32_t prime = 0x01000193;
+    for (char c : s) {
+        h ^= static_cast<uint32_t>(c);
+        h *= prime;
+    }
+    return h;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+
+// FNV hashing code with lowercase conversion of string (assumes/demands C codepage, ie basic ascii, no utf-8 etc)
+
+inline constexpr uint32_t FnvHashLower32(std::string_view s)
+{
+    uint32_t h = 0x811c9dc5;
+    constexpr uint32_t prime = 0x01000193;
+    for (char c : s) {
+        h ^= static_cast<uint32_t>((c >= 'A' && c <= 'Z') ? (c + 32) : c);
+        h *= prime;
+    }
+    return h;
+}
+
+struct FnvHashLower
+{
+    inline constexpr FnvHashLower(const std::string_view s) : h{ FnvHashLower32(s) } {}
+    const uint32_t h;
+    constexpr operator uint32_t() const { return h; }
+};

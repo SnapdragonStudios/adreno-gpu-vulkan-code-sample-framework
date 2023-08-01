@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,13 +9,13 @@
 
 #include <memory>
 
-class Vulkan;
+class GraphicsApiBase;
 class Computable;
 class MaterialManager;
 class ShaderManager;
 class Shadow;
-class VulkanTexInfo;
-class Wrap_VkCommandBuffer;
+class Texture;
+class CommandList;
 
 /// Variance Shadow Map
 class ShadowVSM
@@ -25,14 +25,14 @@ class ShadowVSM
 public:
     ShadowVSM();
 
-    bool Initialize(Vulkan& , const ShaderManager& , const MaterialManager& , const Shadow& );
-    void Release(Vulkan* vulkan);
+    bool Initialize(GraphicsApiBase& , const ShaderManager& , const MaterialManager& , const Shadow& );
+    void Release(GraphicsApiBase&);
 
-    const VulkanTexInfo* const GetVSMTexture() const { return m_VsmTarget.get(); }
-    void AddComputableToCmdBuffer(Wrap_VkCommandBuffer& cmdBuffer);
+    const Texture* const GetVSMTexture() const { return m_VsmTarget.get(); }
+    void AddComputableToCmdBuffer(CommandList& cmdBuffer);
 
 protected:
     std::unique_ptr<Computable>     m_Computable;
-    std::unique_ptr<VulkanTexInfo>  m_VsmTarget;
-    std::unique_ptr<VulkanTexInfo>  m_VsmTargetIntermediate;
+    std::unique_ptr<Texture>        m_VsmTarget;
+    std::unique_ptr<Texture>        m_VsmTargetIntermediate;
 };

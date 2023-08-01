@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,13 +12,20 @@
 
 #include "application.hpp"
 #include "main/applicationEntrypoint.hpp"
-#include "gui/imguiVulkan.hpp"
-#include "material/drawable.hpp"
-#include "material/shaderManager.hpp"
-#include "material/materialManager.hpp"
 #include "camera/cameraController.hpp"
 #include "camera/cameraControllerTouch.hpp"
+#include "camera/cameraData.hpp"
+#include "camera/cameraGltfLoader.hpp"
+#include "gui/imguiVulkan.hpp"
+#include "material/drawable.hpp"
+#include "material/vulkan/shaderModule.hpp"
+#include "material/shaderManagerT.hpp"
+#include "material/materialManager.hpp"
+#include "material/vulkan/specializationConstantsLayout.hpp"
+#include "mesh/meshHelper.hpp"
+#include "mesh/meshLoader.hpp"
 #include "system/math_common.hpp"
+#include "texture/textureManager.hpp"
 #include "imgui.h"
 
 #include <random>
@@ -38,7 +45,7 @@ namespace
     float   gNormalAmount = 0.3f;
     float   gNormalMirrorReflectAmount = 0.05f;
 
-    const char* gMuseumAssetsPath = "Media\\Meshes";
+    const char* gMuseumAssetPath = "Media\\Meshes\\Museum.gltf";
     const char* gTextureFolder    = "Media\\Textures\\";
 }
 
@@ -61,20 +68,20 @@ Application::~Application()
 }
 
 //-----------------------------------------------------------------------------
-bool Application::Initialize(uintptr_t windowHandle)
+bool Application::Initialize(uintptr_t windowHandle, uintptr_t hInstance)
 //-----------------------------------------------------------------------------
 {
-    if (!ApplicationHelperBase::Initialize(windowHandle))
-    {
-        return false;
-    }
-
-    if (!InitializeLights())
+    if (!ApplicationHelperBase::Initialize( windowHandle, hInstance ))
     {
         return false;
     }
 
     if (!InitializeCamera())
+    {
+        return false;
+    }
+    
+    if (!InitializeLights())
     {
         return false;
     }
@@ -131,7 +138,7 @@ bool Application::Initialize(uintptr_t windowHandle)
 void Application::Destroy()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* const pVulkan = GetVulkan();
 
     // Uniform Buffers
     ReleaseUniformBuffer(pVulkan, &m_ObjectVertUniform);
@@ -161,20 +168,13 @@ void Application::Destroy()
     // Render passes / Semaphores
     for (int whichPass = 0; whichPass < NUM_RENDER_PASSES; whichPass++)
     {
-        vkDestroyRenderPass(m_vulkan->m_VulkanDevice, m_RenderPassData[whichPass].RenderPass, nullptr);
-        vkDestroySemaphore(m_vulkan->m_VulkanDevice, m_RenderPassData[whichPass].PassCompleteSemaphore, nullptr);
+        vkDestroyRenderPass(pVulkan->m_VulkanDevice, m_RenderPassData[whichPass].RenderPass, nullptr);
+        vkDestroySemaphore(pVulkan->m_VulkanDevice, m_RenderPassData[whichPass].PassCompleteSemaphore, nullptr);
     }
 
     // Drawables
     m_SceneDrawables.clear();
     m_BlitQuadDrawable.reset();
-
-    // Textures
-    for (auto& [key, texture] : m_LoadedTextures)
-    {
-        texture.Release(m_vulkan.get());
-    }
-    m_LoadedTextures.clear();
 
     // Internal
     m_ShaderManager.reset();
@@ -243,10 +243,10 @@ bool Application::InitializeCamera()
 bool Application::LoadShaders()
 //-----------------------------------------------------------------------------
 {
-    m_ShaderManager = std::make_unique<ShaderManager>(*m_vulkan);
+    m_ShaderManager = std::make_unique<ShaderManagerT<Vulkan>>(*GetVulkan());
     m_ShaderManager->RegisterRenderPassNames(sRenderPassNames);
 
-    m_MaterialManager = std::make_unique<MaterialManager>();
+    m_MaterialManager = std::make_unique<MaterialManagerT<Vulkan>>();
 
     LOGI("******************************");
     LOGI("Loading Shaders...");
@@ -275,23 +275,26 @@ bool Application::LoadShaders()
 bool Application::CreateRenderTargets()
 //-----------------------------------------------------------------------------
 {
+    Vulkan* const pVulkan = GetVulkan();
+
     LOGI("**************************");
     LOGI("Creating Render Targets...");
     LOGI("**************************");
 
-    VkFormat desiredDepthFormat = m_vulkan->GetBestVulkanDepthFormat();
+    TextureFormat vkDesiredDepthFormat = pVulkan->GetBestSurfaceDepthFormat();
+    TextureFormat desiredDepthFormat = vkDesiredDepthFormat;
 
-    const VkFormat MainColorType[] = { VK_FORMAT_R8G8B8A8_UNORM };
-    const VkFormat HudColorType[]  = { VK_FORMAT_R8G8B8A8_UNORM };
+    const TextureFormat MainColorType[] = { TextureFormat::R8G8B8A8_SRGB };
+    const TextureFormat HudColorType[]  = { TextureFormat::R8G8B8A8_SRGB };
 
-    if (!m_RenderPassData[RP_SCENE].RenderTarget.Initialize(m_vulkan.get(), gRenderWidth, gRenderHeight, MainColorType, desiredDepthFormat, VK_SAMPLE_COUNT_1_BIT, "Scene RT"))
+    if (!m_RenderPassData[RP_SCENE].RenderTarget.Initialize(pVulkan, gRenderWidth, gRenderHeight, MainColorType, desiredDepthFormat, VK_SAMPLE_COUNT_1_BIT, "Scene RT"))
     {
         LOGE("Unable to create scene render target");
         return false;
     }
 
     // Notice no depth on the HUD RT
-    if (!m_RenderPassData[RP_HUD].RenderTarget.Initialize(m_vulkan.get(), gSurfaceWidth, gSurfaceHeight, HudColorType, VK_FORMAT_UNDEFINED, VK_SAMPLE_COUNT_1_BIT, "HUD RT"))
+    if (!m_RenderPassData[RP_HUD].RenderTarget.Initialize(pVulkan, gSurfaceWidth, gSurfaceHeight, HudColorType, TextureFormat::UNDEFINED, VK_SAMPLE_COUNT_1_BIT, "HUD RT"))
     {
         LOGE("Unable to create hud render target");
         return false;
@@ -308,7 +311,7 @@ bool Application::InitUniforms()
     LOGI("Initializing Uniforms...");
     LOGI("******************************");
 
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* const pVulkan = GetVulkan();
 
     if (!CreateUniformBuffer(pVulkan, m_ObjectVertUniform))
     {
@@ -327,13 +330,16 @@ bool Application::InitUniforms()
 bool Application::InitAllRenderPasses()
 //-----------------------------------------------------------------------------
 {
+    Vulkan* const pVulkan = GetVulkan();
+
     //                                       ColorInputUsage |               ClearDepthRenderPass | ColorOutputUsage |                     DepthOutputUsage |              ClearColor
     m_RenderPassData[RP_SCENE].PassSetup = { RenderPassInputUsage::Clear,    true,                  RenderPassOutputUsage::StoreReadOnly,  RenderPassOutputUsage::Store,   {}};
     m_RenderPassData[RP_HUD].PassSetup   = { RenderPassInputUsage::Clear,    false,                 RenderPassOutputUsage::StoreReadOnly,  RenderPassOutputUsage::Discard, {}};
     m_RenderPassData[RP_BLIT].PassSetup  = { RenderPassInputUsage::DontCare, true,                  RenderPassOutputUsage::Present,        RenderPassOutputUsage::Discard, {}};
 
-    auto swapChainColorFormat = tcb::span<const VkFormat>({ &m_vulkan->m_SurfaceFormat, 1 });
-    auto swapChainDepthFormat = m_vulkan->m_SwapchainDepth.format;
+    TextureFormat surfaceFormat = pVulkan->m_SurfaceFormat;
+    auto swapChainColorFormat = std::span<const TextureFormat>({ &surfaceFormat, 1 });
+    auto swapChainDepthFormat = pVulkan->m_SwapchainDepth.format;
 
     LOGI("******************************");
     LOGI("Initializing Render Passes... ");
@@ -343,12 +349,12 @@ bool Application::InitAllRenderPasses()
     {
         bool isSwapChainRenderPass = whichPass == RP_BLIT;
 
-        tcb::span<const VkFormat> colorFormats = isSwapChainRenderPass ? swapChainColorFormat : m_RenderPassData[whichPass].RenderTarget[0].m_pLayerFormats;
-        VkFormat                  depthFormat  = isSwapChainRenderPass ? swapChainDepthFormat : m_RenderPassData[whichPass].RenderTarget[0].m_DepthFormat;
+        std::span<const TextureFormat> colorFormats = isSwapChainRenderPass ? swapChainColorFormat : m_RenderPassData[whichPass].RenderTarget[0].m_pLayerFormats;
+        TextureFormat                  depthFormat  = isSwapChainRenderPass ? swapChainDepthFormat : m_RenderPassData[whichPass].RenderTarget[0].m_DepthFormat;
 
         const auto& passSetup = m_RenderPassData[whichPass].PassSetup;
         
-        if (!m_vulkan->CreateRenderPass(
+        if (!pVulkan->CreateRenderPass(
             { colorFormats },
             depthFormat,
             VK_SAMPLE_COUNT_1_BIT,
@@ -371,7 +377,7 @@ bool Application::InitGui(uintptr_t windowHandle)
 //-----------------------------------------------------------------------------
 {
     const auto& hudRenderTarget = m_RenderPassData[RP_HUD].RenderTarget;
-    m_Gui = std::make_unique<GuiImguiVulkan>(*m_vulkan, m_RenderPassData[RP_HUD].RenderPass);
+    m_Gui = std::make_unique<GuiImguiGfx<Vulkan>>(*GetVulkan(), m_RenderPassData[RP_HUD].RenderPass);
     if (!m_Gui->Initialize(windowHandle, hudRenderTarget[0].m_Width, hudRenderTarget[0].m_Height))
     {
         return false;
@@ -381,55 +387,18 @@ bool Application::InitGui(uintptr_t windowHandle)
 }
 
 //-----------------------------------------------------------------------------
-VulkanTexInfo* Application::GetOrLoadTexture(const char* textureName)
-//-----------------------------------------------------------------------------
-{
-    if (textureName == nullptr || textureName[0] == 0)
-    {
-        return nullptr;
-    }
-
-    auto texturePath = std::filesystem::path(textureName);
-    if (!texturePath.has_filename())
-    {
-        return nullptr;
-    }
-
-    auto textureFilename = texturePath.stem();
-
-    auto iter = m_LoadedTextures.find(textureFilename.string());
-    if (iter != m_LoadedTextures.end())
-    {
-        return &iter->second;
-    }
-
-    // Prepare the texture path
-    std::string textureInternalPath = gTextureFolder;
-    textureInternalPath.append(textureFilename.string());
-    textureInternalPath.append(".ktx");
-
-    auto loadedTexture = LoadKTXTexture(m_vulkan.get(), *m_AssetManager, textureInternalPath.c_str());
-    if (!loadedTexture.IsEmpty())
-    {
-        m_LoadedTextures.insert({ textureFilename.string() , std::move(loadedTexture) });
-        VulkanTexInfo* texInfo = &m_LoadedTextures[textureFilename.string()];
-        return texInfo;
-    }
-
-    return nullptr;
-}
-
-//-----------------------------------------------------------------------------
 bool Application::LoadMeshObjects()
 //-----------------------------------------------------------------------------
 {
+    Vulkan* const pVulkan = GetVulkan();
+
     LOGI("***********************");
     LOGI("Initializing Meshes... ");
     LOGI("***********************");
 
     const auto* pSceneOpaqueShader      = m_ShaderManager->GetShader("SceneOpaque");
     const auto* pSceneTransparentShader = m_ShaderManager->GetShader("SceneTransparent");
-    const auto* pBlitQuadShader = m_ShaderManager->GetShader("Blit");
+    const auto* pBlitQuadShader         = m_ShaderManager->GetShader("Blit");
     if (!pSceneOpaqueShader || !pSceneTransparentShader || !pBlitQuadShader)
     {
         return false;
@@ -439,9 +408,11 @@ bool Application::LoadMeshObjects()
     LOGI("Loading and preparing the museum...");
     LOGI("***********************************");
 
-    auto* whiteTexture         = GetOrLoadTexture("white_d.ktx");
-    auto* blackTexture         = GetOrLoadTexture("black_d.ktx");
-    auto* normalDefaultTexture = GetOrLoadTexture("normal_default.ktx");
+    m_TextureManager->SetDefaultFilenameManipulators(PathManipulator_PrefixDirectory{ "Media\\" }, PathManipulator_ChangeExtension{ ".ktx" });
+
+    auto* whiteTexture         = m_TextureManager->GetOrLoadTexture(*m_AssetManager, "Textures\\white_d.ktx", m_SamplerEdgeClamp);
+    auto* blackTexture         = m_TextureManager->GetOrLoadTexture(*m_AssetManager, "Textures\\black_d.ktx", m_SamplerEdgeClamp);
+    auto* normalDefaultTexture = m_TextureManager->GetOrLoadTexture(*m_AssetManager, "Textures\\normal_default.ktx", m_SamplerEdgeClamp);
 
     if (!whiteTexture || !blackTexture || !normalDefaultTexture)
     {
@@ -456,7 +427,6 @@ bool Application::LoadMeshObjects()
         auto iter = m_ObjectFragUniforms.try_emplace(hash, ObjectMaterialParameters());
         if (iter.second)
         {
-            Vulkan* pVulkan = m_vulkan.get();
             iter.first->second.objectFragUniformData = objectMaterialParameters.objectFragUniformData;
             if (!CreateUniformBuffer(pVulkan, iter.first->second.objectFragUniform))
             {
@@ -469,10 +439,10 @@ bool Application::LoadMeshObjects()
 
     auto MaterialLoader = [&](const MeshObjectIntermediate::MaterialDef& materialDef)->std::optional<Material>
     {
-        auto* diffuseTexture           = GetOrLoadTexture(materialDef.diffuseFilename.c_str());
-        auto* normalTexture            = GetOrLoadTexture(materialDef.bumpFilename.c_str());
-        auto* emissiveTexture          = GetOrLoadTexture(materialDef.emissiveFilename.c_str());
-        auto* metallicRoughnessTexture = GetOrLoadTexture(materialDef.specMapFilename.c_str());
+        auto* diffuseTexture           = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.diffuseFilename, m_SamplerEdgeClamp);
+        auto* normalTexture            = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.bumpFilename, m_SamplerEdgeClamp);
+        auto* emissiveTexture          = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.emissiveFilename, m_SamplerEdgeClamp);
+        auto* metallicRoughnessTexture = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.specMapFilename, m_SamplerEdgeClamp);
         bool alphaCutout               = materialDef.alphaCutout;
         bool transparent               = materialDef.transparent;
 
@@ -486,7 +456,12 @@ bool Application::LoadMeshObjects()
         objectMaterial.objectFragUniformData.ORM.b   = static_cast<float>(materialDef.metallicFactor);
         objectMaterial.objectFragUniformData.ORM.g   = static_cast<float>(materialDef.roughnessFactor);
 
-        auto shaderMaterial = m_MaterialManager->CreateMaterial(*m_vulkan.get(), *targetShader, NUM_VULKAN_BUFFERS,
+        if (diffuseTexture == nullptr || normalTexture == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        auto shaderMaterial = m_MaterialManager->CreateMaterial(*pVulkan, *targetShader, NUM_VULKAN_BUFFERS,
             [&](const std::string& texName) -> const MaterialPass::tPerFrameTexInfo
             {
                 if (texName == "Diffuse")
@@ -508,7 +483,7 @@ bool Application::LoadMeshObjects()
 
                 return {};
             },
-            [&](const std::string& bufferName) -> MaterialPass::tPerFrameVkBuffer
+            [&](const std::string& bufferName) -> tPerFrameVkBuffer
             {
                 if (bufferName == "Vert")
                 {
@@ -516,7 +491,7 @@ bool Application::LoadMeshObjects()
                 }
                 else if (bufferName == "Frag")
                 {
-                    return { UniformBufferLoader(objectMaterial).objectFragUniform.buf.GetVkBuffer()};
+                    return { UniformBufferLoader(objectMaterial).objectFragUniform.buf.GetVkBuffer() };
                 }
                 else if (bufferName == "Light")
                 {
@@ -530,64 +505,47 @@ bool Application::LoadMeshObjects()
         return shaderMaterial;
     };
 
-    std::vector<std::string> meshFiles;
-    
-    if (std::filesystem::is_directory(gMuseumAssetsPath))
+
+    const auto loaderFlags = 0; // No instancing
+    const bool ignoreTransforms = (loaderFlags & DrawableLoader::LoaderFlags::IgnoreHierarchy) != 0;
+
+    MeshLoaderModelSceneSanityCheck meshSanityCheckProcessor(gMuseumAssetPath);
+    MeshObjectIntermediateGltfProcessor meshObjectProcessor(gMuseumAssetPath, ignoreTransforms, glm::vec3(1.0f,1.0f,1.0f));
+    CameraGltfProcessor meshCameraProcessor{};
+
+    if (!MeshLoader::LoadGltf(*m_AssetManager, gMuseumAssetPath, meshSanityCheckProcessor, meshObjectProcessor, meshCameraProcessor) ||
+        !DrawableLoader::CreateDrawables(*pVulkan,
+                                        std::move(meshObjectProcessor.m_meshObjects),
+                                        { &m_RenderPassData[RP_SCENE].RenderPass, 1 },
+                                        &sRenderPassNames[RP_SCENE],
+                                        MaterialLoader,
+                                        m_SceneDrawables,
+                                        {},    // RenderPassMultisample
+                                        loaderFlags,
+                                        {}))   // RenderPassSubpasses
     {
-        for (auto& p : std::filesystem::directory_iterator(gMuseumAssetsPath))
-        {
-            if (p.path().extension() == ".gltf")
-            {
-                meshFiles.push_back(p.path().string());
-            }
-        }
+        LOGE("Error Loading the museum gltf file");
+        LOGI("Please verify if you have all required assets on the sample media folder");
+        LOGI("If you are running on Android, don't forget to run the `02_CopyMediaToDevice.bat` script to copy all media files into the device memory");
+        return false;
     }
 
-#if defined(OS_ANDROID)
-    // std::filesystem above will not work on Android, we need to specify the file directly
-    meshFiles.push_back("Media\\Meshes\\Museum.gltf");
-#endif
-
-    if (meshFiles.size() == 0)
+    if (!meshCameraProcessor.m_cameras.empty())
     {
-        LOGE("No meshes found to render!");
-    }
-    else
-    {
-        LOGI("Found %d meshes", static_cast<int>(meshFiles.size()));
+        const auto& camera = meshCameraProcessor.m_cameras[0];
+        m_Camera.SetPosition(camera.Position, camera.Orientation);
     }
 
-    for (auto& meshFile : meshFiles)
-    {
-        bool sceneMeshResult = DrawableLoader::LoadDrawables(
-            *m_vulkan,
-            *m_AssetManager,
-            { &m_RenderPassData[RP_SCENE].RenderPass, 1 },
-            &sRenderPassNames[RP_SCENE],
-            meshFile,
-            MaterialLoader,
-            m_SceneDrawables,
-            {},    // RenderPassMultisample 
-            false, // UseInstancing
-            {});   // RenderPassSubpasses
-        if (!sceneMeshResult)
-        {
-            LOGE("Error Loading the %s gltf file", meshFile.c_str());
-            LOGI("Please verify if you have all required assets on the sample media folder");
-            LOGI("If you are running on Android, don't forget to run the `02_CopyMediaToDevice.bat` script to copy all media files into the device memory");
-            return false;
-        }
-    }
 
     LOGI("*********************");
     LOGI("Creating Quad mesh...");
     LOGI("*********************");
 
-    MeshObject blitQuadMesh; //                       PosLLRadius |                        UVLLRadius
-    MeshObject::CreateScreenSpaceMesh(m_vulkan.get(), glm::vec4(-1.0f, -1.0f, 2.0f, 2.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f), 0, &blitQuadMesh);
+    MeshObject blitQuadMesh;
+    MeshHelper::CreateScreenSpaceMesh(pVulkan->GetMemoryManager(), 0, &blitQuadMesh);
 
     // Blit Material
-    auto blitQuadShaderMaterial = m_MaterialManager->CreateMaterial(*m_vulkan.get(), *pBlitQuadShader, m_vulkan->m_SwapchainImageCount,
+    auto blitQuadShaderMaterial = m_MaterialManager->CreateMaterial(*pVulkan, *pBlitQuadShader, pVulkan->m_SwapchainImageCount,
         [this](const std::string& texName) -> const MaterialPass::tPerFrameTexInfo
         {
             if (texName == "Diffuse")
@@ -600,13 +558,13 @@ bool Application::LoadMeshObjects()
             }
             return {};
         },
-        [this](const std::string& bufferName) -> MaterialPass::tPerFrameVkBuffer
+        [this](const std::string& bufferName) -> tPerFrameVkBuffer
         {
             return {};
         }
         );
 
-    m_BlitQuadDrawable = std::make_unique<Drawable>(*m_vulkan.get(), std::move(blitQuadShaderMaterial));
+    m_BlitQuadDrawable = std::make_unique<Drawable>(*pVulkan, std::move(blitQuadShaderMaterial));
     if (!m_BlitQuadDrawable->Init(m_RenderPassData[RP_BLIT].RenderPass, sRenderPassNames[RP_BLIT], std::move(blitQuadMesh)))
     {
         return false;
@@ -623,7 +581,7 @@ bool Application::InitCommandBuffers()
     LOGI("Initializing Command Buffers...");
     LOGI("*******************************");
 
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* const pVulkan = GetVulkan();
 
     auto GetPassName = [](uint32_t whichPass)
     {
@@ -640,8 +598,8 @@ bool Application::InitCommandBuffers()
     m_RenderPassData[RP_SCENE].ObjectsCmdBuffer.resize(NUM_VULKAN_BUFFERS);
     m_RenderPassData[RP_HUD].PassCmdBuffer.resize(NUM_VULKAN_BUFFERS);
     m_RenderPassData[RP_HUD].ObjectsCmdBuffer.resize(NUM_VULKAN_BUFFERS);
-    m_RenderPassData[RP_BLIT].PassCmdBuffer.resize(m_vulkan->m_SwapchainImageCount);
-    m_RenderPassData[RP_BLIT].ObjectsCmdBuffer.resize(m_vulkan->m_SwapchainImageCount);
+    m_RenderPassData[RP_BLIT].PassCmdBuffer.resize(pVulkan->m_SwapchainImageCount);
+    m_RenderPassData[RP_BLIT].ObjectsCmdBuffer.resize(pVulkan->m_SwapchainImageCount);
 
     char szName[256];
     const VkCommandBufferLevel CmdBuffLevel = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
@@ -680,7 +638,7 @@ bool Application::InitLocalSemaphores()
 
     for (uint32_t whichPass = 0; whichPass < NUM_RENDER_PASSES; whichPass++)
     {
-        VkResult retVal = vkCreateSemaphore(m_vulkan->m_VulkanDevice, &SemaphoreInfo, NULL, &m_RenderPassData[whichPass].PassCompleteSemaphore);
+        VkResult retVal = vkCreateSemaphore(GetVulkan()->m_VulkanDevice, &SemaphoreInfo, NULL, &m_RenderPassData[whichPass].PassCompleteSemaphore);
         if (!CheckVkError("vkCreateSemaphore()", retVal))
         {
             return false;
@@ -698,6 +656,8 @@ bool Application::BuildCmdBuffers()
     LOGI("Building Command Buffers...");
     LOGI("****************************");
 
+    Vulkan* const pVulkan = GetVulkan();
+
     // Begin recording
     for (uint32_t whichPass = 0; whichPass < NUM_RENDER_PASSES; whichPass++)
     {
@@ -708,8 +668,8 @@ bool Application::BuildCmdBuffers()
         {
             auto& cmdBufer = renderPassData.ObjectsCmdBuffer[whichBuffer];
 
-            uint32_t targetWidth  = bisSwapChainRenderPass ? m_vulkan->m_SurfaceWidth : renderPassData.RenderTarget[0].m_Width;
-            uint32_t targetHeight = bisSwapChainRenderPass ? m_vulkan->m_SurfaceHeight : renderPassData.RenderTarget[0].m_Height;
+            uint32_t targetWidth  = bisSwapChainRenderPass ? pVulkan->m_SurfaceWidth : renderPassData.RenderTarget[0].m_Width;
+            uint32_t targetHeight = bisSwapChainRenderPass ? pVulkan->m_SurfaceHeight : renderPassData.RenderTarget[0].m_Height;
 
             VkViewport viewport = {};
             viewport.x          = 0.0f;
@@ -727,7 +687,7 @@ bool Application::BuildCmdBuffers()
 
             // Set up some values that change based on render pass
             VkRenderPass  whichRenderPass  = renderPassData.RenderPass;
-            VkFramebuffer whichFramebuffer = bisSwapChainRenderPass ? m_vulkan->m_pSwapchainFrameBuffers[whichBuffer] : renderPassData.RenderTarget[0].m_FrameBuffer;
+            VkFramebuffer whichFramebuffer = bisSwapChainRenderPass ? pVulkan->m_SwapchainBuffers[whichBuffer].framebuffer : renderPassData.RenderTarget[0].m_FrameBuffer;
 
             // Objects (can render into any pass except Blit)
             if (!cmdBufer.Begin(whichFramebuffer, whichRenderPass, bisSwapChainRenderPass))
@@ -822,7 +782,7 @@ void Application::UpdateGui()
 bool Application::UpdateUniforms(uint32_t whichBuffer)
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* const pVulkan = GetVulkan();
 
     // Vert data
     {
@@ -864,8 +824,10 @@ bool Application::UpdateUniforms(uint32_t whichBuffer)
 void Application::Render(float fltDiffTime)
 //-----------------------------------------------------------------------------
 {
+    Vulkan* const pVulkan = GetVulkan();
+
     // Obtain the next swap chain image for the next frame.
-    auto currentVulkanBuffer = m_vulkan->SetNextBackBuffer();
+    auto currentVulkanBuffer = pVulkan->SetNextBackBuffer();
     uint32_t whichBuffer     = currentVulkanBuffer.idx;
 
     // ********************************
@@ -882,7 +844,7 @@ void Application::Render(float fltDiffTime)
     UpdateUniforms(whichBuffer);
 
     // First time through, wait for the back buffer to be ready
-    tcb::span<const VkSemaphore> pWaitSemaphores = { &currentVulkanBuffer.semaphore, 1 };
+    std::span<const VkSemaphore> pWaitSemaphores = { &currentVulkanBuffer.semaphore, 1 };
 
     const VkPipelineStageFlags DefaultGfxWaitDstStageMasks[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 
@@ -902,7 +864,7 @@ void Application::Render(float fltDiffTime)
     if (m_Gui)
     {
         // Render gui (has its own command buffer, optionally returns vk_null_handle if not rendering anything)
-        guiCommandBuffer = m_Gui->Render(whichBuffer, m_RenderPassData[RP_HUD].RenderTarget[0].m_FrameBuffer);
+        guiCommandBuffer = GetGui()->Render(whichBuffer, m_RenderPassData[RP_HUD].RenderTarget[0].m_FrameBuffer);
         if (guiCommandBuffer != VK_NULL_HANDLE)
         {
             BeginRenderPass(whichBuffer, RP_HUD, currentVulkanBuffer.swapchainPresentIdx);
@@ -927,7 +889,7 @@ void Application::Render(float fltDiffTime)
     }
 
     // Queue is loaded up, tell the driver to start processing
-    m_vulkan->PresentQueue(pWaitSemaphores, currentVulkanBuffer.swapchainPresentIdx);
+    pVulkan->PresentQueue(pWaitSemaphores, currentVulkanBuffer.swapchainPresentIdx);
 
     // ********************************
     // Application Draw() - End
@@ -938,6 +900,7 @@ void Application::Render(float fltDiffTime)
 void Application::BeginRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, uint32_t WhichSwapchainImage)
 //-----------------------------------------------------------------------------
 {
+    Vulkan* const pVulkan = GetVulkan();
     auto& renderPassData         = m_RenderPassData[whichPass];
     bool  bisSwapChainRenderPass = whichPass == RP_BLIT;
 
@@ -961,7 +924,7 @@ void Application::BeginRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, u
         framebuffer = m_RenderPassData[whichPass].RenderTarget[0].m_FrameBuffer;
         break;
     case RP_BLIT:
-        framebuffer = m_vulkan->m_pSwapchainFrameBuffers[WhichSwapchainImage];
+        framebuffer = pVulkan->m_SwapchainBuffers[WhichSwapchainImage].framebuffer;
         break;
     default:
         framebuffer = nullptr;
@@ -973,13 +936,14 @@ void Application::BeginRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, u
     VkRect2D passArea = {};
     passArea.offset.x = 0;
     passArea.offset.y = 0;
-    passArea.extent.width  = bisSwapChainRenderPass ? m_vulkan->m_SurfaceWidth  : renderPassData.RenderTarget[0].m_Width;
-    passArea.extent.height = bisSwapChainRenderPass ? m_vulkan->m_SurfaceHeight : renderPassData.RenderTarget[0].m_Height;
+    passArea.extent.width  = bisSwapChainRenderPass ? pVulkan->m_SurfaceWidth  : renderPassData.RenderTarget[0].m_Width;
+    passArea.extent.height = bisSwapChainRenderPass ? pVulkan->m_SurfaceHeight : renderPassData.RenderTarget[0].m_Height;
 
-    auto                      swapChainColorFormat = tcb::span<const VkFormat>({ &m_vulkan->m_SurfaceFormat, 1 });
-    auto                      swapChainDepthFormat = m_vulkan->m_SwapchainDepth.format;
-    tcb::span<const VkFormat> colorFormats         = bisSwapChainRenderPass ? swapChainColorFormat : m_RenderPassData[whichPass].RenderTarget[0].m_pLayerFormats;
-    VkFormat                  depthFormat          = bisSwapChainRenderPass ? swapChainDepthFormat : m_RenderPassData[whichPass].RenderTarget[0].m_DepthFormat;
+    TextureFormat                  swapChainColorFormat = pVulkan->m_SurfaceFormat;
+    auto                           swapChainColorFormats = std::span<const TextureFormat>({ &swapChainColorFormat, 1 });
+    TextureFormat                  swapChainDepthFormat = pVulkan->m_SwapchainDepth.format;
+    std::span<const TextureFormat> colorFormats         = bisSwapChainRenderPass ? swapChainColorFormats : m_RenderPassData[whichPass].RenderTarget[0].m_pLayerFormats;
+    TextureFormat                  depthFormat          = bisSwapChainRenderPass ? swapChainDepthFormat : m_RenderPassData[whichPass].RenderTarget[0].m_DepthFormat;
 
     VkClearColorValue clearColor = { renderPassData.PassSetup.ClearColor[0], renderPassData.PassSetup.ClearColor[1], renderPassData.PassSetup.ClearColor[2], renderPassData.PassSetup.ClearColor[3] };
 
@@ -989,7 +953,7 @@ void Application::BeginRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, u
         1.0f,
         { &clearColor , 1 },
         (uint32_t)colorFormats.size(),
-        depthFormat != VK_FORMAT_UNDEFINED,
+        depthFormat != TextureFormat::UNDEFINED,
         m_RenderPassData[whichPass].RenderPass,
         bisSwapChainRenderPass,
         framebuffer,
@@ -1015,7 +979,7 @@ void Application::EndRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass)
 }
 
 //-----------------------------------------------------------------------------
-void Application::SubmitRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, const tcb::span<const VkSemaphore> WaitSemaphores, const tcb::span<const VkPipelineStageFlags> WaitDstStageMasks, tcb::span<VkSemaphore> SignalSemaphores, VkFence CompletionFence)
+void Application::SubmitRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, const std::span<const VkSemaphore> WaitSemaphores, const std::span<const VkPipelineStageFlags> WaitDstStageMasks, std::span<VkSemaphore> SignalSemaphores, VkFence CompletionFence)
 //-----------------------------------------------------------------------------
 {
     m_RenderPassData[whichPass].PassCmdBuffer[whichBuffer].End();

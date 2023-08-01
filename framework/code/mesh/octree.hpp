@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -59,7 +59,11 @@ public:
     /// @param center Center position of the octree (nodes will split in 3 dimensions around this center)
     /// @param octreeSize Dimensions of octree (not halfsize)
     /// @param maxObjects Maximum number of objects octree can contain
-    Octree( const glm::vec3 center, const glm::vec3 octreeSize, uint32_t maxObjects ) : m_Center( center, 1.0f ), m_HalfSize( octreeSize*0.5f, 0.0f ), m_Objects(), m_Nodes( 1, Node{} )
+    Octree( const glm::vec3 center, const glm::vec3 octreeSize, uint32_t maxObjects )
+        : m_Nodes( 1, Node{} )
+        , m_Objects()
+        , m_Center( center, 1.0f )
+        , m_HalfSize( octreeSize*0.5f, 0.0f )
     {
         m_Objects.reserve( maxObjects );
     }

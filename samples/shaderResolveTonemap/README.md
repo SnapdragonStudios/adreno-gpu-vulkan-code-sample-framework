@@ -7,7 +7,22 @@
 ## Overview
 
 ShaderResolveTonemap Uses VK_QCOM_render_pass_shader_resolve to perform a filmic tonemapping operator (on a simple forward rendered scene) as part of the MSAA resolve.
+Shader resolve allows creating complex, non-linear filtering of a multisample buffer in the last subpass of a subpass dependency chain.
+
 Optionally runs the tonemap/resolve as a subpass of the main scene pass.  Has onscreen UI controls to modify MSAA sample counts and to enable/disable the shader resolve and use of subpasses (for measuring GPU subpass/shader-resolve efficiency).
+
+Bandwidth savings are meaused with Snapdragon Profiler. 20% of the bandwidth can be saved in this sample when enabling subpass. From SnapdragonProfiler, we can see that there are four surfaces when subpass is disabled and three surfaces otherwise. There is extra GMEM stores when there is no subpass. 
+
+
+![NoSubPassSurfaces](img/nosubpassstage.PNG)
+
+![SubPassSurfaces](img/subpassstage.PNG)
+
+Read total and write total have both been reduced when subpass is enable.
+
+![NoSubPassBandwidth](img/nosubpass.PNG)
+
+![SubPassBandwidth](img/subpass.PNG)
 
 ## Building
 

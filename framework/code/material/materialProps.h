@@ -1,37 +1,39 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
+
 #pragma once
+#ifndef _MATERIAL_MATERIALPROPS_H_
+#define _MATERIAL_MATERIALPROPS_H_
+
+/// @file materialProps.hpp
+/// @brief Simple material system for Vulkan samples.
+
 
 #include "vulkan/vulkan.hpp"
 
-#include "system/os_common.h"
+// Under Vulkan we use uniform buffer objects in the shader. One for vert and one for frag
+#define SHADER_VERT_UBO_LOCATION            0
+#define SHADER_FRAG_UBO_LOCATION            1
 
-#include "vulkan/TextureFuncts.h"
-#include "vulkan/vulkan_support.hpp"
-
-// GLM Include Files
-#define GLmFORCE_CXX03
-#define GLmDEPTH_ZERO_TO_ONE
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#define GLM_ENABLE_EXPERIMENTAL
-
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/transform.hpp>
-
+// Texture Locations
+#define SHADER_BASE_TEXTURE_LOC             2
 
 // MRTs have arrays of blend states, color layers, etc.
 #define MAX_GMEM_OUTPUT_LAYERS              8
 
 // Number of "sampler2D", "samplerCube", etc. that can be bound in material
 #define MAX_MATERIAL_SAMPLERS               16
+
+// Forward declarations
+struct ShaderInfo;
+class Texture;
+template <typename T_GFXAPI> class Mesh;
+template <typename T_GFXAPI> struct Uniform;
 
 //=============================================================================
 // Material Description
@@ -64,16 +66,16 @@ typedef struct _MaterialProps
     ShaderInfo*             pShader;
 
     // Textures (responsibility of owner to clean up)
-    VulkanTexInfo*          pTexture[MAX_MATERIAL_SAMPLERS];
+    Texture*                pTexture[MAX_MATERIAL_SAMPLERS];
 
     // Constant Buffers
     uint32_t                VertUniformOffset;
     uint32_t                VertUniformLength;
-    Uniform*                pVertUniform;
+    Uniform<Vulkan>*        pVertUniform;
 
     uint32_t                FragUniformOffset;
     uint32_t                FragUniformLength;
-    Uniform*                pFragUniform;
+    Uniform<Vulkan>*        pFragUniform;
 
     // Vulkan Objects
     VkDescriptorPool        DescPool;
@@ -84,8 +86,14 @@ typedef struct _MaterialProps
 
     VkPipelineCache         PipelineCache;
     VkPipeline              Pipeline;
+
+
+    // Helper Functions
+    void                    InitOneLayout(Vulkan*);
+    bool                    InitOnePipeline(Vulkan*, Mesh<Vulkan>* pMesh, uint32_t TargetWidth, uint32_t TargetHeight, VkRenderPass RenderPass);
+    bool                    InitDescriptorPool(Vulkan*);
+    bool                    InitDescriptorSet(Vulkan*);
+
 } MaterialProps;
 
-
-
-
+#endif // _MATERIAL_MATERIALPROPS_H_

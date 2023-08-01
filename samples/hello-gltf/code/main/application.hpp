@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,9 +12,9 @@
 #pragma once
 
 #include "main/applicationHelperBase.hpp"
-#include <map>
+#include "memory/vulkan/uniform.hpp"
+#include "vulkan/commandBuffer.hpp"
 #include <unordered_map>
-#include <functional>
 
 #define NUM_SPOT_LIGHTS 4
 
@@ -86,10 +86,10 @@ struct PassData
     VkRenderPass  RenderPass = VK_NULL_HANDLE;
 
     // Recorded objects that are set to be drawn on this pass
-    std::vector< Wrap_VkCommandBuffer> ObjectsCmdBuffer;
+    std::vector< CommandListVulkan> ObjectsCmdBuffer;
 
     // Command buffer used to dispatch the render pass
-    std::vector< Wrap_VkCommandBuffer> PassCmdBuffer;
+    std::vector< CommandListVulkan> PassCmdBuffer;
 
     // Indicates the completing of the underlying render pass
     VkSemaphore PassCompleteSemaphore = VK_NULL_HANDLE;
@@ -137,7 +137,7 @@ public:
     ~Application() override;
 
     // ApplicationHelperBase
-    virtual bool Initialize(uintptr_t windowHandle) override;
+    virtual bool Initialize(uintptr_t windowHandle, uintptr_t hInstance) override;
     virtual void Destroy() override;
     virtual void Render(float fltDiffTime) override;
 
@@ -156,15 +156,13 @@ private:
     bool InitLocalSemaphores();
     bool BuildCmdBuffers();
 
-    VulkanTexInfo* GetOrLoadTexture(const char* textureName);
-
 private:
 
     // Application - Frame
     void BeginRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass, uint32_t WhichSwapchainImage);
     void AddPassCommandBuffer(uint32_t WhichBuffer, RENDER_PASS WhichPass);
     void EndRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass);
-    void SubmitRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass, const tcb::span<const VkSemaphore> WaitSemaphores, const tcb::span<const VkPipelineStageFlags> WaitDstStageMasks, tcb::span<VkSemaphore> SignalSemaphores, VkFence CompletionFence = (VkFence)nullptr);
+    void SubmitRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass, const std::span<const VkSemaphore> WaitSemaphores, const std::span<const VkPipelineStageFlags> WaitDstStageMasks, std::span<VkSemaphore> SignalSemaphores, VkFence CompletionFence = (VkFence)nullptr);
     void UpdateGui();
     bool UpdateUniforms(uint32_t WhichBuffer);
 
@@ -189,7 +187,4 @@ private:
 
     // Materials
     std::unique_ptr<MaterialManager> m_MaterialManager;
-
-    // Textures
-    std::map<std::string, VulkanTexInfo> m_LoadedTextures;
 };

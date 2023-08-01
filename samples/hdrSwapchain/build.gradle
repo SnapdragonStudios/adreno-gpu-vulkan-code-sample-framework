@@ -6,8 +6,11 @@ android {
         abortOnError false
     }
 
+    String rootDir = "${project.rootDir}"
+    rootDir = rootDir.replace("\\", "/")
+
     defaultConfig {
-        applicationId "com.quic.hdrSwapchain"
+        applicationId "com.quic.hdrswapchain"
         minSdkVersion 26
         targetSdkVersion 30
         versionCode 1
@@ -18,10 +21,10 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments "-DPROJECT_ROOT_DIR=${project.rootDir}", "-DFRAMEWORK_DIR=${project.rootDir}/../../framework"
+                arguments "-DPROJECT_ROOT_DIR=${rootDir}", "-DFRAMEWORK_DIR=${rootDir}/../../framework"
             }
         }
-     }
+    }
 
 	signingConfigs{
 		unsigned{
@@ -57,6 +60,9 @@ android {
 //                 srcDir "${android.ndkDirectory}/sources/third_party/vulkan/src/build-android/jniLibs"
 //            }
         }
+//		main.assets {
+//		    srcDirs = ['assets']
+//		}
 		main.assets {
 		    srcDirs = ['assets']
             // Uncomment this to add Media folder to assets
@@ -69,7 +75,7 @@ android {
 
     externalNativeBuild {
         cmake {
-            version "3.19.0+"
+            version "3.21.0+"
             path 'CMakeLists.txt'
         }
     }

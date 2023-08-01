@@ -1,10 +1,10 @@
-//============================================================================================
+//============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
-//============================================================================================
+//============================================================================================================
 
 ///
 /// Sample app for Tonemapping in Shader Resolve (MSAA)
@@ -19,8 +19,11 @@
 #include "material/shader.hpp"
 #include "material/shaderDescription.hpp"
 #include "material/shaderManager.hpp"
+#include "mesh/meshHelper.hpp"
 #include "system/math_common.hpp"
+#include "texture/vulkan/textureManager.hpp"
 #include "imgui.h"
+#include <memory>
 #include <bitset>
 #include <filesystem>
 #include <sys/stat.h>
@@ -64,18 +67,18 @@ Application::~Application()
 }
 
 //-----------------------------------------------------------------------------
-int Application::PreInitializeSelectSurfaceFormat(tcb::span<const VkSurfaceFormatKHR> formats)
+int Application::PreInitializeSelectSurfaceFormat(std::span<const SurfaceFormat> formats)
 //-----------------------------------------------------------------------------
 {
     // On Snapdragon if the surfaceflinger has to do the rotation to the display native orientation then it will do it at 8bit colordepth.
     // To avoid this we need to enable the 'pre-rotation' of the display (and the use of VK_QCOM_render_pass_transform so we dont have to rotate our buffers/passes manually).
-    m_vulkan->m_UseRenderPassTransform = gUseRenderPassTransform;
+    GetVulkan()->m_UseRenderPassTransform = true;
 
     // We want to select a SRGB output format (if one exists)
     int index = 0;
     for (const auto& format : formats)
     {
-        if (format.format == VK_FORMAT_B8G8R8A8_SRGB)
+        if (format.format == TextureFormat::B8G8R8A8_SRGB)
             return index;
         ++index;
     }
@@ -83,20 +86,20 @@ int Application::PreInitializeSelectSurfaceFormat(tcb::span<const VkSurfaceForma
 }
 
 //-----------------------------------------------------------------------------
-bool Application::Initialize( uintptr_t windowHandle )
+bool Application::Initialize( uintptr_t windowHandle, uintptr_t instanceHandle )
 //-----------------------------------------------------------------------------
 {
-    if( !ApplicationHelperBase::Initialize( windowHandle ) )
+    if( !ApplicationHelperBase::Initialize( windowHandle, instanceHandle) )
     {
         return false;
     }
 
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     // Disable shader resolve if it is not exposed by Vulkan.
     gShaderResolve = gShaderResolve && pVulkan->GetExtRenderPassShaderResolveAvailable();
     // Disable render pass transform if it is not exposed by Vulkan.
-    gUseRenderPassTransform = gUseRenderPassTransform && m_vulkan->GetExtRenderPassTransformAvailable();
+    gUseRenderPassTransform = gUseRenderPassTransform && pVulkan->GetExtRenderPassTransformAvailable();
 
     m_RequestedUseSubpasses  = gUseSubpasses;
 
@@ -105,11 +108,9 @@ bool Application::Initialize( uintptr_t windowHandle )
     CreateUniformBuffer( pVulkan, m_ObjectVertUniform );
     CreateUniformBuffer( pVulkan, m_ObjectFragUniform );
 
-    m_MaterialManager = std::make_unique<MaterialManager>();
+    m_TexWhite = LoadKTXTexture(pVulkan, *m_AssetManager, "./Media/Textures/white_d.ktx", SamplerAddressMode::Repeat);
 
-    m_TexWhite = LoadKTXTexture(pVulkan, *m_AssetManager, "./Media/Textures/white_d.ktx", VK_SAMPLER_ADDRESS_MODE_REPEAT);
-   
-    InitGui(windowHandle);
+    InitGui(windowHandle, instanceHandle);
 
     InitCommandBuffers();
 
@@ -130,9 +131,8 @@ bool Application::Initialize( uintptr_t windowHandle )
 bool Application::LoadShaders()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
-    m_ShaderManager = std::make_unique<ShaderManager>(*m_vulkan);
     //m_ShaderManager->RegisterRenderPassNames( {sRenderPassNames} );
 
     LOGI("Loading Shaders...");
@@ -162,7 +162,7 @@ bool Application::LoadShaders()
 bool Application::InitFramebuffersRenderPassesAndDrawables()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     //
     // Clean up old render targets and render passes
@@ -177,12 +177,12 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
 
     //
     // Setup formats for the first pass
-    std::vector<VkFormat> PassColorFormats = { VK_FORMAT_A2B10G10R10_UNORM_PACK32 };// VK_FORMAT_R8G8B8A8_UNORM };// { VK_FORMAT_R16G16B16A16_SFLOAT };
-    // std::vector<VkFormat> PassColorFormats = { VK_FORMAT_R8G8B8A8_UNORM };
+    std::vector<TextureFormat> PassColorFormats = { TextureFormat::A2B10G10R10_UNORM_PACK32 };// TextureFormat::R8G8B8A8_UNORM };// { TextureFormat::R16G16B16A16_SFLOAT };
+    // std::vector<TextureFormat> PassColorFormats = { TextureFormat::R8G8B8A8_UNORM };
     std::vector<VkSampleCountFlagBits> PassColorMsaa = { gMsaa };
     std::vector<TEXTURE_TYPE> PassTextureTypes;
 
-    const VkFormat DepthFormat = pVulkan->GetBestVulkanDepthFormat();
+    const TextureFormat DepthFormat = pVulkan->GetBestSurfaceDepthFormat();
     const bool NeedsResolve = true;
 
     VkRenderPass ObjectRenderPass = VK_NULL_HANDLE;
@@ -196,12 +196,12 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
         if(NeedsResolve && !gShaderResolve)
         {
             // Intermediate MSAA target for output of tonemap
-            PassColorFormats.push_back( VK_FORMAT_A2B10G10R10_UNORM_PACK32 );
+            PassColorFormats.push_back( TextureFormat::A2B10G10R10_UNORM_PACK32 );
             PassColorMsaa.push_back( gMsaa );
             PassTextureTypes.push_back( TT_RENDER_TARGET_SUBPASS );
         }
         // Resolved Output
-        PassColorFormats.push_back( VK_FORMAT_A2B10G10R10_UNORM_PACK32 );
+        PassColorFormats.push_back( TextureFormat::A2B10G10R10_UNORM_PACK32 );
         PassColorMsaa.push_back( VK_SAMPLE_COUNT_1_BIT );
         PassTextureTypes.push_back( TT_RENDER_TARGET );
 
@@ -240,24 +240,24 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
         // Tonemap render pass
         VkRenderPass TonemapRenderPass = VK_NULL_HANDLE;
 
-        std::vector<VkFormat> TonemapColorAndResolveFormats{ VK_FORMAT_A2B10G10R10_UNORM_PACK32 };
-        // std::vector<VkFormat> TonemapColorAndResolveFormats{ VK_FORMAT_R8G8B8A8_UNORM };
-        tcb::span<const VkFormat> TonemapResolveFormat{};
+        std::vector<TextureFormat> TonemapColorAndResolveFormats{ TextureFormat::A2B10G10R10_UNORM_PACK32 };
+        // std::vector<TextureFormat> TonemapColorAndResolveFormats{ TextureFormat::R8G8B8A8_UNORM };
+        std::span<const TextureFormat> TonemapResolveFormat{};
         std::vector<VkSampleCountFlagBits> TonemapColorAndResolveMsaa{ PassColorMsaa.back() };
         std::vector<TEXTURE_TYPE> TonemapColorAndResolveTextureTypes{ TT_RENDER_TARGET };
 
         if( NeedsResolve )
         {
             // Setup to have an additional 1xMSAA buffer for the Resolve after the tonemap
-            TonemapColorAndResolveFormats.push_back( VK_FORMAT_A2B10G10R10_UNORM_PACK32 );
+            TonemapColorAndResolveFormats.push_back( TextureFormat::A2B10G10R10_UNORM_PACK32 );
             TonemapResolveFormat = { &TonemapColorAndResolveFormats.back(), 1 };
             TonemapColorAndResolveMsaa.push_back( VK_SAMPLE_COUNT_1_BIT );
             TonemapColorAndResolveTextureTypes.push_back( TT_RENDER_TARGET );
         }
 
-        tcb::span<const VkFormat> TonemapColorFormat{ &TonemapColorAndResolveFormats.front(),1 };
+        std::span<const TextureFormat> TonemapColorFormat{ &TonemapColorAndResolveFormats.front(),1 };
         if( !pVulkan->CreateRenderPass( TonemapColorFormat,
-                                        VK_FORMAT_UNDEFINED,
+                                        TextureFormat::UNDEFINED,
                                         TonemapColorAndResolveMsaa.front(),
                                         RenderPassInputUsage::DontCare/*color*/,
                                         RenderPassOutputUsage::StoreReadOnly,/*color*/
@@ -271,7 +271,7 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
         pVulkan->SetDebugObjectName( TonemapRenderPass, "TonemapRenderPass" );
 
         // Create the render target for the Tonemap (only needed when passes are seperate - subpass variant has all the rendertarget buffers for both subpasses in m_LinearColorRT)
-        if( !m_TonemapRT.Initialize( pVulkan, gRenderWidth, gRenderHeight, TonemapColorAndResolveFormats, VK_FORMAT_UNDEFINED, TonemapRenderPass/*takes ownership*/, (VkRenderPass) VK_NULL_HANDLE, TonemapColorAndResolveMsaa, "Tonemap RT", TonemapColorAndResolveTextureTypes ) )
+        if( !m_TonemapRT.Initialize( pVulkan, gRenderWidth, gRenderHeight, TonemapColorAndResolveFormats, TextureFormat::UNDEFINED, TonemapRenderPass/*takes ownership*/, (VkRenderPass) VK_NULL_HANDLE, TonemapColorAndResolveMsaa, "Tonemap RT", TonemapColorAndResolveTextureTypes ) )
         {
             LOGE( "Error initializing LinearColorRT" );
             return false;
@@ -332,7 +332,7 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
         //
         // Blit drawable
         //
-        std::map<const std::string, const VulkanTexInfo*> blitInputs = { {"Diffuse", &m_LinearColorRT[0].m_ColorAttachments.back() },
+        std::map<const std::string, const TextureVulkan*> blitInputs = { {"Diffuse", &m_LinearColorRT[0].m_ColorAttachments.back() },
                                                                          {"Overlay", &m_GuiRT[0].m_ColorAttachments.front() },
         };
 
@@ -343,7 +343,7 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
         //
         // Tonemap drawable
         //
-        std::map<const std::string, const VulkanTexInfo*> tonemapTex = { {"Diffuse", &m_LinearColorRT[0].m_ColorAttachments.front() } };
+        std::map<const std::string, const TextureVulkan*> tonemapTex = { {"Diffuse", &m_LinearColorRT[0].m_ColorAttachments.front() } };
         if( PassColorMsaa.front() == VK_SAMPLE_COUNT_1_BIT )
         {
             m_TonemapDrawable = InitFullscreenDrawable( "Tonemap", tonemapTex, {}, m_TonemapRT.m_RenderPass, 0, PassColorMsaa.front() );
@@ -356,7 +356,7 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
         //
         // Blit drawable
         //
-        std::map<const std::string, const VulkanTexInfo*> blitInputs = { {"Diffuse", &m_TonemapRT[0].m_ColorAttachments.back() },
+        std::map<const std::string, const TextureVulkan*> blitInputs = { {"Diffuse", &m_TonemapRT[0].m_ColorAttachments.back() },
                                                                          {"Overlay", &m_GuiRT[0].m_ColorAttachments.front() },
         };
         m_BlitDrawable = InitFullscreenDrawable( "Blit", blitInputs, {}, m_BlitRenderPass, 0, VK_SAMPLE_COUNT_1_BIT );
@@ -369,14 +369,11 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
 bool Application::LoadSceneDrawables( VkRenderPass renderPass, uint32_t subpassIdx, VkSampleCountFlagBits passMsaa )
 //-----------------------------------------------------------------------------
 {
-    const char* pGLTFMeshFile = "./Media/Meshes/Museum.gltf";
-
-    std::string texturesPath("Media\\");
-    
+    const char* pGLTFMeshFile = "./Media/Meshes/Museum.gltf";    
 
     LOGI( "Loading Scene Drawable %s", pGLTFMeshFile );
 
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     const auto* pObjectShader = m_ShaderManager->GetShader( "Object" );
     if( !pObjectShader )
@@ -385,49 +382,24 @@ bool Application::LoadSceneDrawables( VkRenderPass renderPass, uint32_t subpassI
         return false;
     }
 
+    m_TextureManager->SetDefaultFilenameManipulators(PathManipulator_PrefixDirectory{ "Media\\" }, PathManipulator_ChangeExtension{ ".ktx" });
+
     // Lambda to load a texture for the given material (slot)
-    const auto& textureLoader = [&]( const MeshObjectIntermediate::MaterialDef& materialDef, const std::string& textureSlotName ) -> const MaterialPass::tPerFrameTexInfo
+    const auto& textureLoader = [&](const MeshObjectIntermediate::MaterialDef& materialDef, const std::string& textureSlotName) -> const MaterialPass::tPerFrameTexInfo
     {
-        std::string textureName = materialDef.diffuseFilename;
-        if (textureName.empty())
+        auto* diffuseTexture = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.diffuseFilename, m_SamplerEdgeClamp);
+        if (!diffuseTexture)
         {
             return { &m_TexWhite };
         }
-
-        auto texturePath = std::filesystem::path(textureName);
-        if (!texturePath.has_filename())
+        else
         {
-            return { &m_TexWhite };
+            return { diffuseTexture };
         }
-
-        auto textureFilename = texturePath.stem();
-
-        auto textureIt = m_LoadedTextures.find(textureFilename.string());
-        if (textureIt == m_LoadedTextures.end())
-        {
-            // Prepare the texture path
-            std::string textureInternalPath = gTextureFolder;
-            textureInternalPath.append(textureFilename.string());
-            textureInternalPath.append(".ktx");
-
-            auto loadedTexture = LoadKTXTexture(pVulkan, *m_AssetManager, textureInternalPath.c_str(), VK_SAMPLER_ADDRESS_MODE_REPEAT);
-            if (!loadedTexture.IsEmpty())
-            {
-                textureIt = m_LoadedTextures.insert({ textureFilename.string() , std::move(loadedTexture) }).first;
-            }
-            else
-            {
-                return { &m_TexWhite };
-            }
-        }
-
-        assert(!textureIt->second.IsEmpty());
-
-        return { &textureIt->second };
     };
 
     // Lambda to associate (uniform) buffers with their shader binding/slot names.
-    const auto& bufferLoader = [&]( const std::string& bufferSlotName ) -> MaterialPass::tPerFrameVkBuffer {
+    const auto& bufferLoader = [&]( const std::string& bufferSlotName ) -> tPerFrameVkBuffer {
         if( bufferSlotName == "Vert" )
         {
             return { m_ObjectVertUniform.buf.GetVkBuffer() };
@@ -468,14 +440,14 @@ bool Application::LoadSceneDrawables( VkRenderPass renderPass, uint32_t subpassI
 
 
 //-----------------------------------------------------------------------------
-std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShaderName, const std::map<const std::string, const VulkanTexInfo*>& ColorAttachmentsLookup, const std::map<const std::string, const ImageInfo>& ImageAttachmentsLookup, VkRenderPass renderPass, uint32_t subpassIdx, VkSampleCountFlagBits passMsaa )
+std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShaderName, const std::map<const std::string, const TextureVulkan*>& ColorAttachmentsLookup, const std::map<const std::string, const ImageInfo>& ImageAttachmentsLookup, VkRenderPass renderPass, uint32_t subpassIdx, VkSampleCountFlagBits passMsaa )
 //-----------------------------------------------------------------------------
 {
     //
     // Tonemap pass is a fullscreen quad, setup a 'drawable'.
     //
 
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     LOGI("Creating %s mesh...", pShaderName);
 
@@ -488,7 +460,7 @@ std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShad
     }
 
     MeshObject mesh;
-    if (!MeshObject::CreateMesh(pVulkan, MeshObjectIntermediate::CreateScreenSpaceMesh(), 0, pShader->m_shaderDescription->m_vertexFormats, &mesh))
+    if (!MeshHelper::CreateMesh(pVulkan->GetMemoryManager(), MeshObjectIntermediate::CreateScreenSpaceMesh(), 0, pShader->m_shaderDescription->m_vertexFormats, &mesh))
     {
         LOGE("Error creating Fullscreen Mesh (for %s)", pShaderName);
         return nullptr;
@@ -500,14 +472,14 @@ std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShad
             assert(0);
             return {};
         },
-        []( const std::string& bufferName ) -> const MaterialPass::tPerFrameVkBuffer {
+        [](const std::string& bufferName) -> const tPerFrameVkBuffer {
             assert(0);
             return {};
         },
-        [this, &ImageAttachmentsLookup]( const std::string& imageName ) -> const ImageInfo {
+            [this, &ImageAttachmentsLookup](const std::string& imageName) -> const ImageInfo {
             return { ImageAttachmentsLookup.find(imageName)->second };
         }
-    );
+        );
 
     static const char* passName = "Fullscreen";
     const VkSampleCountFlagBits renderPassMultisamples[1] = { passMsaa };
@@ -528,7 +500,7 @@ std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShad
 bool Application::InitCommandBuffers()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     char szName[256];
     for( uint32_t WhichBuffer = 0; WhichBuffer < NUM_VULKAN_BUFFERS; WhichBuffer++ )
@@ -551,7 +523,7 @@ void Application::Render(float fltDiffTime)
 
     UpdateCamera( fltDiffTime );
 
-    auto* pVulkan = m_vulkan.get();
+    auto* pVulkan = GetVulkan();
 
     // See if we want to change the MSAA mode
     if(  gUseSubpasses != m_RequestedUseSubpasses )
@@ -587,10 +559,12 @@ void Application::UpdateCamera(float elapsedTime)
 bool Application::UpdateUniforms( uint32_t bufferIdx )
 //-----------------------------------------------------------------------------
 {
+    auto* pVulkan = GetVulkan();
+
     ObjectVertUniform data{ };
     data.MVPMatrix = m_Camera.ProjectionMatrix() * m_Camera.ViewMatrix();
     data.ModelMatrix = glm::identity<glm::mat4>();
-    UpdateUniformBuffer( m_vulkan.get(), m_ObjectVertUniform, data );
+    UpdateUniformBuffer( pVulkan, m_ObjectVertUniform, data );
 
     return true;
 }
@@ -600,7 +574,7 @@ bool Application::UpdateUniforms( uint32_t bufferIdx )
 bool Application::UpdateCommandBuffer(uint32_t bufferIdx)
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     auto& commandBuffer = m_CommandBuffer[bufferIdx];
 
@@ -660,7 +634,7 @@ bool Application::UpdateCommandBuffer(uint32_t bufferIdx)
         {
             return false;
         }
-        m_Gui->Render(commandBuffer.m_VkCommandBuffer);
+        GetGui()->Render(commandBuffer.m_VkCommandBuffer);
 
         commandBuffer.EndRenderPass();
     }
@@ -672,7 +646,7 @@ bool Application::UpdateCommandBuffer(uint32_t bufferIdx)
     Scissor.extent.width = pVulkan->m_SurfaceWidth;
     Scissor.extent.height = pVulkan->m_SurfaceHeight;
 
-    if( !commandBuffer.BeginRenderPass( Scissor, 0.0f, 1.0f, { &ClearColor , 1 }, 1, false, m_BlitRenderPass, true/*swapchain*/, pVulkan->m_pSwapchainFrameBuffers[bufferIdx], VK_SUBPASS_CONTENTS_INLINE ) )
+    if( !commandBuffer.BeginRenderPass( Scissor, 0.0f, 1.0f, { &ClearColor , 1 }, 1, false, m_BlitRenderPass, true/*swapchain*/, pVulkan->m_SwapchainBuffers[bufferIdx].framebuffer, VK_SUBPASS_CONTENTS_INLINE ) )
     {
         return false;
     }
@@ -688,12 +662,14 @@ bool Application::UpdateCommandBuffer(uint32_t bufferIdx)
 
 
 //-----------------------------------------------------------------------------
-bool Application::Create2SubpassRenderPass( const tcb::span<const VkFormat> InternalColorFormats, const tcb::span<const VkFormat> OutputColorFormats, VkFormat InternalDepthFormat, VkSampleCountFlagBits InternalMsaa, VkSampleCountFlagBits OutputMsaa, VkRenderPass* pRenderPass/*out*/ )
+bool Application::Create2SubpassRenderPass( const std::span<const TextureFormat> InternalColorFormats, const std::span<const TextureFormat> OutputColorFormats, TextureFormat InternalDepthFormat, VkSampleCountFlagBits InternalMsaa, VkSampleCountFlagBits OutputMsaa, VkRenderPass* pRenderPass/*out*/ )
 //-----------------------------------------------------------------------------
 {
     assert(pRenderPass && *pRenderPass == VK_NULL_HANDLE);  // check not already allocated and that we have a location to place the renderpass handle
     assert( !InternalColorFormats.empty() );                // not supporting a depth only pass
     assert( !OutputColorFormats.empty() );
+
+    Vulkan* pVulkan = GetVulkan();
 
     const bool NeedsResolve = InternalMsaa != OutputMsaa;
 
@@ -715,7 +691,7 @@ bool Application::Create2SubpassRenderPass( const tcb::span<const VkFormat> Inte
     ColorReferencesPass1.reserve(OutputColorFormats.size());
     ResolveReferencesPass1.reserve(OutputColorFormats.size());
 
-    const bool HasDepth = InternalDepthFormat != VK_FORMAT_UNDEFINED;
+    const bool HasDepth = InternalDepthFormat != TextureFormat::UNDEFINED;
     const bool HasPass2ReadDepth = HasDepth && false;
 
     //
@@ -725,7 +701,7 @@ bool Application::Create2SubpassRenderPass( const tcb::span<const VkFormat> Inte
     {
         // Pass0 color and depth buffers setup to clear on load, discard on end (of entire pass).
         VkAttachmentDescription AttachmentDescPass0 = { 0/*flags*/,
-            ColorFormat/*format*/,
+            TextureFormatToVk(ColorFormat)/*format*/,
             InternalMsaa/*samples*/,
             VK_ATTACHMENT_LOAD_OP_CLEAR/*loadOp*/,
             VK_ATTACHMENT_STORE_OP_DONT_CARE/*storeOp*/,
@@ -744,7 +720,7 @@ bool Application::Create2SubpassRenderPass( const tcb::span<const VkFormat> Inte
     for(const auto& ColorFormat: OutputColorFormats)
     {
         // Pass1 color buffers setup to, store on end (of entire pass).
-        VkAttachmentDescription AttachmentDescPass1 = { 0, ColorFormat/*format*/,
+        VkAttachmentDescription AttachmentDescPass1 = { 0, TextureFormatToVk(ColorFormat)/*format*/,
             (gShaderResolve||!NeedsResolve) ? OutputMsaa : InternalMsaa/*samples*/,
             VK_ATTACHMENT_LOAD_OP_DONT_CARE/*loadOp*/,
             (gShaderResolve||!NeedsResolve) ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE/*storeOp*/,
@@ -766,7 +742,7 @@ bool Application::Create2SubpassRenderPass( const tcb::span<const VkFormat> Inte
         for( const auto& ColorFormat : OutputColorFormats )
         {
             // Pass1 color buffers to resolve to at end of pass.
-            VkAttachmentDescription AttachmentDescResolvePass1 = { 0, ColorFormat/*format*/,
+            VkAttachmentDescription AttachmentDescResolvePass1 = { 0, TextureFormatToVk(ColorFormat)/*format*/,
                 OutputMsaa/*samples*/,
                 VK_ATTACHMENT_LOAD_OP_DONT_CARE/*loadOp*/,
                 VK_ATTACHMENT_STORE_OP_STORE/*storeOp*/,
@@ -791,7 +767,7 @@ bool Application::Create2SubpassRenderPass( const tcb::span<const VkFormat> Inte
     if (HasDepth)
     {
         VkAttachmentDescription AttachmentDescDepthPass0 = { 0/*flags*/,
-            InternalDepthFormat/*format*/,
+            TextureFormatToVk(InternalDepthFormat)/*format*/,
             InternalMsaa/*samples*/,
             VK_ATTACHMENT_LOAD_OP_CLEAR/*loadOp*/,
             VK_ATTACHMENT_STORE_OP_DONT_CARE/*storeOp*/,
@@ -858,7 +834,7 @@ bool Application::Create2SubpassRenderPass( const tcb::span<const VkFormat> Inte
     RenderPassInfo.dependencyCount = (uint32_t) PassDependencies.size();
     RenderPassInfo.pDependencies = PassDependencies.data();
 
-    VkResult RetVal = vkCreateRenderPass(m_vulkan->m_VulkanDevice, &RenderPassInfo, NULL, pRenderPass);
+    VkResult RetVal = vkCreateRenderPass(pVulkan->m_VulkanDevice, &RenderPassInfo, NULL, pRenderPass);
     if (!CheckVkError("vkCreateRenderPass()", RetVal))
     {
         return false;
@@ -872,9 +848,11 @@ bool Application::Create2SubpassRenderPass( const tcb::span<const VkFormat> Inte
 void Application::ChangeMsaaMode()
 //-----------------------------------------------------------------------------
 {
+    Vulkan* pVulkan = GetVulkan();
+
     gUseSubpasses  = m_RequestedUseSubpasses;
     
-    m_vulkan->RecreateSwapChain();
+    pVulkan->RecreateSwapChain();
 
     InitFramebuffersRenderPassesAndDrawables();
 }
@@ -884,6 +862,8 @@ void Application::ChangeMsaaMode()
 bool Application::InitHdr()
 //-----------------------------------------------------------------------------
 {
+    Vulkan* pVulkan = GetVulkan();
+
     // Set the color profile
     VkHdrMetadataEXT AuthoringProfile = {VK_STRUCTURE_TYPE_HDR_METADATA_EXT};
     AuthoringProfile.displayPrimaryRed.x = 0.680f;
@@ -898,25 +878,25 @@ bool Application::InitHdr()
     AuthoringProfile.minLuminance = 0.001f;
     AuthoringProfile.maxContentLightLevel = 2000.f;
     AuthoringProfile.maxFrameAverageLightLevel = 1000.f;
-    return m_vulkan->SetSwapchainHrdMetadata(AuthoringProfile);
+    return pVulkan->SetSwapchainHrdMetadata(AuthoringProfile);
 }
 
 
 //-----------------------------------------------------------------------------
-bool Application::InitGui(uintptr_t windowHandle)
+bool Application::InitGui(uintptr_t windowHandle, uintptr_t instanceHandle)
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
-    const VkFormat GuiColorFormat[]{ VK_FORMAT_R8G8B8A8_UNORM };
+    const TextureFormat GuiColorFormat[]{ TextureFormat::R8G8B8A8_UNORM };
     const TEXTURE_TYPE GuiTextureTypes[]{ TT_RENDER_TARGET };
 
-    if( !m_GuiRT.Initialize( pVulkan, gRenderWidth, gRenderHeight, GuiColorFormat, VK_FORMAT_UNDEFINED, VK_SAMPLE_COUNT_1_BIT, "Gui RT", GuiTextureTypes ) )
+    if( !m_GuiRT.Initialize( pVulkan, gRenderWidth, gRenderHeight, GuiColorFormat, TextureFormat::UNDEFINED, VK_SAMPLE_COUNT_1_BIT, "Gui RT", GuiTextureTypes ) )
     {
         return false;
     }
 
-    m_Gui = std::make_unique<GuiImguiVulkan>(*pVulkan, m_GuiRT.m_RenderPass);
+    m_Gui = std::make_unique<GuiImguiGfx<Vulkan>>(*pVulkan, m_GuiRT.m_RenderPass);
     if (!m_Gui->Initialize(windowHandle, m_GuiRT[0].m_Width, m_GuiRT[0].m_Height))
     {
         return false;
@@ -929,6 +909,8 @@ bool Application::InitGui(uintptr_t windowHandle)
 void Application::UpdateGui()
 //-----------------------------------------------------------------------------
 {
+    Vulkan* pVulkan = GetVulkan();
+
     if (m_Gui)
     {
         // Update Gui
@@ -941,9 +923,13 @@ void Application::UpdateGui()
         if (ImGui::Begin("Settings", &settingsOpen, (ImGuiWindowFlags)0))
         {
             // Add our widgets
-            if( m_vulkan->GetExtRenderPassShaderResolveAvailable() )
+            if( pVulkan->GetExtRenderPassShaderResolveAvailable() )
             {
                 ImGui::Checkbox("Use Subpasses", &m_RequestedUseSubpasses);
+            }
+            else
+            {
+                ImGui::Text("RenderPass shader resolve isn't available");
             }
         
         }
@@ -964,16 +950,13 @@ void Application::UpdateGui()
 void Application::Destroy()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    Vulkan* pVulkan = GetVulkan();
 
     m_SceneObject.clear();
     m_TonemapDrawable.reset();
     m_BlitDrawable.reset();
 
-    for (auto& texture : m_LoadedTextures)
-    {
-        ReleaseTexture(pVulkan, &texture.second);
-    }
+    m_TexWhite.Release(pVulkan);
 
     ReleaseUniformBuffer( pVulkan, &m_ObjectVertUniform );
     ReleaseUniformBuffer( pVulkan, &m_ObjectFragUniform );

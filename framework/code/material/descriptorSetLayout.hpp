@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,7 +12,7 @@
 #include <map>
 #include <string>
 #include <memory>//TEMP
-#include "tcb/span.hpp"
+#include <span>
 
 // Forward declares
 class DescriptorSetDescription;
@@ -34,8 +34,8 @@ public:
     bool Init(Vulkan& vulkan, const DescriptorSetDescription&);
     void Destroy(Vulkan& vulkan);
 
-    static VkDescriptorSetLayout CreateVkDescriptorSetLayout(Vulkan& vulkan, const tcb::span<const VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings);
-    static void CalculatePoolSizes(const tcb::span<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings, std::vector<VkDescriptorPoolSize>& descriptorPoolSizes/*output*/);
+    static VkDescriptorSetLayout CreateVkDescriptorSetLayout(Vulkan& vulkan, const std::span<const VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings);
+    static void CalculatePoolSizes(const std::span<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings, std::vector<VkDescriptorPoolSize>& descriptorPoolSizes/*output*/);
 
     const auto& GetVkDescriptorSetLayoutBinding() const { return m_descriptorSetLayoutBindings; }
     const auto& GetVkDescriptorSetLayout() const { return m_descriptorSetLayout; }

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -155,6 +155,7 @@ static void LOG_(WORD ConsoleColor, const char* pszFormat, va_list args)
 //-----------------------------------------------------------------------------
 {
     char szBuffer[2048];    // Bumped to 2048 based on Vulkan validation errors
+    szBuffer[0] = 0;
 
     vsnprintf_s(szBuffer, sizeof(szBuffer), _TRUNCATE, pszFormat, args);
 

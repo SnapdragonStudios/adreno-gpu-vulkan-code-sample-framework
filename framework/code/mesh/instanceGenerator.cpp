@@ -1,13 +1,12 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "instanceGenerator.hpp"
-#include "mesh/meshObjectIntermediate.hpp"
 #include "system/crc32c.hpp"
 #include <glm/gtx/norm.hpp>
 #define EIGEN_INITIALIZE_MATRICES_BY_ZERO
@@ -17,7 +16,7 @@
 #include <algorithm>
 
 // Calculate the 'centroid' of the object mesh.
-static glm::vec3 ComputeMeshCenter( const tcb::span<MeshObjectIntermediate::FatVertex> vertices )
+static glm::vec3 ComputeMeshCenter( const std::span<MeshObjectIntermediate::FatVertex> vertices )
 {
     glm::highp_dvec3 center(0.0);   // calculate in 'doubles'
     {
@@ -32,7 +31,7 @@ static glm::vec3 ComputeMeshCenter( const tcb::span<MeshObjectIntermediate::FatV
     return center;
 }
 
-static void TransformToCenter( const tcb::span<MeshObjectIntermediate::FatVertex> vertices, const glm::vec3 center )
+static void TransformToCenter( const std::span<MeshObjectIntermediate::FatVertex> vertices, const glm::vec3 center )
 {
     for (auto& v: vertices)
     {
@@ -42,8 +41,8 @@ static void TransformToCenter( const tcb::span<MeshObjectIntermediate::FatVertex
     }
 }
 
-static glm::mat4x4 ComputeTransformationBetweenVertexPositions( const tcb::span<const MeshObjectIntermediate::FatVertex>& verticesFrom,
-                                                                const tcb::span<const MeshObjectIntermediate::FatVertex>& verticesTo,
+static glm::mat4x4 ComputeTransformationBetweenVertexPositions( const std::span<const MeshObjectIntermediate::FatVertex>& verticesFrom,
+                                                                const std::span<const MeshObjectIntermediate::FatVertex>& verticesTo,
                                                                 const glm::highp_dvec3 verticesFromCenter,
                                                                 const glm::highp_dvec3 verticesToCenter )
 {

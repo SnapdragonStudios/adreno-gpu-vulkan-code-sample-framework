@@ -22,8 +22,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_ROOT_DIR}/cmake)
 #
 # Add in the contents of 'shaders' directory
 #
-# Don't include shaders until extensions are part of default GLSLang
-#include(AddShadersDir)
+include(AddShadersDir)
 
 #
 # Do all the build steps for a Framework application.
@@ -32,9 +31,9 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_ROOT_DIR}/cmake)
 include(FrameworkApplicationHelper)
 
 #
-# Copy required assets to local folders
+# Convert and copy textures to local folders
 #
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures/painting.ktx DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/Media/Textures/)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures/painting_astc.ktx DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/Media/Textures/)
-file(RENAME ${CMAKE_CURRENT_SOURCE_DIR}/Media/Textures/painting.ktx ${CMAKE_CURRENT_SOURCE_DIR}/Media/Textures/Bloom-Source-Texture.ktx)
-file(RENAME ${CMAKE_CURRENT_SOURCE_DIR}/Media/Textures/painting_astc.ktx ${CMAKE_CURRENT_SOURCE_DIR}/Media/Textures/Bloom-Source-Texture-astc.ktx)
+include(TexturePackager)
+
+# Textures
+add_textures_from_path(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures)

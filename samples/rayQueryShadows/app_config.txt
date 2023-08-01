@@ -1,0 +1,6 @@
+gFramesToRender=0
+#gCameraMoveSpeed=100
+
+gRasterizedShadow=false
+gRasterizedShadowCulled=true
+
