@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -19,9 +19,10 @@
 #include <fcntl.h>
 #include <io.h>
 #include <iostream>
+#include <filesystem>
 
 #include "system/os_common.h"
-#include "vulkan/vulkan.hpp"
+//#include "vulkan/vulkan.hpp"
 
 #include "main/frameworkApplicationBase.hpp"
 #include "main/applicationEntrypoint.hpp"
@@ -68,36 +69,59 @@ int DefaultCrashReport(int i, char* msg, int* p)
 }
 int (*PFN_CrashReportHook)(int, char*, int*) = &DefaultCrashReport;//_CRT_REPORT_HOOK)
 
-void CreateConsoleWindow()
+bool CreateConsoleWindow( bool forceNewConsole )
 {
-    // Create the new console window
-    if (!AllocConsole())
-        return;
+    // Grab the output handles from windows.
+    auto stdoutHandle = GetStdHandle( STD_OUTPUT_HANDLE );
+    auto stderrHandle = GetStdHandle( STD_ERROR_HANDLE );
 
-    _CrtSetReportHook(PFN_CrashReportHook);
+    bool allocatedNewConsole = false;
+    if (forceNewConsole || !AttachConsole( ATTACH_PARENT_PROCESS ))
+    {
+        // Create the new console window
+        if (!AllocConsole())
+            return false;
+        allocatedNewConsole = true;
+
+        stdoutHandle = GetStdHandle( STD_OUTPUT_HANDLE );
+        stderrHandle = GetStdHandle( STD_ERROR_HANDLE );
+    }
+
+    _CrtSetReportHook( PFN_CrashReportHook );
 
     // Redirect stdout and stderr from our app to the new console window...
 
-    // Grab the output handles from windows.
-    auto stdoutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-    auto stderrHandle = GetStdHandle(STD_ERROR_HANDLE);
-
-    // Transfer ownership of the Windows OS handles to C style file descriptor
-    FILE* pConsoleStdoutFile = _fdopen(_open_osfhandle((intptr_t)stdoutHandle, _O_TEXT), "w");
-    if (pConsoleStdoutFile != nullptr)
-        *stdout = *pConsoleStdoutFile;
-    FILE* pConsoleStderrFile = _fdopen(_open_osfhandle((intptr_t)stderrHandle, _O_TEXT), "w");
-    if (pConsoleStderrFile != nullptr)
-        *stderr = *pConsoleStderrFile;
-
-    // Disable buffering so that we dont lose output on breakpoints/crashes
-    setvbuf(stdout, NULL, _IONBF, 0);
-    setvbuf(stderr, NULL, _IONBF, 0);
+    if (stdoutHandle)
+    {
+        const auto stdoutFileType = GetFileType( stdoutHandle );
+        if (stdoutFileType != FILE_TYPE_DISK && stdoutFileType != FILE_TYPE_PIPE) // dont redirect to our console if someone is already redirecting!
+        {
+            // Transfer ownership of the Windows OS handles to C style file descriptor
+            FILE* pConsoleStdoutFile = _fdopen( _open_osfhandle( (intptr_t) stdoutHandle, _O_TEXT ), "w" );
+            if (pConsoleStdoutFile != nullptr)
+                *stdout = *pConsoleStdoutFile;
+            setvbuf( stdout, NULL, _IONBF, 0 );   // Disable buffering so that we dont lose output on breakpoints/crashes
+        }
+    }
+    if (stderrHandle)
+    {
+        const auto stderrfileType = GetFileType( stderrHandle );
+        if (stderrfileType != FILE_TYPE_DISK && stderrfileType != FILE_TYPE_PIPE) // dont redirect to our console if someone is already redirecting!
+        {
+            FILE* pConsoleStderrFile = _fdopen( _open_osfhandle( (intptr_t) stderrHandle, _O_TEXT ), "w" );
+            if (pConsoleStderrFile != nullptr)
+                *stderr = *pConsoleStderrFile;
+            setvbuf( stderr, NULL, _IONBF, 0 );   // Disable buffering so that we dont lose output on breakpoints/crashes
+        }
+    }
 
     // Direct C++ streams to write to stdout/stderr too
     std::ios::sync_with_stdio();
-}
 
+    freopen( "CON", "w", stdout );
+
+    return allocatedNewConsole;
+}
 
 //-----------------------------------------------------------------------------
 LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -275,18 +299,54 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     // WS_POPUP allows a window larger than the actual screen
     DWORD dwStyle = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_POPUP;
 
-    // Create the console window
-    CreateConsoleWindow();
+    // See if the user want to attach to the console
+    const bool consoleAttachRequested = (sCommandLine.substr(0, 8) == "-console");
+    if (consoleAttachRequested)
+        sCommandLine = sCommandLine.size() > 8 ? sCommandLine.substr(9) : std::string{};
+
+    // Create the console window (or attempt to attact to existing console eg commandline)
+    bool allocatedNewConsoleWindow = CreateConsoleWindow(false);
+
+    // Check for a media directy (fatal to not have one).
+    constexpr auto mediaPath = "Media";
+    if (!std::filesystem::exists(mediaPath) || !std::filesystem::is_directory(mediaPath))
+    {
+        std::string errorMessage = "Cannot find 'Media' folder.\n  If you built this application maybe you didnt run the corresponding 02_PrepareMedia.bat script?\n  If you did prepare the media (or are running a pre-built build) you're likely not running from the correct directory.\n";
+        LOGE(errorMessage.c_str());
+        SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+
+        if (allocatedNewConsoleWindow && !IsDebuggerPresent())
+        {
+            MessageBox(nullptr, errorMessage.c_str(), "Vulkan Framework", MB_OK);
+        }
+        return FALSE;
+    }
+
+    if (!allocatedNewConsoleWindow)
+    {
+        // We attached to an existing console!
+        if (!consoleAttachRequested)
+        {
+            LOGI("For log output to this console, relaunch app with -console option.\nIf running from a commandline console it is also recommended you launch with \"start /wait\", eg \"start /b /wait thisapp.exe -console\".\nThe -console option will also allow you to redirect output to file or pipe!\n");
+            FreeConsole();
+            allocatedNewConsoleWindow = CreateConsoleWindow(true/*force a new console window*/);
+        }
+    }
+    else if (consoleAttachRequested)
+    {
+        LOGE("Could not attach to launching commandline / console (despite \"-console\" commandline argument)");
+    }
+
+    // Move the console out of the way of the graphics window (if we created a new console).
+    const uint32_t WindowMargin = 50;
+    if (allocatedNewConsoleWindow)
+    {
+        HWND hConsole = GetConsoleWindow();
+        SetWindowPos(hConsole, 0, WindowMargin, (int)(1.0f * WindowMargin) + gSurfaceHeight, gSurfaceWidth, 3 * gSurfaceHeight / 4, SWP_SHOWWINDOW);    // SWP_NOSIZE
+    }
 
     // Create the application
     gpApplication = Application_ConstructApplication();
-
-    uint32_t WindowMargin = 50;
-
-    // Want the console window here so Vulkan initialization is logged
-    HWND hConsole = GetConsoleWindow();
-    SetWindowPos(hConsole, 0, WindowMargin, (int)(1.0f * WindowMargin) + gSurfaceHeight, gSurfaceWidth, 3 * gSurfaceHeight / 4, SWP_SHOWWINDOW);    // SWP_NOSIZE
-    freopen("CON", "w", stdout);
 
     // Do a very simple parse of the cmd line...
     std::string sConfigFilenameOverride;
@@ -336,19 +396,12 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     ::CoInitialize(NULL);
 
-    // Initialize some Vulkan stuff
-    // Do this BEFORE calling CreateVulkanWindow()
-    if (!gpApplication->GetVulkan()->Init( (uintptr_t)hWnd,
-                                           (uintptr_t)hInstance,
-                                           [](tcb::span<const VkSurfaceFormatKHR> x) { return gpApplication->PreInitializeSelectSurfaceFormat(x); },
-                                           [](Vulkan::AppConfiguration& x) { return gpApplication->PreInitializeSetVulkanConfiguration(x); }))
+    // Initialize the application class
+    if (!gpApplication->Initialize((uintptr_t)hWnd, (uintptr_t)hInstance))
     {
-        LOGE("Unable to initialize Vulkan!!");
-        return 0;
-    }
-
-    if (!gpApplication->Initialize((uintptr_t)hWnd))
+        LOGE("Application initialization failed!!");
         return FALSE;
+    }
 
     gAppInitialized = true;
 
@@ -361,7 +414,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     while (!fDone)
     {
         // Handle all the messages first
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+        while (!fDone && PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
         {
             if (msg.message == WM_QUIT)
             {

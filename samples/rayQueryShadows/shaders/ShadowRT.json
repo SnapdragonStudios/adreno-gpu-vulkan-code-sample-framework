@@ -1,0 +1,47 @@
+{
+	"$schema": "../../../framework/schema/shaderSchema.json",
+	"Passes": [
+		{
+			"Name": "ShadowRayQuery",
+			"Shaders": {
+				"Compute": "Media/Shaders/ShadowRT.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Uniform" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Depth" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Normal" ]
+						},
+						{
+							"Type": "AccelerationStructure",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "AccelerationStructure" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "Output" ]
+						}
+					]
+				}
+			]
+		}
+	]
+}

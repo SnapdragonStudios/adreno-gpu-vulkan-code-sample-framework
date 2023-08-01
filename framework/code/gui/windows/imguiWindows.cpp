@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -42,6 +42,10 @@ bool GuiImguiPlatform::Initialize(uintptr_t windowHandle, uint32_t deviceWidth, 
     }
 
     PFN_Gui_WndProcHandler = &ImGui_ImplWin32_WndProcHandler;
+
+    // Disable the IME callback, if IME is needed then we can revisit but this fixes a hang when entering text into an entry box.
+    // Remove if/when we upgrade IMGUI past 1.88.  https://github.com/ocornut/imgui/issues/5535
+    ImGui::GetIO().SetPlatformImeDataFn = nullptr;
 
     return true;
 }

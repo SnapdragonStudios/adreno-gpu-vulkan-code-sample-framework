@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -20,10 +20,13 @@ public:
     enum class DescriptorType {
         UniformBuffer,
         StorageBuffer,
-        ImageSampler,
+        ImageSampler,           ///< Texture and Sampler combined
+        ImageSampled,           ///< Image/texture alone (no sampler)
+        Sampler,                ///< Sampler alone (no image/texture)
         ImageStorage,
         InputAttachment,
-        DrawIndirectBuffer
+        DrawIndirectBuffer,
+        AccelerationStructure   ///< Ray Tracing
     };
     class StageFlag
     {
@@ -33,7 +36,11 @@ public:
             Vertex = 1,
             Fragment = 2,
             Geometry = 4,
-            Compute = 8
+            Compute = 8,
+            RayGeneration = 16,
+            RayClosestHit = 32,
+            RayAnyHit = 64,
+            RayMiss = 128
         };
         StageFlag(const t _type) : type(_type) {}
         StageFlag& operator=(const StageFlag& other) { type = other.type; return *this; }

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -168,7 +168,7 @@ public:
     template<typename Func, typename... Args>
     struct FunctionParamWrapper : ParameterWrapperBase
     {
-        FunctionParamWrapper(Func&& func, Args&&... args) : m_func(+func), m_args(std::forward<Args>(args)... )
+        FunctionParamWrapper(Func&& func, Args... args) : m_func(+func), m_args(std::forward<Args>(args)... )
         {
         }
         void                (*m_func)(Args...);
@@ -182,7 +182,7 @@ public:
     /// @note Thread safe.
     /// @note DOES NOT support lambdas with captures (essentially the lambda is treated as a function pointer)
     template<typename Func, typename... Args>
-    void        DoWork2( Func&& lambda, Args&&... args ) {
+    void        DoWork2( Func&& lambda, Args... args ) {
 
         using tWrapper = FunctionParamWrapper<Func, Args...>;
 
@@ -190,7 +190,7 @@ public:
 
         auto lambdaWrap = []( void* voidParams ) {
             tWrapper* pParams = static_cast<tWrapper*>(voidParams);
-            std::apply( pParams->m_func, pParams->m_args );
+            std::apply( pParams->m_func, std::move(pParams->m_args) );
             delete pParams;
         };
 

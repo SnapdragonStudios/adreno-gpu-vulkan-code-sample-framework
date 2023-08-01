@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -14,17 +14,26 @@
 #include "memory/memoryManager.hpp"
 #include "vulkan_support.hpp"
 #include "TextureFuncts.h"
+#include "texture/vulkan/texture.hpp"
 #include <vector>
 #include <map>
+#include <cinttypes>
 #define STB_IMAGE_IMPLEMENTATION
 #include "tinygltf/stb_image.h"
 #include "tinygltf/stb_image_write.h"
+
+#if 0
 
 // http://www.khronos.org/opengles/sdk/tools/KTX/file_format_spec/
 constexpr std::array<unsigned char, 12> KTX_IDENTIFIER_REF = { 0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A };
 constexpr uint32_t KTX_ENDIAN_REF = 0x04030201;     // Big Endian
 constexpr uint32_t KTX_ENDIAN_REF_REV = 0x01020304; // Little Endian
 constexpr uint32_t KTX_HEADER_SIZE = 64;
+
+// https://github.khronos.org/KTX-Specification/
+// https://github.com/KhronosGroup/KTX-Software/blob/master/lib/ktxint.h
+constexpr std::array<unsigned char, 12> KTX2_IDENTIFIER_REF{ 0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A };
+#define KTX2_HEADER_SIZE     (80)
 
 #if !defined(FLT_MAX)
 #define FLT_MAX          3.402823466e+38f
@@ -52,6 +61,47 @@ typedef struct _KTXHeader
     uint32_t  numberOfMipmapLevels;
     uint32_t  bytesOfKeyValueData;
 } KTXHeader;
+
+// https://github.khronos.org/KTX-Specification/
+// https://github.com/KhronosGroup/KTX-Software/blob/master/lib/ktxint.h
+typedef struct ktxIndexEntry32 {
+    uint32_t byteOffset; /*!< Offset of item from start of file. */
+    uint32_t byteLength; /*!< Number of bytes of data in the item. */
+} ktxIndexEntry32;
+/**
+ * @internal
+ * @~English
+ * @brief 64-bit KTX 2 index entry.
+ */
+typedef struct ktxIndexEntry64 {
+    uint64_t byteOffset; /*!< Offset of item from start of file. */
+    uint64_t byteLength; /*!< Number of bytes of data in the item. */
+} ktxIndexEntry64;
+
+typedef struct KTX_header2 {
+    uint8_t  identifier[12];
+    uint32_t vkFormat;
+    uint32_t typeSize;
+    uint32_t pixelWidth;
+    uint32_t pixelHeight;
+    uint32_t pixelDepth;
+    uint32_t layerCount;
+    uint32_t faceCount;
+    uint32_t levelCount;
+    uint32_t supercompressionScheme;
+    ktxIndexEntry32 dataFormatDescriptor;
+    ktxIndexEntry32 keyValueData;
+    ktxIndexEntry64 supercompressionGlobalData;
+} KTX_header2;
+
+typedef struct ktxLevelIndexEntry {
+    uint64_t byteOffset; /*!< Offset of level from start of file. */
+    uint64_t byteLength;
+    /*!< Number of bytes of compressed image data in the level. */
+    uint64_t uncompressedByteLength;
+    /*!< Number of bytes of uncompressed image data in the level. */
+} ktxLevelIndexEntry;
+
 
 // This is not a class.  It is up to caller to release any objects in this structure
 typedef struct _MipTexData
@@ -215,6 +265,9 @@ static VkFormat L_ReturnVulkanFormat(uint32_t glType, uint32_t glFormat, uint32_
     const uint32_t glFormat_GL_RGBA16F = 0x881A;
     const uint32_t glFormat_GL_RGBA32F = 0x8814;
 
+    const uint32_t glFormat_GL_RED = 0x1903;
+    const uint32_t glFormat_GL_R8 = 0x8229;
+
     VkFormat RetVal = VK_FORMAT_UNDEFINED;
 
     // Unsigned Byte Formats (SimpleTextureConverted uses either GL_RGB or GL_RGB8)
@@ -228,6 +281,14 @@ static VkFormat L_ReturnVulkanFormat(uint32_t glType, uint32_t glFormat, uint32_
         else
         {
             RetVal = VK_FORMAT_R8G8B8_UNORM;
+        }
+    }
+
+    else if (glType == glType_GL_UNSIGNED_BYTE && (glFormat == glFormat_GL_RED || glFormat == glFormat_GL_R8))
+    {
+        if (glInternalFormat == glFormat_GL_R8)
+        {
+            RetVal = VK_FORMAT_R8_UNORM;
         }
     }
 
@@ -465,6 +526,230 @@ static bool L_ParseKTXBuffer(const char* pFileName, void* pKTXBuffer, uint32_t B
     // Everything worked out
     return true;
 }
+//-----------------------------------------------------------------------------
+static bool L_ParseKTX2Buffer(const char* pFileName, void* pKTXBuffer, uint32_t BufferLength, VulkanTexData* pTexData)
+//-----------------------------------------------------------------------------
+{
+    if (pTexData == NULL)
+        return false;
+
+    // Make sure starting from a clean place
+    L_FreeTexData(pTexData);
+
+    // Set up the walker
+    void* pWalker = pKTXBuffer;
+    uint32_t uiWalkerDist = 0;
+
+    // Read and verify the KTX Header
+    KTX_header2* pHeader = (KTX_header2*)pWalker;
+
+    if (memcmp(pHeader->identifier, KTX2_IDENTIFIER_REF.data(), KTX2_IDENTIFIER_REF.size()) != 0)
+    {
+        LOGE("KTX file has invalid header: %s", pFileName);
+        return false;
+    }
+
+    LOGI("Texture Header Info (%s)", pFileName);
+    LOGI("    vkFormat: 0x%x", pHeader->vkFormat);
+    LOGI("    typeSize: %d", pHeader->typeSize);
+    LOGI("    pixelWidth: %d", pHeader->pixelWidth);
+    LOGI("    pixelHeight: %d", pHeader->pixelHeight);
+    LOGI("    pixelDepth: %d", pHeader->pixelDepth);
+    LOGI("    layerCount: %d", pHeader->layerCount);
+    LOGI("    faceCount: %d", pHeader->faceCount);
+    LOGI("    levelCount: %d", pHeader->levelCount);
+
+    // Cubemaps => NOT SUPPORTED
+    if (pHeader->faceCount != 1)
+    {
+        LOGE("    CubeMaps in KTX2 NOT SUPPORTED!");
+        return false;
+    }
+
+    // Array textures => NOT SUPPORTED
+    if (pHeader->layerCount != 0)
+    {
+        LOGE("    Array Textures in KTX2 NOT SUPPORTED!");
+        return false;
+    }
+
+    // Single Mip => NOT SUPPORTED
+    if (pHeader->levelCount == 0)
+    {
+        LOGE("    Single mip in KTX2 NOT SUPPORTED!");
+        return false;
+    }
+
+    if (pHeader->vkFormat == VK_FORMAT_R16G16B16A16_SFLOAT)
+    {
+        LOGI("    Floating point format: VK_FORMAT_R16G16B16A16_SFLOAT");
+    }
+
+    // if (pHeader->vkFormat == VK_FORMAT_B8G8R8_SRGB)
+    // {
+    //     LOGE("    SRGB KTX2 NOT SUPPORTED! Changing VK_FORMAT_B8G8R8_SRGB to VK_FORMAT_R8G8B8_UNORM");
+    //     pHeader->vkFormat = VK_FORMAT_R8G8B8_UNORM;
+    // }
+    // 
+    // if (pHeader->vkFormat == VK_FORMAT_B8G8R8A8_SRGB)
+    // {
+    //     LOGE("    SRGB KTX2 NOT SUPPORTED! Changing VK_FORMAT_B8G8R8A8_SRGB to VK_FORMAT_R8G8B8A8_UNORM");
+    //     pHeader->vkFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    // }
+
+    // Skip over the header
+    uiWalkerDist += sizeof(KTX_header2);
+    pWalker = (char*)pKTXBuffer + uiWalkerDist;
+    // LOGI("Walker is now %d bytes from start of file", uiWalkerDist);
+
+    // DataFormatDescriptor
+    // LOGI("    DataFormatDescriptor: %d bytes starting at %d", pHeader->dataFormatDescriptor.byteLength, pHeader->dataFormatDescriptor.byteOffset);
+    // uiWalkerDist = pHeader->dataFormatDescriptor.byteOffset + pHeader->dataFormatDescriptor.byteLength;
+    // pWalker = (char*)pKTXBuffer + uiWalkerDist;
+    // LOGI("Walker is now %d bytes from start of file", uiWalkerDist);
+
+
+    // KeyValueData
+    // LOGI("    KeyValueData: %d bytes starting at %d", pHeader->keyValueData.byteLength, pHeader->keyValueData.byteOffset);
+    // uiWalkerDist = pHeader->keyValueData.byteOffset + pHeader->keyValueData.byteLength;
+    // pWalker = (char*)pKTXBuffer + uiWalkerDist;
+    // LOGI("Walker is now %d bytes from start of file", uiWalkerDist);
+
+    // SupercompressionGlobalData => NOT SUPPORTED
+    if (pHeader->supercompressionGlobalData.byteOffset != 0 || pHeader->supercompressionGlobalData.byteLength != 0)
+    {
+        LOGE("    SupercompressionGlobalData is NOT SUPPORTED!");
+        return false;
+    }
+
+    // Now come the levels: One entry for each mip
+    uint32_t MipWidth = pHeader->pixelWidth;
+    uint32_t MipHeight = pHeader->pixelHeight;
+    ktxLevelIndexEntry* pLevelEntry = (ktxLevelIndexEntry*)pWalker;
+    for (uint32_t WhichLevel = 0; WhichLevel < pHeader->levelCount; WhichLevel++)
+    {
+        // LOGI("        Level %02d (%d x %d): %lld bytes starting at %lld", WhichLevel, MipWidth, MipHeight, pLevelEntry[WhichLevel].byteLength, pLevelEntry[WhichLevel].byteOffset);
+
+        MipWidth /= 2;
+        MipHeight /= 2;
+
+        uiWalkerDist += sizeof(ktxLevelIndexEntry);
+        pWalker = (char*)pKTXBuffer + uiWalkerDist;
+    }
+    // LOGI("Walker is now %d bytes from start of file", uiWalkerDist);
+
+    // Sanity check that I am the start of DataFormatDescriptor
+    if (uiWalkerDist != pHeader->dataFormatDescriptor.byteOffset)
+    {
+        LOGE("KTX file has invalid header: %s", pFileName);
+        LOGE("    Accounted for %d bytes but should be at %d offset", uiWalkerDist, pHeader->dataFormatDescriptor.byteOffset);
+        return false;
+    }
+
+    // ********************************
+    // Memory Allocation
+    // ********************************
+    // Each texture has faces...
+    pTexData->pFaceData = (FaceTexData*)malloc(pHeader->faceCount * sizeof(FaceTexData));
+    if (pTexData->pFaceData == NULL)
+    {
+        LOGE("Unable to allocate memory for %d faces: %s", pHeader->faceCount, pFileName);
+        return false;
+    }
+
+    // Pull off the info we care about
+    pTexData->glType = pHeader->vkFormat;
+    pTexData->glFormat = pHeader->vkFormat;
+    pTexData->glInternalFormat = pHeader->vkFormat;
+    pTexData->VulkanFormat = (VkFormat)pHeader->vkFormat;
+    pTexData->NumFaces = pHeader->faceCount;
+
+    for (uint32_t WhichFace = 0; WhichFace < pTexData->NumFaces; WhichFace++)
+    {
+        pTexData->pFaceData[WhichFace].pLayerData = (LayerTexData*)malloc(sizeof(LayerTexData));
+        if (pTexData->pFaceData[WhichFace].pLayerData == NULL)
+        {
+            LOGE("Unable to allocate memory for layer: %s", pFileName);
+            return false;
+        }
+        pTexData->pFaceData[WhichFace].NumLayers = 1;
+
+        for (uint32_t WhichLayer = 0; WhichLayer < pTexData->pFaceData[WhichFace].NumLayers; WhichLayer++)
+        {
+            // ...each layer has mip levels
+
+            pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].pMipData = (MipTexData*)malloc(pHeader->levelCount * sizeof(MipTexData));
+            if (pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].pMipData == NULL)
+            {
+                LOGE("Unable to allocate memory for %d mip levels: %s", pHeader->levelCount, pFileName);
+                return false;
+            }
+            pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].NumMipLevels = pHeader->levelCount;
+
+            for (uint32_t WhichMipLevel = 0; WhichMipLevel < pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].NumMipLevels; WhichMipLevel++)
+            {
+                // These will be allocated and filled in later.  Set to NULL for error checking
+                pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[WhichMipLevel].pData = nullptr;
+            }   // Which MipLevel
+
+        }   // Which Layer
+
+    }   // Which Face
+
+    // ********************************
+    // Allocate and fill mip levels
+    // ********************************
+    uint32_t uiMipWidth = pHeader->pixelWidth;
+    uint32_t uiMipHeight = pHeader->pixelHeight;
+    uint32_t uiMipSize = 0;
+    for (uint32_t WhichMipLevel = 0; WhichMipLevel < pHeader->levelCount; WhichMipLevel++)
+    {
+        // What is the data size of this mip level
+        uiMipSize = (uint32_t)pLevelEntry[WhichMipLevel].byteLength;
+
+        // LOGI("Mip %d: %dx%d => %d bytes", WhichMipLevel, uiMipWidth, uiMipHeight, uiMipSize);
+
+        for (uint32_t WhichLayer = 0; WhichLayer < 1; WhichLayer++)
+        {
+            for (uint32_t WhichFace = 0; WhichFace < pHeader->faceCount; WhichFace++)
+            {
+                // TODO: for (uint32_t WhichSlice = 0; WhichSlice < pHeader->pixelDepth; WhichSlice++)
+
+                // Allocate this mip level...
+                void* pTempData = malloc(uiMipSize);
+                if (pTempData == NULL)
+                {
+                    LOGE("Unable to allocate %d bytes of memory for mip level: %s", uiMipSize, pFileName);
+                    return false;
+                }
+
+                // ...copy the data over...
+                void* pMipSource = (char*)pKTXBuffer + (uint32_t)pLevelEntry[WhichMipLevel].byteOffset;
+                memcpy(pTempData, pMipSource, uiMipSize);
+
+                // ... and set the data in the structure
+                pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[WhichMipLevel].Width = uiMipWidth;
+                pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[WhichMipLevel].Height = uiMipHeight;
+                pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[WhichMipLevel].Size = uiMipSize;
+                pTexData->pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[WhichMipLevel].pData = pTempData;
+
+            }   // Which Face
+        }   // Which Layer
+
+        // Divide the mip size to go to next one
+        uiMipWidth /= 2;
+        uiMipHeight /= 2;
+
+        // Make sure we don't have a size of zero
+        if (uiMipWidth == 0)
+            uiMipWidth = 1;
+        if (uiMipHeight == 0)
+            uiMipHeight = 1;
+    }   // Which MipLevel
+
+    // Everything worked out
+    return true;
+}
 
 //-----------------------------------------------------------------------------
 static bool L_ParsePNGBuffer( const char* pFileName, void* pPNGBuffer, uint32_t BufferLength, VulkanTexData* pTexData )
@@ -528,30 +813,32 @@ static bool L_ParsePNGBuffer( const char* pFileName, void* pPNGBuffer, uint32_t 
      return true;
 }
 
+#endif // 0
+
 //-----------------------------------------------------------------------------
-bool SaveTextureData( const char* pFileName, VkFormat format, int width, int height, const void* data )
+bool SaveTextureData( const char* pFileName, TextureFormat format, int width, int height, const void* data )
 //-----------------------------------------------------------------------------
 {
     int bytesPerTexel = 1;
     int components = 0;
     switch (format)
     {
-    case VK_FORMAT_R8G8B8A8_SRGB:
+    case TextureFormat::R8G8B8A8_SRGB:
         components = 4;
         break;
-    case VK_FORMAT_R8G8B8_SRGB:
+    case TextureFormat::R8G8B8_SRGB:
         components = 3;
         break;
-    case VK_FORMAT_R8G8_SRGB:
-    case VK_FORMAT_R8G8_UNORM:
+    case TextureFormat::R8G8_SRGB:
+    case TextureFormat::R8G8_UNORM:
         components = 2;
         break;
-    case VK_FORMAT_R8_SRGB:
-    case VK_FORMAT_R8_UNORM:
+    case TextureFormat::R8_SRGB:
+    case TextureFormat::R8_UNORM:
         components = 1;
         break;
     default:
-        LOGE( "SaveTextureData: format %s not supported for output", Vulkan::VulkanFormatString( format ) );
+        LOGE( "SaveTextureData: format %s not supported for output", Vulkan::VulkanFormatString( TextureFormatToVk(format) ) );
         return false;
     }
 
@@ -561,8 +848,10 @@ bool SaveTextureData( const char* pFileName, VkFormat format, int width, int hei
     }
 }
 
+#if 0
+
 //-----------------------------------------------------------------------------
-static bool CreateSampler(Vulkan* pVulkan, VkSamplerAddressMode SamplerMode, VkFilter FilterMode, VkBorderColor BorderColor, bool UnnormalizedCoordinates, float mipBias, VkSampler* pRetSampler)
+bool CreateSampler(Vulkan* pVulkan, VkSamplerAddressMode SamplerMode, VkFilter FilterMode, VkBorderColor BorderColor, bool UnnormalizedCoordinates, float mipBias, VkSampler* pRetSampler)
 //-----------------------------------------------------------------------------
 {
     assert(pRetSampler);
@@ -570,12 +859,12 @@ static bool CreateSampler(Vulkan* pVulkan, VkSamplerAddressMode SamplerMode, VkF
     SamplerInfo.flags = 0;
     SamplerInfo.magFilter = FilterMode;
     SamplerInfo.minFilter = FilterMode;
-    SamplerInfo.mipmapMode = FilterMode==VK_FILTER_LINEAR ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    SamplerInfo.mipmapMode = FilterMode == SamplerFilter::Linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
     SamplerInfo.addressModeU = SamplerMode;
     SamplerInfo.addressModeV = SamplerMode;
     SamplerInfo.addressModeW = SamplerMode;
     SamplerInfo.mipLodBias = mipBias;
-    SamplerInfo.anisotropyEnable = FilterMode == VK_FILTER_LINEAR ? VK_TRUE : VK_FALSE;
+    SamplerInfo.anisotropyEnable = FilterMode == SamplerFilter::Linear ? VK_TRUE : VK_FALSE;
     SamplerInfo.maxAnisotropy = SamplerInfo.anisotropyEnable==VK_TRUE ? 4.0f : 1.0f;
     SamplerInfo.compareEnable = VK_FALSE;
     SamplerInfo.compareOp = VK_COMPARE_OP_NEVER;
@@ -591,7 +880,41 @@ static bool CreateSampler(Vulkan* pVulkan, VkSamplerAddressMode SamplerMode, VkF
 }
 
 //-----------------------------------------------------------------------------
-VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const char* pFileName, VkSamplerAddressMode SamplerMode, int32_t NumMipsToLoad, float mipBias)
+bool CreateImageView(Vulkan* pVulkan, VkImage image, VkFormat format, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t numFaces, VkImageViewType viewType, VkImageView* pRetImageView)
+//-----------------------------------------------------------------------------
+{
+    assert(pRetImageView);
+    VkImageViewCreateInfo ImageViewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    ImageViewInfo.flags = 0;
+    ImageViewInfo.image = image;
+    ImageViewInfo.viewType = viewType;
+
+    ImageViewInfo.format = format;
+    ImageViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+    ImageViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
+    ImageViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
+    ImageViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
+    ImageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    ImageViewInfo.subresourceRange.baseMipLevel = baseMipLevel;
+    ImageViewInfo.subresourceRange.levelCount = numMipLevels;
+    ImageViewInfo.subresourceRange.baseArrayLayer = 0;
+    ImageViewInfo.subresourceRange.layerCount = 1;
+    if (numFaces == 6)
+        ImageViewInfo.subresourceRange.layerCount = 6;
+    else
+        ImageViewInfo.subresourceRange.layerCount = 1;
+
+    VkImageView RetImageView;
+    auto RetVal = vkCreateImageView(pVulkan->m_VulkanDevice, &ImageViewInfo, NULL, pRetImageView);
+    if (!CheckVkError("vkCreateImageView()", RetVal))
+    {
+        return false;
+    }
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+TextureVulkan LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const char* pFileName, VkSamplerAddressMode SamplerMode, int32_t NumMipsToLoad, float mipBias)
 //-----------------------------------------------------------------------------
 {
     // Texture Convert Command Line: simpletextureconverter hud.tga hud.ktx -format R8G8B8A8Unorm -flipY
@@ -605,8 +928,6 @@ VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
     uint32_t uiMipOffset = 0;
     VkFormat VulkanFormat = VK_FORMAT_UNDEFINED;
     bool forceLinearTiling = false;
-
-    VkFormatProperties formatProperties = {};
 
     VulkanTexData TexData = {};
 
@@ -624,6 +945,14 @@ VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
         if (filenameLength > 4 && strcmp( pFileName + filenameLength - 4, ".ktx" ) == 0)
         {
             if (!L_ParseKTXBuffer(pFileName, fileData.data(), (uint32_t)fileData.size(), &TexData))
+            {
+                LOGE("Error parsing texture file: %s", pFileName);
+                return {};
+            }
+        }
+        else if (filenameLength > 5 && strcmp(pFileName + filenameLength - 5, ".ktx2") == 0)
+        {
+            if (!L_ParseKTX2Buffer(pFileName, fileData.data(), (uint32_t)fileData.size(), &TexData))
             {
                 LOGE("Error parsing texture file: %s", pFileName);
                 return {};
@@ -675,7 +1004,7 @@ VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
     }
 
 	// Get device properites for the requested texture format
-	vkGetPhysicalDeviceFormatProperties(pVulkan->m_VulkanGpu, VulkanFormat, &formatProperties);
+    const auto& formatProperties = pVulkan->GetFormatProperties(VulkanFormat);
 	bool useStaging = !(formatProperties.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT);
 
 	// Image creation info.  Will change below based on need
@@ -733,7 +1062,7 @@ VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
             char szName[256];
             memset(szName, 0, sizeof(szName));
             sprintf(szName, "%s: Face %d; Mip %d", pFileName, WhichFace, WhichMip);
-            if (!cubeFaces[WhichFace].mipImages[WhichMip].Initialize(pVulkan, ImageInfo, MemoryManager::MemoryUsage::CpuToGpu))
+            if (!cubeFaces[WhichFace].mipImages[WhichMip].Initialize(pVulkan, ImageInfo, MemoryUsage::CpuToGpu))
             {
                 LOGE("Unable to initialize mip %d of face %d (%s)", WhichMip + 1, WhichFace + 1, pFileName);
                 return {};
@@ -751,11 +1080,11 @@ VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
 
             {
                 // account for SubResLayout.offset too?
-                MemoryManager& memorymanager = pVulkan->GetMemoryManager();
+                auto& memorymanager = pVulkan->GetMemoryManager();
                 auto mappedMemory = memorymanager.Map<void>(faceImage);
                 uint8_t* pDst = (uint8_t*)mappedMemory.data();
                 uint8_t* pSrc = (uint8_t*)TexData.pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[TexDataMip].pData;
-                if (Vulkan::FormatIsCompressed(VulkanFormat) || SubResLayout.rowPitch * ImageInfo.extent.height == TexData.pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[TexDataMip].Size)
+                if (FormatIsCompressed(VulkanFormat) || SubResLayout.rowPitch * ImageInfo.extent.height == TexData.pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[TexDataMip].Size)
                 {
                     // Block sizes match, copy entire mip level.
                     memcpy(pDst, pSrc, TexData.pFaceData[WhichFace].pLayerData[WhichLayer].pMipData[TexDataMip].Size);
@@ -813,7 +1142,7 @@ VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
 
     // Need the return image
     Wrap_VkImage RetImage;
-    if(!RetImage.Initialize(pVulkan, ImageInfo, MemoryManager::MemoryUsage::GpuExclusive, pFileName))
+    if(!RetImage.Initialize(pVulkan, ImageInfo, MemoryUsage::GpuExclusive, pFileName))
     {
         LOGE("Unable to initialize texture image (%s)", pFileName);
         return {};
@@ -913,41 +1242,24 @@ VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
 
 	// Need a sampler...
     VkSampler RetSampler;
-    if (!CreateSampler(pVulkan, SamplerMode, VK_FILTER_LINEAR, VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK, false, mipBias, &RetSampler))
+    if (!CreateSampler(pVulkan, SamplerMode, SamplerFilter::Linear, VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK, false, mipBias, &RetSampler))
     {
         return {};
 	}
 
 	// ... and an ImageView
-	VkImageViewCreateInfo ImageViewInfo {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-	ImageViewInfo.flags = 0;
-	ImageViewInfo.image = RetImage.m_VmaImage.GetVkBuffer();
-    if (uiFaces == 6)
-        ImageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    VkImageViewType viewType;
+    if (layerCount == 6)
+        viewType = VK_IMAGE_VIEW_TYPE_CUBE;
     else
-        ImageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-
-	ImageViewInfo.format = ImageInfo.format;
-	ImageViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
-	ImageViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
-	ImageViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
-	ImageViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
-	ImageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	ImageViewInfo.subresourceRange.baseMipLevel = baseMipLevel;
-    ImageViewInfo.subresourceRange.levelCount = uiMipLevels;
-	ImageViewInfo.subresourceRange.baseArrayLayer = 0;
-	ImageViewInfo.subresourceRange.layerCount = 1;
-    if (uiFaces == 6)
-        ImageViewInfo.subresourceRange.layerCount = 6;
-    else
-        ImageViewInfo.subresourceRange.layerCount = 1;
-
-	VkImageView RetImageView;
-	RetVal = vkCreateImageView(pVulkan->m_VulkanDevice, &ImageViewInfo, NULL, &RetImageView);
-	if (!CheckVkError("vkCreateImageView()", RetVal))
-	{
+        viewType = VK_IMAGE_VIEW_TYPE_2D;
+    assert(layerCount == 1 || layerCount == 6);
+    VkImageView RetImageView;
+    if (!CreateImageView(pVulkan, RetImage.m_VmaImage.GetVkBuffer(), ImageInfo.format, baseMipLevel, mipLevelCount, layerCount, viewType, &RetImageView))
+    {
+        vkDestroySampler(pVulkan->m_VulkanDevice, RetSampler, nullptr);
         return {};
-	}
+    }
 
     // LOGI("vkCreateImageView: %s -> %p", pFileName, RetImageView);
 
@@ -960,7 +1272,7 @@ VulkanTexInfo LoadKTXTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
 	// ****************************************************
 
     // Set the return values
-    return VulkanTexInfo{ uiWidth, uiHeight, 1, uiMipLevels, ImageInfo.format, RetImageLayout, std::move(RetImage.m_VmaImage), RetSampler, RetImageView };
+    return TextureVulkan{ uiWidth, uiHeight, 1, uiMipLevels, ImageInfo.format, RetImageLayout, std::move(RetImage.m_VmaImage), RetSampler, RetImageView };
 }
 
 //-----------------------------------------------------------------------------
@@ -1053,7 +1365,7 @@ void DumpKTXMipFiles(AssetManager& assetManager, std::string SourceFile, std::st
 }
 
 //-----------------------------------------------------------------------------
-VulkanTexInfo LoadPPMTexture(Vulkan* pVulkan, AssetManager& assetManager, const char* pFileName, VkSamplerAddressMode SamplerMode)
+TextureVulkan LoadPPMTexture(Vulkan* pVulkan, AssetManager& assetManager, const char* pFileName, SamplerAddressMode SamplerMode)
 //-----------------------------------------------------------------------------
 {
     LOGI("Loading PPM texture: %s", pFileName);
@@ -1132,11 +1444,11 @@ VulkanTexInfo LoadPPMTexture(Vulkan* pVulkan, AssetManager& assetManager, const 
             ++fileDataIt;
         }
     }
-    return LoadTextureFromBuffer(pVulkan, targetData.data(), targetData.size(), width, height, depth, format, SamplerMode);
+    return CreateTextureFromBuffer(pVulkan, targetData.data(), targetData.size(), width, height, depth, format, SamplerMode);
 }
 
 //-----------------------------------------------------------------------------
-VulkanTexInfo LoadTextureFromBuffer(Vulkan* pVulkan, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, VkFormat Format, VkSamplerAddressMode SamplerMode, VkFilter Filter, VkImageUsageFlags FinalUsage, VkImageLayout FinalLayout)
+TextureVulkan CreateTextureFromBuffer(Vulkan* pVulkan, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, VkFormat Format, VkSamplerAddressMode SamplerMode, VkFilter Filter, VkImageUsageFlags FinalUsage, VkImageLayout FinalLayout)
 //-----------------------------------------------------------------------------
 {
     VkResult RetVal;
@@ -1211,9 +1523,9 @@ VulkanTexInfo LoadTextureFromBuffer(Vulkan* pVulkan, const void* pData, size_t D
                 ImageInfo.extent.depth = 1;
 
                 Wrap_VkImage& faceImage = cubeFaces[WhichFace].GetImage(WhichDepth, WhichMip);
-                if (!faceImage.Initialize(pVulkan, ImageInfo, MemoryManager::MemoryUsage::CpuToGpu))
+                if (!faceImage.Initialize(pVulkan, ImageInfo, MemoryUsage::CpuToGpu))
                 {
-                    LOGE("LoadTextureFromBuffer: Unable to initialize mip %d of face %d", WhichMip + 1, WhichFace + 1);
+                    LOGE("CreateTextureFromBuffer: Unable to initialize mip %d of face %d", WhichMip + 1, WhichFace + 1);
                     return {};
                 }
 
@@ -1228,7 +1540,7 @@ VulkanTexInfo LoadTextureFromBuffer(Vulkan* pVulkan, const void* pData, size_t D
                 vkGetImageSubresourceLayout(pVulkan->m_VulkanDevice, faceImageMem.GetVkBuffer(), &SubresInfo, &SubResLayout);
 
                 {
-                    MemoryManager& memorymanager = pVulkan->GetMemoryManager();
+                    auto& memorymanager = pVulkan->GetMemoryManager();
                     auto mappedMemory = memorymanager.Map<uint8_t>(faceImageMem);
                     if (SubResLayout.rowPitch == Width * FormatBytesPerPixel)
                     {
@@ -1290,9 +1602,9 @@ VulkanTexInfo LoadTextureFromBuffer(Vulkan* pVulkan, const void* pData, size_t D
 
     // Need the return image
     Wrap_VkImage RetImage;
-    if (!RetImage.Initialize(pVulkan, ImageInfo, MemoryManager::MemoryUsage::GpuExclusive))
+    if (!RetImage.Initialize(pVulkan, ImageInfo, MemoryUsage::GpuExclusive))
     {
-        LOGE("LoadTextureFromBuffer: Unable to initialize texture image");
+        LOGE("CreateTextureFromBuffer: Unable to initialize texture image");
         return {};
     }
 
@@ -1388,36 +1700,17 @@ VulkanTexInfo LoadTextureFromBuffer(Vulkan* pVulkan, const void* pData, size_t D
         return {};
     }
 
-    // ... and an ImageView
-    VkImageViewCreateInfo ImageViewInfo {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    ImageViewInfo.flags = 0;
-    ImageViewInfo.image = RetImage.m_VmaImage.GetVkBuffer();
+    VkImageViewType viewType;
     if (Depth > 1)
-        ImageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
+        viewType = VK_IMAGE_VIEW_TYPE_3D;
     else if (Faces == 6)
-        ImageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        viewType = VK_IMAGE_VIEW_TYPE_CUBE;
     else
-        ImageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-
-    ImageViewInfo.format = ImageInfo.format;
-    ImageViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
-    ImageViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
-    ImageViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
-    ImageViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
-    ImageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    ImageViewInfo.subresourceRange.baseMipLevel = baseMipLevel;
-    ImageViewInfo.subresourceRange.levelCount = MipLevels;
-    ImageViewInfo.subresourceRange.baseArrayLayer = 0;
-    ImageViewInfo.subresourceRange.layerCount = 1;
-    if (Faces == 6)
-        ImageViewInfo.subresourceRange.layerCount = 6;
-    else
-        ImageViewInfo.subresourceRange.layerCount = 1;
-
+        viewType = VK_IMAGE_VIEW_TYPE_2D;
     VkImageView RetImageView;
-    RetVal = vkCreateImageView(pVulkan->m_VulkanDevice, &ImageViewInfo, NULL, &RetImageView);
-    if (!CheckVkError("vkCreateImageView()", RetVal))
+    if (!CreateImageView(pVulkan, RetImage.m_VmaImage.GetVkBuffer(), Format, baseMipLevel, MipLevels, Faces, viewType, &RetImageView))
     {
+        vkDestroySampler(pVulkan->m_VulkanDevice, RetSampler, nullptr);
         return {};
     }
 
@@ -1425,29 +1718,30 @@ VulkanTexInfo LoadTextureFromBuffer(Vulkan* pVulkan, const void* pData, size_t D
     cubeFaces.clear();
 
     // Set the return values
-    VulkanTexInfo RetTex{ Width, Height, Depth, MipLevels, ImageInfo.format, FinalLayout, std::move( RetImage.m_VmaImage ), RetSampler, RetImageView };
+    TextureVulkan RetTex{ Width, Height, Depth, MipLevels, ImageInfo.format, FinalLayout, std::move( RetImage.m_VmaImage ), RetSampler, RetImageView };
     return RetTex;
 }
 
 
-//-----------------------------------------------------------------------------
-void ReleaseTexture(Vulkan* pVulkan, VulkanTexInfo* pTexInfo)
-//-----------------------------------------------------------------------------
-{
-    pTexInfo->Release(pVulkan);
-
-    *pTexInfo = VulkanTexInfo{};    // destroy and clear
-}
-
+////-----------------------------------------------------------------------------
+//void ReleaseTexture(Vulkan* pVulkan, TextureVulkan* pTexInfo)
+////-----------------------------------------------------------------------------
+//{
+//    pTexInfo->Release(pVulkan);
 //
-// Constructors/move-operators for VulkanTexInfo.
+//    *pTexInfo = TextureVulkan{};    // destroy and clear
+//}
+
+#if 0
+//
+// Constructors/move-operators for TextureVulkan.
 // Ensures we are not leaking Samplers, ImageViews or memory.
 //
-VulkanTexInfo::VulkanTexInfo(VulkanTexInfo&& other) noexcept
+TextureVulkan::TextureVulkan(TextureVulkan&& other) noexcept
 {
     *this = std::move(other);
 }
-VulkanTexInfo& VulkanTexInfo::operator=(VulkanTexInfo&& other) noexcept
+TextureVulkan& TextureVulkan::operator=(TextureVulkan&& other) noexcept
 {
     if (this != &other)
     {
@@ -1472,7 +1766,7 @@ VulkanTexInfo& VulkanTexInfo::operator=(VulkanTexInfo&& other) noexcept
     }
     return *this;
 }
-VulkanTexInfo::~VulkanTexInfo()
+TextureVulkan::~TextureVulkan()
 {
     // Asserts to ensure we called ReleaseTexture on this already.
     assert(!VmaImage);
@@ -1481,7 +1775,7 @@ VulkanTexInfo::~VulkanTexInfo()
 }
 
 
-void VulkanTexInfo::Release( Vulkan* pVulkan )
+void TextureVulkan::Release( Vulkan* pVulkan )
 {
     if( ImageView != VK_NULL_HANDLE )
         vkDestroyImageView( pVulkan->m_VulkanDevice, ImageView, NULL );
@@ -1497,9 +1791,10 @@ void VulkanTexInfo::Release( Vulkan* pVulkan )
     Image = VK_NULL_HANDLE;
     Memory = VK_NULL_HANDLE;
 }
+#endif
 
 //-----------------------------------------------------------------------------
-VulkanTexInfo CreateTextureObject(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, VkFormat Format, TEXTURE_TYPE TexType, const char* pName, VkSampleCountFlagBits Msaa, TEXTURE_FLAGS Flags)
+TextureVulkan CreateTextureObject(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, VkFormat Format, TEXTURE_TYPE TexType, const char* pName, VkSampleCountFlagBits Msaa, TEXTURE_FLAGS Flags)
 //-----------------------------------------------------------------------------
 {
     CreateTexObjectInfo createInfo{};
@@ -1514,7 +1809,7 @@ VulkanTexInfo CreateTextureObject(Vulkan* pVulkan, uint32_t uiWidth, uint32_t ui
 }
 
 //-----------------------------------------------------------------------------
-VulkanTexInfo	CreateTextureObject(Vulkan* pVulkan, const CreateTexObjectInfo& texInfo)
+TextureVulkan	CreateTextureObject(Vulkan* pVulkan, const CreateTexObjectInfo& texInfo)
 //-----------------------------------------------------------------------------
 {
     VkResult RetVal;
@@ -1529,7 +1824,7 @@ VulkanTexInfo	CreateTextureObject(Vulkan* pVulkan, const CreateTexObjectInfo& te
     VkImageLayout RetImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // How this texture object will be used.
-    MemoryManager::MemoryUsage MemoryUsage = MemoryManager::MemoryUsage::GpuExclusive;
+    MemoryUsage MemoryUsage = MemoryUsage::GpuExclusive;
 
     // Create the image...
     VkImageCreateInfo ImageInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -1587,7 +1882,7 @@ VulkanTexInfo	CreateTextureObject(Vulkan* pVulkan, const CreateTexObjectInfo& te
         ImageInfo.usage = VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
         ImageInfo.samples = texInfo.Msaa;
         // Subpass render targets dont need to be backed by memory!
-        MemoryUsage = MemoryManager::MemoryUsage::GpuLazilyAllocated;
+        MemoryUsage = MemoryUsage::GpuLazilyAllocated;
         break;
     case TT_COMPUTE_TARGET:
         ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -1617,10 +1912,10 @@ VulkanTexInfo	CreateTextureObject(Vulkan* pVulkan, const CreateTexObjectInfo& te
     // Need the return image
     Wrap_VkImage RetImage;
     bool ImageInitialized = RetImage.Initialize( pVulkan, ImageInfo, MemoryUsage, texInfo.pName );
-    if( !ImageInitialized && MemoryUsage == MemoryManager::MemoryUsage::GpuLazilyAllocated )
+    if( !ImageInitialized && MemoryUsage == MemoryUsage::GpuLazilyAllocated )
     {
         LOGI( "Unable to initialize GpuLazilyAllocated image (probably not supported by GPU hardware).  Falling back to GpuExclusive" );
-        MemoryUsage = MemoryManager::MemoryUsage::GpuExclusive;
+        MemoryUsage = MemoryUsage::GpuExclusive;
         ImageInfo.usage &= ~VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
         ImageInitialized = RetImage.Initialize( pVulkan, ImageInfo, MemoryUsage, texInfo.pName );
     }
@@ -1737,17 +2032,27 @@ VulkanTexInfo	CreateTextureObject(Vulkan* pVulkan, const CreateTexObjectInfo& te
     // LOGI("vkCreateImageView: %s -> %p", pName, RetImageView);
 
     // Need a sampler...
-    if (!CreateSampler(pVulkan, SamplerMode, texInfo.FilterMode, BorderColor, texInfo.UnNormalizedCoordinates, 0.0f, &RetSampler))
+    VkFilter FilterMode = texInfo.FilterMode;
+    if (FilterMode == VK_FILTER_MAX_ENUM)
+    {
+        const auto& FormatProperties = pVulkan->GetFormatProperties(texInfo.Format);
+        auto TilingFeatures = (ImageInfo.tiling == VK_IMAGE_TILING_LINEAR) ? FormatProperties.linearTilingFeatures : FormatProperties.optimalTilingFeatures;
+        if ((TilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0)
+            FilterMode = VK_FILTER_LINEAR;
+        else
+            FilterMode = VK_FILTER_NEAREST;
+    }
+    if (!CreateSampler(pVulkan, SamplerMode, FilterMode, BorderColor, texInfo.UnNormalizedCoordinates, 0.0f, &RetSampler))
     {
         return {};
     }
 
-    VulkanTexInfo RetTex{ texInfo.uiWidth, texInfo.uiHeight, texInfo.uiDepth, texInfo.uiMips, texInfo.Format, RetImageLayout, std::move( RetImage.m_VmaImage ), RetSampler, RetImageView };
+    TextureVulkan RetTex{ texInfo.uiWidth, texInfo.uiHeight, texInfo.uiDepth, texInfo.uiMips, texInfo.Format, RetImageLayout, std::move( RetImage.m_VmaImage ), RetSampler, RetImageView };
     return RetTex;
 }
 
 //-----------------------------------------------------------------------------
-VulkanTexInfo	CreateTextureObjectView( Vulkan* pVulkan, const VulkanTexInfo& original, VkFormat viewFormat )
+TextureVulkan	CreateTextureObjectView( Vulkan* pVulkan, const TextureVulkan& original, VkFormat viewFormat )
 //-----------------------------------------------------------------------------
 {
     VkSampler sampler = VK_NULL_HANDLE;
@@ -1773,13 +2078,14 @@ VulkanTexInfo	CreateTextureObjectView( Vulkan* pVulkan, const VulkanTexInfo& ori
         return {};
     }
 
-    if (!CreateSampler( pVulkan, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_FILTER_LINEAR, {}, false, 0.0f, &sampler ))
+    if (!CreateSampler( pVulkan, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, SamplerFilter::Linear, {}, false, 0.0f, &sampler ))
     {
         return {};
     }
 
-    //    VulkanTexInfo( uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageLayout imageLayout, VkImage image, VkDeviceMemory memory, VkSampler sampler, VkImageView imageView )
-    VulkanTexInfo RetTex { original.Width, original.Height, original.Depth, original.MipLevels, original.Format, original.GetVkImageLayout(), original.GetVkImage(), VK_NULL_HANDLE, sampler, imageView };
+    //    TextureVulkan( uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageLayout imageLayout, VkImage image, VkDeviceMemory memory, VkSampler sampler, VkImageView imageView )
+    TextureVulkan RetTex { original.Width, original.Height, original.Depth, original.MipLevels, original.Format, original.GetVkImageLayout(), original.GetVkImage(), VK_NULL_HANDLE, sampler, imageView };
     return RetTex;
 }
 
+#endif

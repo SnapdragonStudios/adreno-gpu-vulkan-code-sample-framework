@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,17 +12,21 @@
 #include <array>
 #include "system/os_common.h"
 #include "vulkan/TextureFuncts.h"
+#include "vulkan/material.hpp"
+#include "texture/vulkan/texture.hpp"
 
 
-MaterialPass::MaterialPass(Vulkan& vulkan, const ShaderPass& shaderPass, VkDescriptorPool&& descriptorPool, std::vector<VkDescriptorSet>&& descriptorSets, std::vector<VkDescriptorSetLayout>&& dynamicDescriptorSetLayouts, tTextureBindings&& textureBindings, tImageBindings&& imageBindings, tBufferBindings&& bufferBindings)
-	: mVulkan(vulkan)
-	, mShaderPass(shaderPass)
-	, mDescriptorPool(descriptorPool)
+MaterialPass::MaterialPass(Vulkan& vulkan, const ShaderPass<Vulkan>& shaderPass, VkDescriptorPool&& descriptorPool, std::vector<VkDescriptorSet>&& descriptorSets, std::vector<VkDescriptorSetLayout>&& dynamicDescriptorSetLayouts, tTextureBindings&& textureBindings, tImageBindings&& imageBindings, tBufferBindings&& bufferBindings, tAccelerationStructureBindings&& accelerationStructureBindings, SpecializationConstants&& specializationConstants )
+	: mShaderPass(shaderPass)
+    , mVulkan( vulkan )
+    , mDescriptorPool(descriptorPool)
 	, mDescriptorSets(std::move(descriptorSets))
 	, mDynamicDescriptorSetLayouts(std::move(dynamicDescriptorSetLayouts))
-	, mTextureBindings(std::move(textureBindings))
+    , mSpecializationConstants( std::move( specializationConstants ) )
+    , mTextureBindings(std::move(textureBindings))
 	, mImageBindings(std::move(imageBindings))
 	, mBufferBindings(std::move(bufferBindings))
+    , mAccelerationStructureBindings( std::move( accelerationStructureBindings ) )
 {
 	if (!mDynamicDescriptorSetLayouts.empty())
 		mDynamicPipelineLayout.Init(vulkan, mDynamicDescriptorSetLayouts);
@@ -31,15 +35,17 @@ MaterialPass::MaterialPass(Vulkan& vulkan, const ShaderPass& shaderPass, VkDescr
 }
 
 MaterialPass::MaterialPass(MaterialPass&& other) noexcept
-	: mVulkan(other.mVulkan)
-	, mShaderPass(other.mShaderPass)
-	, mDescriptorPool(other.mDescriptorPool)
+	: mShaderPass(other.mShaderPass)
+    , mVulkan( other.mVulkan )
+    , mDescriptorPool(other.mDescriptorPool)
 	, mDescriptorSets(std::move(other.mDescriptorSets))
 	, mDynamicDescriptorSetLayouts(std::move(other.mDynamicDescriptorSetLayouts))
 	, mDynamicPipelineLayout(std::move(other.mDynamicPipelineLayout))
-	, mTextureBindings(std::move(other.mTextureBindings))
+    , mAccelerationStructureBindings( std::move( other.mAccelerationStructureBindings ) )
+    , mTextureBindings(std::move(other.mTextureBindings))
 	, mImageBindings(std::move(other.mImageBindings))
 	, mBufferBindings(std::move(other.mBufferBindings))
+    , mSpecializationConstants( std::move( other.mSpecializationConstants ) )
 {
 	other.mDescriptorPool = VK_NULL_HANDLE;
 }
@@ -59,12 +65,16 @@ MaterialPass::~MaterialPass()
 		vkDestroyDescriptorSetLayout(mVulkan.m_VulkanDevice, layout, nullptr);
 }
 
-ImageInfo::ImageInfo(const VulkanTexInfo& t)
+ImageInfo::ImageInfo(const TextureT<Vulkan>& t)
 	: image(t.GetVkImage())
 	, imageView(t.GetVkImageView())
-	, imageLayout(t.GetVkImageLayout())
 	, imageViewNumMips(t.MipLevels)
 	, imageViewFirstMip(t.FirstMip)
+    , imageLayout( t.GetVkImageLayout() )
+{
+}
+
+ImageInfo::ImageInfo(const Texture& t) : ImageInfo( apiCast<Vulkan>(t) )
 {
 }
 
@@ -111,14 +121,15 @@ ImageInfo& ImageInfo::operator=(ImageInfo&& src) noexcept
 
 bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 {
-// #error These constants are too small
-    // TODO: These need to become vectors that can dynamically grow
+    // TODO: All these need to become vectors that can dynamically grow
 	static const int cMAX_WRITES = 32;
 	static const int cMAX_IMAGE_INFOS = 1048;
-	static const int cMAX_BUFFER_INFOS = 1024;
+	static const int cMAX_BUFFER_INFOS = 1048;
+	static const int cMAX_ACCELERATIONSTRUCTURE_INFOS = 32;
 	std::array<VkWriteDescriptorSet, cMAX_WRITES> writeInfo{/*zero it*/ };
 	std::array<VkDescriptorImageInfo, cMAX_IMAGE_INFOS> imageInfo{/*zero it*/ };
-	std::array<VkDescriptorBufferInfo, cMAX_BUFFER_INFOS> bufferInfo{};
+    std::array<VkDescriptorBufferInfo, cMAX_BUFFER_INFOS> bufferInfoFixed/*not initialized*/;
+    std::vector<VkDescriptorBufferInfo> bufferInfoDynamic;
 
 	//	std::vector<m_descriptorSetBindings>
 
@@ -152,7 +163,7 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
                 return false;
             }
 
-            imageInfo[imageInfoCount] = textureBinding.first[texIndex]->GetVkDescriptorImageInfo();
+            imageInfo[imageInfoCount] = apiCast<Vulkan>(textureBinding.first[texIndex])->GetVkDescriptorImageInfo();
         }
 
 		++writeInfoIdx;
@@ -169,7 +180,7 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 	{
 		uint32_t bindingIndex = imageBinding.second.index;
 		VkDescriptorType bindingType = imageBinding.second.type;
-		assert(bindingType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);	// combined image sampler should go through mTextureBindings
+		assert(bindingType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && bindingType != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);	// combined image sampler or sampled image should go through mTextureBindings
 		//assert(imageBinding.first.imageLayout == VK_IMAGE_LAYOUT_GENERAL);
 
 		uint32_t numImgToBind = imageBinding.second.isArray ? (uint32_t)imageBinding.first.size() : 1;
@@ -206,10 +217,22 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
         }
 	}
 
-	// Now do the buffers
-	for (const auto& bufferBinding : mBufferBindings)
-	{
-		uint32_t bindingIndex = bufferBinding.second.index;
+    // Now do the buffers
+
+    for (const auto& bufferBinding : mBufferBindings)
+    {
+        bufferInfoCount += bufferBinding.second.isArray ? (uint32_t) bufferBinding.first.size() : 1;
+    }
+    auto* pBufferInfo = bufferInfoFixed.data();
+    if (bufferInfoCount > cMAX_BUFFER_INFOS)
+    {
+        bufferInfoDynamic.resize( bufferInfoCount );
+        pBufferInfo = bufferInfoDynamic.data();
+    }
+
+    for (const auto& bufferBinding : mBufferBindings)
+    {
+        uint32_t bindingIndex = bufferBinding.second.index;
 		VkDescriptorType bindingType = bufferBinding.second.type;
 
 		uint32_t numBuffersToBind = bufferBinding.second.isArray ? (uint32_t)bufferBinding.first.size() : 1;
@@ -221,21 +244,15 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 		writeInfo[writeInfoIdx].dstBinding = bindingIndex;
 		writeInfo[writeInfoIdx].dstArrayElement = 0;
 		writeInfo[writeInfoIdx].descriptorCount = numBuffersToBind;
-		writeInfo[writeInfoIdx].pBufferInfo = &bufferInfo[bufferInfoCount];
+		writeInfo[writeInfoIdx].pBufferInfo = pBufferInfo;
 		writeInfo[writeInfoIdx].pImageInfo = nullptr;
 
-		for (uint32_t t = 0; t < numBuffersToBind; ++t, ++bufferInfoCount, ++bufferIndex)
+		for (uint32_t t = 0; t < numBuffersToBind; ++t, ++bufferIndex)
 		{
-            if (bufferInfoCount >= cMAX_BUFFER_INFOS)
-            {
-                LOGE("Max number (%d) of VkDescriptorBufferInfo elements reached!", cMAX_BUFFER_INFOS);
-                assert(0);
-                return false;
-            }
-
-			bufferInfo[bufferInfoCount].buffer = bufferBinding.first[bufferIndex];
-			bufferInfo[bufferInfoCount].offset = 0;
-			bufferInfo[bufferInfoCount].range = VK_WHOLE_SIZE;
+			pBufferInfo->buffer = bufferBinding.first[bufferIndex].buffer;
+            pBufferInfo->offset = bufferBinding.first[bufferIndex].offset;
+            pBufferInfo->range = VK_WHOLE_SIZE;
+            ++pBufferInfo;
 		}
 
 		++writeInfoIdx;
@@ -247,6 +264,53 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
         }
 	}
 
+#if VK_KHR_acceleration_structure
+	// And the acceleration structures
+	std::array<VkWriteDescriptorSetAccelerationStructureKHR, cMAX_ACCELERATIONSTRUCTURE_INFOS> accelerationStructureInfo{};
+	uint32_t accelerationStructureCount = 0;
+
+	for (const auto& accelerationBinding : mAccelerationStructureBindings)
+	{
+		uint32_t bindingIndex = accelerationBinding.second.index;
+		VkDescriptorType bindingType = accelerationBinding.second.type;
+
+		uint32_t numAccelToBind = accelerationBinding.second.isArray ? (uint32_t)accelerationBinding.first.size() : 1;
+		uint32_t accelIndex = accelerationBinding.second.isArray ? 0 : (bufferIdx < accelerationBinding.first.size() ? bufferIdx : 0);
+
+        if (writeInfoIdx >= cMAX_WRITES)
+        {
+            LOGE("Max number (%d) of VkWriteDescriptorSet elements reached!", cMAX_WRITES);
+            assert(0);
+            return false;
+        }
+
+        if (accelerationStructureCount >= cMAX_ACCELERATIONSTRUCTURE_INFOS)
+        {
+            LOGE("Max number (%d) of VkWriteDescriptorSetAccelerationStructureKHR elements reached!", cMAX_ACCELERATIONSTRUCTURE_INFOS);
+            assert(0);
+            return false;
+        }
+        
+        const VkAccelerationStructureKHR * pAs = &accelerationBinding.first[accelIndex];
+		accelerationStructureInfo[accelerationStructureCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+		accelerationStructureInfo[accelerationStructureCount].accelerationStructureCount = 1;
+		accelerationStructureInfo[accelerationStructureCount].pAccelerationStructures = pAs;
+
+		writeInfo[writeInfoIdx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writeInfo[writeInfoIdx].descriptorType = bindingType;//VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[bufferIdx];
+		writeInfo[writeInfoIdx].dstBinding = bindingIndex;
+		writeInfo[writeInfoIdx].dstArrayElement = 0;
+		writeInfo[writeInfoIdx].descriptorCount = accelerationStructureInfo[accelerationStructureCount].accelerationStructureCount;
+		writeInfo[writeInfoIdx].pBufferInfo = nullptr;
+		writeInfo[writeInfoIdx].pImageInfo = nullptr;
+		writeInfo[writeInfoIdx].pNext = &accelerationStructureInfo[accelerationStructureCount];
+		++writeInfoIdx;
+		++accelerationStructureCount;
+
+	}
+#endif // VK_KHR_acceleration_structure
+
 	// LOGI("Updating Descriptor Set (bufferIdx %d) with %d objects", bufferIdx, writeInfoIdx);
 	vkUpdateDescriptorSets(mVulkan.m_VulkanDevice, writeInfoIdx, writeInfo.data(), 0, NULL);
 	// LOGI("Descriptor Set Updated!");
@@ -254,9 +318,9 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 	return true;
 }
 
-bool MaterialPass::UpdateDescriptorSetBinding(uint32_t bufferIdx, const std::string& bindingName, const VulkanTexInfo& newTexture) const
+bool MaterialPass::UpdateDescriptorSetBinding(uint32_t bufferIdx, const std::string& bindingName, const TextureT<Vulkan>& newTexture) const
 {
-	std::array<VkWriteDescriptorSet, 1>  writeInfo{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    std::array<VkWriteDescriptorSet, 1>  writeInfo{ {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET} };
 	std::array<VkDescriptorImageInfo, 1> imageInfo{/*zero it*/ };
 
 	uint32_t writeInfoIdx = 0;
@@ -269,7 +333,7 @@ bool MaterialPass::UpdateDescriptorSetBinding(uint32_t bufferIdx, const std::str
 	if (bindingIt != nameToBinding.end())
 	{
 		VkDescriptorType bindingType = bindingIt->second.type;
-		assert(bindingType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+		assert(bindingType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || bindingType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 
 		uint32_t bindingIndex = bindingIt->second.index;
 
@@ -295,7 +359,7 @@ bool MaterialPass::UpdateDescriptorSetBinding(uint32_t bufferIdx, const std::str
 // Material class implementation
 //
 
-Material::Material(const Shader& shader, uint32_t numFramebuffers)
+Material::Material(const ShaderT<Vulkan>& shader, uint32_t numFramebuffers)
 	: m_shader(shader)
 	, m_numFramebuffers(numFramebuffers)
 {
@@ -336,7 +400,7 @@ bool Material::UpdateDescriptorSets(uint32_t bufferIdx)
 	return success;
 }
 
-bool Material::UpdateDescriptorSetBinding(uint32_t bufferIdx, const std::string& bindingName, const VulkanTexInfo& newTexture) const
+bool Material::UpdateDescriptorSetBinding(uint32_t bufferIdx, const std::string& bindingName, const TextureT<Vulkan>& newTexture) const
 {
 	bool success = true;
 	for (auto& materialPass : m_materialPasses)
@@ -346,3 +410,43 @@ bool Material::UpdateDescriptorSetBinding(uint32_t bufferIdx, const std::string&
 	return success;
 }
 
+bool SpecializationConstants::Init( const SpecializationConstantsLayout<Vulkan>& layout, const std::span<VertexElementData> constants )
+{
+    const auto& layoutMapEntry = layout.GetVkSpecializationMapEntry();
+    assert( layoutMapEntry.size() == constants.size() );
+    if (layoutMapEntry.empty())
+    {
+        mSpecializationData.reset();
+        return true;
+    }
+
+    std::span<std::byte> specializationConstantsRaw { new std::byte[layout.GetBufferSize()], layout.GetBufferSize() };    // unsafe - raw pointer in the span!
+
+    for (auto constantIdx = 0; constantIdx < layoutMapEntry.size(); ++constantIdx)
+    {
+        const auto& constantLayout = layoutMapEntry[constantIdx];
+
+        // copy the loaded constant data into the constant buffer
+        std::span constantDataRaw = constants[constantIdx].getUnsafeData();
+        assert( constantLayout.size == constantDataRaw.size() );
+        std::copy( constantDataRaw.begin(), constantDataRaw.end(), specializationConstantsRaw.begin() + constantLayout.offset );
+    }
+
+    VkSpecializationInfo vkSpecializationInfo {};
+    vkSpecializationInfo.mapEntryCount = (uint32_t) layout.GetVkSpecializationMapEntry().size();
+    vkSpecializationInfo.pMapEntries = layout.GetVkSpecializationMapEntry().data();
+    vkSpecializationInfo.dataSize = specializationConstantsRaw.size();
+    vkSpecializationInfo.pData = specializationConstantsRaw.data(); // move ownership of the allocated buffer.
+
+    mSpecializationData.emplace().specializationInfo = vkSpecializationInfo;
+
+    return true;
+}
+
+SpecializationConstants::VulkanSpecializationData::VulkanSpecializationData( SpecializationConstants::VulkanSpecializationData&& other ) noexcept : specializationInfo( other.specializationInfo )/*dumb move*/
+{
+    other.specializationInfo.mapEntryCount = 0;
+    other.specializationInfo.pMapEntries = nullptr;
+    other.specializationInfo.dataSize = 0;
+    other.specializationInfo.pData = nullptr;
+}

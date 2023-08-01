@@ -21,12 +21,12 @@
 	path = framework/external/eigen
 	url = https://gitlab.com/libeigen/eigen.git
 	shallow = true
-[submodule "framework/external/span"]
-	path = framework/external/span
-	url = https://github.com/tcbrindle/span
-[submodule "assets"]
-	path = assets
-	url = https://github.com/quic/game-assets-for-adreno-gpu-code-samples
 [submodule "framework/external/Vulkan-Headers"]
 	path = framework/external/Vulkan-Headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "assets"]
+	path = assets
+	url = https://github.com/quic/game-assets-for-adreno-gpu-code-samples
+[submodule "framework/external/KTX-Software"]
+	path = framework/external/KTX-Software
+	url = https://github.com/KhronosGroup/KTX-Software

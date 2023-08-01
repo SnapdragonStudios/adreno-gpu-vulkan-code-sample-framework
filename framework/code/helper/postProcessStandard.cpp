@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -10,8 +10,10 @@
 #include "material/materialManager.hpp"
 #include "material/drawable.hpp"
 #include "material/shader.hpp"
+#include "mesh/meshHelper.hpp"
 #include "system/os_common.h"
 #include "vulkan/MeshObject.h"
+#include "vulkan/vulkan_support.hpp"
 #include "nlohmann/json.hpp"
 
 
@@ -23,7 +25,7 @@ PostProcessStandard::~PostProcessStandard()
     ReleaseUniformBuffer(&m_Vulkan, m_FragUniform);
 }
 
-bool PostProcessStandard::Init(const Shader& shader, MaterialManager& materialManager, VkRenderPass blitRenderPass, tcb::span<const VulkanTexInfo> diffuseRenderTargets, VulkanTexInfo* bloomRenderTarget, VulkanTexInfo* uiRenderTarget)
+bool PostProcessStandard::Init(const Shader& shader, MaterialManagerT<Vulkan>& materialManager, VkRenderPass blitRenderPass, std::span<const TextureT<Vulkan>> diffuseRenderTargets, TextureT<Vulkan>* bloomRenderTarget, TextureT<Vulkan>* uiRenderTarget)
 {
     assert(!diffuseRenderTargets.empty());
     assert(bloomRenderTarget);
@@ -37,11 +39,11 @@ bool PostProcessStandard::Init(const Shader& shader, MaterialManager& materialMa
     //
     // Create the 'Blit' drawable mesh.
     // Fullscreen quad that does the final composite (hud and scene) for output.
-    MeshObject blitMesh;
-    MeshObject::CreateScreenSpaceMesh(&m_Vulkan, 0, &blitMesh);
+    Mesh<Vulkan> blitMesh;
+    MeshHelper::CreateScreenSpaceMesh(m_Vulkan.GetMemoryManager(), 0, &blitMesh);
 
     auto blitShaderMaterial = materialManager.CreateMaterial(m_Vulkan, shader, NUM_VULKAN_BUFFERS,
-        [&](const std::string& texName) -> const MaterialManager::tPerFrameTexInfo {
+        [&](const std::string& texName) -> const MaterialManagerT<Vulkan>::tPerFrameTexInfo {
             if (texName == "Diffuse") {
                 return { diffuseRenderTargets.data() };
             }
@@ -54,7 +56,7 @@ bool PostProcessStandard::Init(const Shader& shader, MaterialManager& materialMa
             assert(0);
             return {};
         },
-        [this](const std::string& bufferName) -> MaterialManager::tPerFrameVkBuffer {
+        [this](const std::string& bufferName) -> tPerFrameVkBuffer {
             //BlitFragCB
             return { m_FragUniform.vkBuffers.begin(), m_FragUniform.vkBuffers.end() };
         }

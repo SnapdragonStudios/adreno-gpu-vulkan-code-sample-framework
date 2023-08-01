@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -63,6 +63,14 @@ bool DescriptorSetLayout::Init(Vulkan& vulkan, const DescriptorSetDescription& d
             binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             assert(readOnly);
             break;
+        case DescriptorSetDescription::DescriptorType::ImageSampled:
+            binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            assert(readOnly);
+            break;
+        case DescriptorSetDescription::DescriptorType::Sampler:
+            binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+            assert(readOnly);
+            break;
         case DescriptorSetDescription::DescriptorType::UniformBuffer:
             binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             assert(readOnly);
@@ -75,6 +83,14 @@ bool DescriptorSetLayout::Init(Vulkan& vulkan, const DescriptorSetDescription& d
             break;
         case DescriptorSetDescription::DescriptorType::InputAttachment:
             binding.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+            assert(readOnly);
+            break;
+        case DescriptorSetDescription::DescriptorType::AccelerationStructure:
+#if VK_KHR_acceleration_structure
+            binding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+#else
+            assert(0 && "Cannot bind AccelerationStructure without VK_KHR_acceleration_structure");
+#endif // VK_KHR_acceleration_structure
             assert(readOnly);
             break;
         case DescriptorSetDescription::DescriptorType::DrawIndirectBuffer:
@@ -90,6 +106,16 @@ bool DescriptorSetLayout::Init(Vulkan& vulkan, const DescriptorSetDescription& d
             binding.stageFlags |= VK_SHADER_STAGE_GEOMETRY_BIT;
         if (it.stages & DescriptorSetDescription::StageFlag::t::Compute)
             binding.stageFlags |= VK_SHADER_STAGE_COMPUTE_BIT;
+#if VK_KHR_ray_tracing_pipeline
+        if (it.stages & DescriptorSetDescription::StageFlag::t::RayGeneration)
+            binding.stageFlags |= VK_SHADER_STAGE_RAYGEN_BIT_NV;
+        if (it.stages & DescriptorSetDescription::StageFlag::t::RayMiss)
+            binding.stageFlags |= VK_SHADER_STAGE_MISS_BIT_NV;
+        if (it.stages & DescriptorSetDescription::StageFlag::t::RayClosestHit)
+            binding.stageFlags |= VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+        if (it.stages & DescriptorSetDescription::StageFlag::t::RayAnyHit)
+            binding.stageFlags |= VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+#endif
         binding.pImmutableSamplers = nullptr;
 
         assert(it.names.size() <= 1);   ///TODO: only one name supported, needs to store the index within the descriptor as well as the binding index if we want to support this! (the 'for' loop below is not the full implementation)
@@ -117,13 +143,12 @@ bool DescriptorSetLayout::Init(Vulkan& vulkan, const DescriptorSetDescription& d
 }
 
 
-VkDescriptorSetLayout DescriptorSetLayout::CreateVkDescriptorSetLayout(Vulkan& vulkan, const tcb::span<const VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings)
+VkDescriptorSetLayout DescriptorSetLayout::CreateVkDescriptorSetLayout(Vulkan& vulkan, const std::span<const VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings)
 {
     //
     // Create the descriptor set layout
     //
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = static_cast<uint32_t>(descriptorSetLayoutBindings.size());
     layoutInfo.pBindings = descriptorSetLayoutBindings.data();
 
@@ -138,7 +163,7 @@ VkDescriptorSetLayout DescriptorSetLayout::CreateVkDescriptorSetLayout(Vulkan& v
 }
 
 
-void DescriptorSetLayout::CalculatePoolSizes(const tcb::span<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings, std::vector<VkDescriptorPoolSize>& descriptorPoolSizes)
+void DescriptorSetLayout::CalculatePoolSizes(const std::span<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings, std::vector<VkDescriptorPoolSize>& descriptorPoolSizes)
 {
 #define MAX_USED_DESCRIPTOR_TYPES   ((VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT - VK_DESCRIPTOR_TYPE_SAMPLER + 1) + 2)    // Take a guess at how many unique descript types will be used
 

@@ -1,0 +1,98 @@
+{
+  "$schema": "../../../framework/schema/shaderSchema.json",
+  "Passes": [
+    {
+      "Name": "RP_LIGHT",
+      "Shaders": {
+        "Vertex": "Media/Shaders/ObjectDeferred.vert.spv",
+        "Fragment": "Media/Shaders/ObjectEmissive.frag.spv"
+      },
+      "DescriptorSets": [
+        {
+          "Buffers": [
+            {
+              "Type": "UniformBuffer",
+              "Stages": [ "Vertex" ],
+              "Names": [ "Vert" ]
+            },
+            {
+              "Type": "UniformBuffer",
+              "Stages": [ "Fragment" ],
+              "Names": [ "Frag" ]
+            },
+            {
+              "Type": "ImageSampler",
+              "Stages": [ "Fragment" ],
+              "Count": 1,
+              "Names": [ "Emissive" ]
+            }
+          ]
+        }
+      ],
+      "VertexBindings": [ "VB0", "Instances" ],
+      "FixedFunction": {
+        "CullBackFace": true,
+        "DepthTestEnable": true,
+        "DepthWriteEnable": true,
+        "DepthCompareOp": "LessEqual",
+        "BlendEnable": false
+      }
+    }
+  ],
+  "Vertex": [
+    {
+      "Span": 60,
+      "Name": "VB0",
+      "Elements": [
+        {
+          "Name": "Position",
+          "Offset": 0,
+          "Type": "Vec3"
+        },
+        {
+          "Name": "Normal",
+          "Offset": 12,
+          "Type": "Vec3"
+        },
+        {
+          "Name": "UV",
+          "Offset": 24,
+          "Type": "Vec2"
+        },
+        {
+          "Name": "Color",
+          "Offset": 32,
+          "Type": "Vec4"
+        },
+        {
+          "Name": "Tangent",
+          "Offset": 48,
+          "Type": "Vec3"
+        }
+      ]
+    },
+    {
+      "Span": 48,
+      "Name": "Instances",
+      "Rate": "Instance",
+      "Elements": [
+        {
+          "Name": "Transform0",
+          "Offset": 0,
+          "Type": "Vec4"
+        },
+        {
+          "Name": "Transform1",
+          "Offset": 16,
+          "Type": "Vec4"
+        },
+        {
+          "Name": "Transform2",
+          "Offset": 32,
+          "Type": "Vec4"
+        }
+      ]
+    }
+
+  ]
+}

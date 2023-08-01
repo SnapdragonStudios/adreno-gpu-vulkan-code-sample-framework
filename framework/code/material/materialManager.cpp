@@ -1,33 +1,42 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "materialManager.hpp"
 #include "descriptorSetLayout.hpp"
-#include "material.hpp"
+#include "vulkan/material.hpp"
 #include "shader.hpp"
 #include "shaderDescription.hpp"
 #include "system/os_common.h"
 #include "vulkan/vulkan.hpp"
+#include "texture/vulkan/texture.hpp"
+//#include "material/vulkan/specializationConstantsLayout.hpp"
 
-MaterialManager::MaterialManager()
+#include <glm/glm.hpp>
+static_assert(GLM_HAS_CONSTEXPR);
+
+template<>
+MaterialManagerT<Vulkan>::MaterialManagerT()
 {}
 
-MaterialManager::~MaterialManager()
+template<>
+MaterialManagerT<Vulkan>::~MaterialManagerT()
 {}
 
-
-MaterialPass MaterialManager::CreateMaterialPassInternal(
+template<>
+MaterialPass MaterialManagerT<Vulkan>::CreateMaterialPassInternal(
     Vulkan& vulkan,
-    const ShaderPass& shaderPass,
+    const ShaderPass<Vulkan>& shaderPass,
     uint32_t numFrameBuffers,
     const std::function<const MaterialPass::tPerFrameTexInfo(const std::string&)>& textureLoader,
-    const std::function<MaterialPass::tPerFrameVkBuffer(const std::string&)>& bufferLoader,
+    const std::function<const tPerFrameVkBuffer(const std::string&)>& bufferLoader,
     const std::function<const ImageInfo(const std::string&)>& imageLoader,
+    const std::function<const MaterialPass::tPerFrameVkAccelerationStructure(const std::string&)>& accelerationStructureLoader,
+    const std::function<const VertexElementData(const std::string&)>& specializationStructureLoader,
     const std::string& passDebugName) const
 {
     const std::vector<DescriptorSetLayout>& descriptorSetLayouts = shaderPass.GetDescriptorSetLayouts();
@@ -50,6 +59,7 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
     MaterialPass::tTextureBindings textureBindings;
     MaterialPass::tImageBindings imageBindings;
     MaterialPass::tBufferBindings bufferBindings;
+    MaterialPass::tAccelerationStructureBindings accelerationStructureBindings;
 
     for (size_t layoutIdx = 0; layoutIdx < descriptorSetLayouts.size(); ++layoutIdx)
     {
@@ -72,8 +82,10 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
             switch (binding.type)
             {
             case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+            case VK_DESCRIPTOR_TYPE_SAMPLER:
             {
-                MaterialPass::tPerFrameTexInfo pTextures = textureLoader(bindingName);	// Get the texture(s) from the callback
+                MaterialPass::tPerFrameTexInfo pTextures = textureLoader(bindingName);	// Get the texture(s) and/or samplers from the callback
                 descriptorCount = (uint32_t) pTextures.size();
                 textureBindings.push_back({ std::move(pTextures), binding });
                 break;
@@ -94,8 +106,8 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
                     std::vector<ImageInfo> imageInfos;
                     descriptorCount = (uint32_t)pTextures.size();
                     imageInfos.reserve(descriptorCount);
-                    for(const VulkanTexInfo* pTexture: pTextures)
-                        imageInfos.push_back( ImageInfo(*pTexture) );
+                    for (const auto* pTexture : pTextures)
+                        imageInfos.push_back(ImageInfo(*pTexture));
                     imageBindings.push_back({ std::move(imageInfos), binding });
                 }
                 break;
@@ -103,11 +115,27 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
             case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
             case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
             {
-                MaterialPass::tPerFrameVkBuffer vkBuffers = bufferLoader(bindingName);	// Get the buffer(s) from the callback
+                tPerFrameVkBuffer vkBuffers = bufferLoader(bindingName);	// Get the buffer(s) from the callback
                 descriptorCount = (uint32_t) vkBuffers.size();
                 bufferBindings.push_back({ std::move(vkBuffers), binding });
                 break;
             }
+#if VK_KHR_acceleration_structure
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch"
+#endif // defined(__clang__)
+            case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
+            {
+                assert(accelerationStructureLoader && "Needs accelerationStructureLoader function defining");
+                MaterialPass::tPerFrameVkAccelerationStructure vkAS = accelerationStructureLoader(bindingName);	// Get the buffer(s) from the callback
+                accelerationStructureBindings.push_back({ std::move(vkAS), binding });
+                break;
+            }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif // defined(__clang__)
+#endif // VK_KHR_acceleration_structure
             default:
                 assert(0);	// needs implementing
                 break;
@@ -168,8 +196,7 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     if (poolSizeTotal > 0)
     {
-        VkDescriptorPoolCreateInfo poolInfo = {};
-        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         //PoolInfo.flags = 0;     // VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT to allow them to be returned
         poolInfo.maxSets = numFrameBuffers;  // Since descriptor sets come out of this pool we need more than one
         poolInfo.poolSizeCount = (uint32_t)poolSizes.size();
@@ -181,7 +208,7 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
     }
 
     //
-    // Create the descriptor sets to be populated with the 
+    // Create the descriptor sets to be populated
     //
 
     std::vector<VkDescriptorSet> descriptorSets;
@@ -194,9 +221,7 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
             //
             // Create the descriptor set
             //
-            VkDescriptorSetAllocateInfo descSetInfo = {};
-            descSetInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            descSetInfo.pNext = NULL;
+            VkDescriptorSetAllocateInfo descSetInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
             descSetInfo.descriptorPool = descriptorPool;
             descSetInfo.descriptorSetCount = (uint32_t) descriptorSetLayouts.size();
             descSetInfo.pSetLayouts = vkDescSetLayouts.data();
@@ -204,7 +229,7 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
             VkDescriptorSet* pNewDescriptorSets = &descriptorSets[descriptorSets.size() - descSetInfo.descriptorSetCount];
             if (VK_SUCCESS != vkAllocateDescriptorSets( vulkan.m_VulkanDevice, &descSetInfo, pNewDescriptorSets ))
             {
-                assert( 0 );
+                assert(0);
             }
 
             for (const VkDescriptorSet* pDescriptorSet = pNewDescriptorSets; pDescriptorSet <= &descriptorSets.back(); ++pDescriptorSet)
@@ -215,13 +240,26 @@ MaterialPass MaterialManager::CreateMaterialPassInternal(
         }
     }
 
-    return MaterialPass(vulkan, shaderPass, std::move(descriptorPool), std::move(descriptorSets), std::move(dynamicVkDescriptorSetLayouts), std::move(textureBindings), std::move(imageBindings), std::move(bufferBindings));
+    // Create the specialization constants for this material pass
+    const auto& shaderPassConstantDescriptions = shaderPass.m_shaderPassDescription.m_constants;
+    std::vector<VertexElementData> shaderConstantDatas;
+    shaderConstantDatas.reserve( shaderPassConstantDescriptions.size() );
+    for (const auto& constantDescription : shaderPassConstantDescriptions)
+        shaderConstantDatas.push_back( specializationStructureLoader( constantDescription.name ) );
+
+    SpecializationConstants specializationConstants;
+    specializationConstants.Init( shaderPass.GetSpecializationConstantsLayout(), { shaderConstantDatas } );
+
+    return MaterialPass(vulkan, shaderPass, std::move(descriptorPool), std::move(descriptorSets), std::move(dynamicVkDescriptorSetLayouts), std::move(textureBindings), std::move(imageBindings), std::move(bufferBindings), std::move(accelerationStructureBindings), std::move(specializationConstants));
 }
 
-Material MaterialManager::CreateMaterial(Vulkan& vulkan, const Shader& shader, uint32_t numFrameBuffers,
-                                          const std::function<const MaterialPass::tPerFrameTexInfo(const std::string&)>& textureLoader,
-                                          const std::function<const MaterialPass::tPerFrameVkBuffer(const std::string&)>& bufferLoader,
-                                          const std::function<const ImageInfo(const std::string&)>& imageLoader) const
+template<>
+Material MaterialManagerT<Vulkan>::CreateMaterial(Vulkan& vulkan, const ShaderT<Vulkan>& shader, uint32_t numFrameBuffers,
+                                          const std::function<const MaterialManagerT<Vulkan>::tPerFrameTexInfo(const std::string&)>& textureLoader,
+                                          const std::function<const tPerFrameVkBuffer(const std::string&)>& bufferLoader,
+                                          const std::function<const ImageInfo(const std::string&)>& imageLoader,
+                                          const std::function<const MaterialManagerT<Vulkan>::tPerFrameVkAccelerationStructure(const std::string&)>& accelerationStructureLoader,
+                                          const std::function<const VertexElementData(const std::string&)>& specializationConstantLoader) const
 {
     Material material( shader, numFrameBuffers );
 
@@ -230,12 +268,11 @@ Material MaterialManager::CreateMaterial(Vulkan& vulkan, const Shader& shader, u
 
     // iterate over the passes (in their index order - iterating std::map gaurantees to iterate in key order)
     const auto& shaderPasses = shader.GetShaderPasses();
-    for (const auto& shaderPassIdxAndName : shader.GetShaderPassIndicesToNames())
+    for (uint32_t passIdx = 0; const auto& passName : shader.GetShaderPassIndicesToNames())
     {
-        const std::string& passName = shaderPassIdxAndName.second;
-        const ShaderPass& shaderPass = shaderPasses[shaderPassIdxAndName.first];
-
-        material.AddMaterialPass(passName, CreateMaterialPassInternal(vulkan, shaderPass, numFrameBuffers, textureLoader, bufferLoader, imageLoader, passName) );
+        const auto& shaderPass = shaderPasses[passIdx];
+        material.AddMaterialPass(passName, CreateMaterialPassInternal(vulkan, shaderPass, numFrameBuffers, textureLoader, bufferLoader, imageLoader, accelerationStructureLoader, specializationConstantLoader, passName));
+        ++passIdx;
     }
 
     for (uint32_t whichBuffer = 0; whichBuffer < numFrameBuffers; ++whichBuffer)
@@ -244,4 +281,16 @@ Material MaterialManager::CreateMaterial(Vulkan& vulkan, const Shader& shader, u
     }
 
     return material;
+}
+
+template<>
+Material MaterialManagerT<Vulkan>::CreateMaterial(GraphicsApiBase& gfxApi, const Shader& shader, uint32_t numFrameBuffers,
+                        const std::function<const tPerFrameTexInfo(const std::string&)>& textureLoader,
+                        const std::function<const tPerFrameVkBuffer(const std::string&)>& bufferLoader,
+                        const std::function<const ImageInfo(const std::string&)>& imageLoader,
+                        const std::function<const tPerFrameVkAccelerationStructure(const std::string&)>& accelerationStructureLoader,
+                        const std::function<const VertexElementData(const std::string&)>& specializationConstantLoader) const /*override*/
+{
+    return CreateMaterial(static_cast<Vulkan&>(gfxApi), static_cast<const ShaderT<Vulkan>&>(shader), numFrameBuffers,
+                          textureLoader, bufferLoader, imageLoader, accelerationStructureLoader, specializationConstantLoader);
 }

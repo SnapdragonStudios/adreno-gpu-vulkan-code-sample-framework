@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -10,7 +10,7 @@
 
 #include "animationData.hpp"
 #include <unordered_map>
-#include "tcb/span.hpp"
+#include <span>
 
 class Skeleton;
 
@@ -100,7 +100,7 @@ public:
 
     /// Recalculate matrix array
     /// @param nodeMatrixs array of matrixes we want to update (indexed by nodeId)
-    static void UpdateSkeletonMatrixes( const Skeleton&, AnimationIterator& iterator, tcb::span<glm::mat3x4> nodeMatrixs );
+    static void UpdateSkeletonMatrixes( const Skeleton&, AnimationIterator& iterator, std::span<glm::mat3x4> nodeMatrixs );
 
 protected:
     std::vector<Animation> m_Animations;

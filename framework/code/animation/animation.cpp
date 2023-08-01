@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -167,7 +167,7 @@ AnimationIterator AnimationList::MakeIterator(const Animation& animation)
 }
 
 // Recalculate matrix array (one per nodeId)
-void AnimationList::UpdateSkeletonMatrixes(const Skeleton& skeleton, AnimationIterator& iterator, tcb::span<glm::mat3x4> nodeMatrixs)
+void AnimationList::UpdateSkeletonMatrixes(const Skeleton& skeleton, AnimationIterator& iterator, std::span<glm::mat3x4> nodeMatrixs)
 {
     const Animation& animation = iterator.animation;
     float time = iterator.time;

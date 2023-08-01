@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -13,10 +13,10 @@
 
 // Buffer binding locations
 #define SHADER_DIFFUSE_TEXTURE_LOC          0
-
-#define SHADER_DIFFUSE_SUBPASS_INPUT        0
+#define SHADER_OVERLAY_TEXTURE_LOC          1
 
 layout(set = 0, binding = SHADER_DIFFUSE_TEXTURE_LOC) uniform sampler2D u_DiffuseTex;
+layout(set = 0, binding = SHADER_OVERLAY_TEXTURE_LOC) uniform sampler2D u_OverlayTex;
 
 // Varying's
 layout (location = 0) in vec2   v_TexCoord;
@@ -82,14 +82,13 @@ void main()
     //float lerp12 = max(0,FragCB.Diffuse-1);
     //DiffuseColor = DiffuseColor * lerp01 + lerp12 - lerp12 * DiffuseColor;
 
-    // ********************************
-    // Alpha Blending
-    // ********************************
-    FragColor.rgb = DiffuseColor.rgb;
-    FragColor.a = 1.0;
-
     // Color mapping
-    FragColor.rgb = ACESFilmic(FragColor.rgb);
+    FragColor.rgb = ACESFilmic(DiffuseColor.rgb);
+
+    // UI Overlay
+    vec4 OverlayColor = texture( u_OverlayTex, LocalTexCoord.xy );
+    FragColor.rgb =  FragColor.rgb*(1.0-OverlayColor.a) + OverlayColor.rgb;
+    FragColor.a = 1.0;
 
     // ********************************
     // sRGB conversion (if speed was a factor we would probably hardcode and have 2 blit shaders)

@@ -1,35 +1,30 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "renderTarget.hpp"
 #include "system/os_common.h"
-//#include "vulkan_support.hpp"
-//#include "system/assetManager.hpp"
-//#include "memory/memoryManager.hpp"
 
 //=============================================================================
 // CRenderTarget
 //=============================================================================
 
 //-----------------------------------------------------------------------------
-CRenderTarget::CRenderTarget() :
+CRenderTarget::CRenderTarget()
 //-----------------------------------------------------------------------------
-    m_FrameBuffer(VK_NULL_HANDLE),
-    m_FrameBufferDepthOnly(VK_NULL_HANDLE)
 {
-    HardReset();
+    // class is fully initialized by member constructors and member value initilization in the class definition
 }
 
 //-----------------------------------------------------------------------------
 CRenderTarget::~CRenderTarget()
 //-----------------------------------------------------------------------------
 {
-    Release();
+    Release(true/*assume we own the framebuffers*/);
 }
 
 //-----------------------------------------------------------------------------
@@ -54,7 +49,7 @@ CRenderTarget& CRenderTarget::operator=( CRenderTarget&& src) noexcept
         m_Msaa = std::move( src.m_Msaa );
         m_FilterMode = std::move( src.m_FilterMode );
         m_DepthFormat = src.m_DepthFormat;
-        src.m_DepthFormat = VK_FORMAT_UNDEFINED;
+        src.m_DepthFormat = TextureFormat::UNDEFINED;
         m_ColorAttachments = std::move( src.m_ColorAttachments );
         m_ClearColorValues = std::move( src.m_ClearColorValues );
         m_ResolveAttachments = std::move( src.m_ResolveAttachments );
@@ -72,41 +67,14 @@ CRenderTarget& CRenderTarget::operator=( CRenderTarget&& src) noexcept
 }
 
 //-----------------------------------------------------------------------------
-void CRenderTarget::HardReset()
-//-----------------------------------------------------------------------------
-{
-    m_Name = "RenderTarget";
-
-    m_Width = 0;
-    m_Height = 0;
-
-    m_pLayerFormats.clear();
-    m_Msaa = {};
-    m_FilterMode = {};
-    m_DepthFormat = VK_FORMAT_UNDEFINED;
-
-    m_ColorAttachments.clear();
-    m_ClearColorValues.clear();
-    m_ResolveAttachments.clear();
-    m_DepthAttachment = VulkanTexInfo();
-
-    assert(m_FrameBuffer == VK_NULL_HANDLE);
-    m_FrameBuffer = VK_NULL_HANDLE;
-    assert(m_FrameBufferDepthOnly == VK_NULL_HANDLE);
-    m_FrameBufferDepthOnly = VK_NULL_HANDLE;
-
-    m_pVulkan = nullptr;
-}
-
-//-----------------------------------------------------------------------------
-bool CRenderTarget::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const tcb::span<const VkFormat> pLayerFormats, VkFormat DepthFormat, tcb::span<const VkSampleCountFlagBits> Msaa, const char* pName)
+bool CRenderTarget::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHeight, const std::span<const TextureFormat> pLayerFormats, TextureFormat DepthFormat, std::span<const VkSampleCountFlagBits> Msaa, const char* pName)
 //-----------------------------------------------------------------------------
 {
     m_pVulkan = pVulkan;
     m_DepthFormat = DepthFormat;
     m_Msaa.assign(Msaa.begin(), Msaa.end());
     m_Msaa.resize( pLayerFormats.size(), VK_SAMPLE_COUNT_1_BIT );
-    m_FilterMode.resize(pLayerFormats.size(), VK_FILTER_LINEAR);
+    m_FilterMode.resize(pLayerFormats.size(), SamplerFilter::Linear);
 
     m_Width = uiWidth;
     m_Height = uiHeight;
@@ -118,7 +86,7 @@ bool CRenderTarget::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHei
     }
 
     m_ColorAttachments.clear();
-    m_ClearColorValues.resize(pLayerFormats.size(), { 0.0f, 0.0f, 0.0f, 0.0f });
+    m_ClearColorValues.resize(pLayerFormats.size(), {{ 0.0f, 0.0f, 0.0f, 0.0f }});
     m_ResolveAttachments.clear();
 
     m_pLayerFormats.assign( pLayerFormats.begin(), pLayerFormats.end() );
@@ -130,21 +98,21 @@ bool CRenderTarget::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_t uiHei
 bool CRenderTarget::InitializeDepth()
 //-----------------------------------------------------------------------------
 {
-    if (m_DepthFormat != VK_FORMAT_UNDEFINED)
+    if (m_DepthFormat != TextureFormat::UNDEFINED)
     {
         char szName[256];
         sprintf(szName, "%s: Depth", m_Name.c_str());
-        m_DepthAttachment = CreateTextureObject(m_pVulkan, m_Width, m_Height, m_DepthFormat, TT_DEPTH_TARGET, m_Name.c_str(), m_Msaa.empty() ? VK_SAMPLE_COUNT_1_BIT : m_Msaa[0]);
+        m_DepthAttachment = CreateTextureObject(*m_pVulkan, m_Width, m_Height, m_DepthFormat, TT_DEPTH_TARGET, m_Name.c_str(), m_Msaa.empty() ? VK_SAMPLE_COUNT_1_BIT : m_Msaa[0]);
     }
     else
     {
-        ReleaseTexture(m_pVulkan, &m_DepthAttachment);
+        ReleaseTexture(*m_pVulkan, &m_DepthAttachment);
     }
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool CRenderTarget::InitializeColor(const tcb::span<const TEXTURE_TYPE> TextureTypes)
+bool CRenderTarget::InitializeColor(const std::span<const TEXTURE_TYPE> TextureTypes)
 //-----------------------------------------------------------------------------
 {
     const auto NumColorLayers = GetNumColorLayers();
@@ -154,7 +122,7 @@ bool CRenderTarget::InitializeColor(const tcb::span<const TEXTURE_TYPE> TextureT
     m_ColorAttachments.reserve(NumColorLayers);
 
     m_ClearColorValues.clear();
-    m_ClearColorValues.resize(NumColorLayers, {0.0f,0.0f,0.0f,0.0f});
+    m_ClearColorValues.resize(NumColorLayers, {{0.0f,0.0f,0.0f,0.0f}});
 
     CreateTexObjectInfo createInfo{};
     createInfo.uiWidth = m_Width;
@@ -172,19 +140,19 @@ bool CRenderTarget::InitializeColor(const tcb::span<const TEXTURE_TYPE> TextureT
         createInfo.Msaa = m_Msaa[WhichLayer];
         createInfo.FilterMode = m_FilterMode[WhichLayer];
 
-        m_ColorAttachments.emplace_back(CreateTextureObject(m_pVulkan, createInfo));
+        m_ColorAttachments.emplace_back(CreateTextureObject(*m_pVulkan, createInfo));
     }
 
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool CRenderTarget::InitializeResolve(const tcb::span<const TEXTURE_TYPE> TextureTypes)
+bool CRenderTarget::InitializeResolve(const std::span<const TextureFormat> ResolveTextureFormats)
 //-----------------------------------------------------------------------------
 {
     m_ResolveAttachments.clear();
 
-    if (!m_Msaa.empty())
+    if (!m_Msaa.empty() && !ResolveTextureFormats.empty())
     {
         const auto NumColorLayers = GetNumColorLayers();
         LOGI("Creating Render Target (%s): (%d x %d); %d resolve layer[s]", m_Name.c_str(), m_Width, m_Height, NumColorLayers);
@@ -195,12 +163,12 @@ bool CRenderTarget::InitializeResolve(const tcb::span<const TEXTURE_TYPE> Textur
         char szName[256];
         for (size_t WhichLayer = 0; WhichLayer < NumColorLayers; WhichLayer++)
         {
-            if (m_Msaa[WhichLayer] != VK_SAMPLE_COUNT_1_BIT)
+            if (m_Msaa[WhichLayer] != VK_SAMPLE_COUNT_1_BIT && WhichLayer < ResolveTextureFormats.size() && ResolveTextureFormats[WhichLayer] != TextureFormat::UNDEFINED)
             {
                 sprintf(szName, "%s: Color Resolve", m_Name.c_str());
 
-                const TEXTURE_TYPE TextureType = (WhichLayer < TextureTypes.size()) ? TextureTypes[WhichLayer] : TT_RENDER_TARGET;
-                m_ResolveAttachments.emplace_back(CreateTextureObject(m_pVulkan, m_Width, m_Height, m_pLayerFormats[WhichLayer], TextureType, m_Name.c_str()));
+                const TEXTURE_TYPE TextureType = TT_RENDER_TARGET;
+                m_ResolveAttachments.emplace_back(CreateTextureObject(*m_pVulkan, m_Width, m_Height, ResolveTextureFormats[WhichLayer], TextureType, m_Name.c_str()));
             }
         }
     }
@@ -216,13 +184,13 @@ bool CRenderTarget::InitializeColor(const SwapchainBuffers& SwapchainBuffer)
     m_ColorAttachments.clear();
     m_ColorAttachments.reserve(1);
     m_ClearColorValues.clear();
-    m_ClearColorValues.resize(1, { 0.0f,0.0f,0.0f,0.0f });
+    m_ClearColorValues.resize(1, {{0.0f,0.0f,0.0f,0.0f}});
 
     char szName[256];
 
     sprintf(szName, "%s: Swapchain", m_Name.c_str());
 
-    m_ColorAttachments.emplace_back(VulkanTexInfo(m_Width, m_Height, 1, 0, m_pVulkan->m_SurfaceFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, SwapchainBuffer.image, VK_NULL_HANDLE, VK_NULL_HANDLE, SwapchainBuffer.view));
+    m_ColorAttachments.emplace_back(TextureVulkan(m_Width, m_Height, 1, 0, m_pVulkan->m_SurfaceFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, SwapchainBuffer.image, VK_NULL_HANDLE, VK_NULL_HANDLE, SwapchainBuffer.view));
 
     return true;
 }
@@ -243,14 +211,14 @@ bool CRenderTarget::InitializeResolve(const SwapchainBuffers& SwapchainBuffer)
 
         sprintf(szName, "%s: resolve Swapchain", m_Name.c_str());
 
-        m_ResolveAttachments.emplace_back(VulkanTexInfo(m_Width, m_Height, 1, 0, m_pVulkan->m_SurfaceFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, SwapchainBuffer.image, VK_NULL_HANDLE, VK_NULL_HANDLE, SwapchainBuffer.view));
+        m_ResolveAttachments.emplace_back(TextureVulkan(m_Width, m_Height, 1, 0, m_pVulkan->m_SurfaceFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, SwapchainBuffer.image, VK_NULL_HANDLE, VK_NULL_HANDLE, SwapchainBuffer.view));
     }
 
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool CRenderTarget::InitializeFrameBuffer(VkRenderPass renderPass, const tcb::span<const VulkanTexInfo> ColorAttachments, const VulkanTexInfo* pDepthAttachment, const tcb::span<const VulkanTexInfo> ResolveAttachments, const VulkanTexInfo* pVRSAttachment, VkFramebuffer* pFramebuffer )
+bool CRenderTarget::InitializeFrameBuffer(VkRenderPass renderPass, const std::span<const TextureVulkan> ColorAttachments, const TextureVulkan* pDepthAttachment, const std::span<const TextureVulkan> ResolveAttachments, const TextureVulkan* pVRSAttachment, VkFramebuffer* pFramebuffer )
 //-----------------------------------------------------------------------------
 {
     VkResult RetVal;
@@ -259,15 +227,15 @@ bool CRenderTarget::InitializeFrameBuffer(VkRenderPass renderPass, const tcb::sp
     std::vector<VkImageView> attachments;
     attachments.reserve( ColorAttachments.size() + 1/*depth*/ );
 
-    for (const VulkanTexInfo& ColorAttachement: ColorAttachments)
+    for (const auto& ColorAttachement: ColorAttachments)
     {
         attachments.push_back(ColorAttachement.GetVkImageView());
     }
-    if (pDepthAttachment && pDepthAttachment->Format != VK_FORMAT_UNDEFINED)
+    if (pDepthAttachment && pDepthAttachment->Format != TextureFormat::UNDEFINED)
     {
         attachments.push_back(pDepthAttachment->GetVkImageView());
     }
-    for (const VulkanTexInfo& ResolveAttachment : ResolveAttachments)
+    for (const auto& ResolveAttachment : ResolveAttachments)
     {
         attachments.push_back( ResolveAttachment.GetVkImageView() );
     }
@@ -295,7 +263,7 @@ bool CRenderTarget::InitializeFrameBuffer(VkRenderPass renderPass, const tcb::sp
 }
 
 //-----------------------------------------------------------------------------
-void CRenderTarget::SetClearColors(const tcb::span<const VkClearColorValue> clearColors)
+void CRenderTarget::SetClearColors(const std::span<const VkClearColorValue> clearColors)
 //-----------------------------------------------------------------------------
 {
     assert(clearColors.size() == m_ColorAttachments.size());
@@ -303,7 +271,7 @@ void CRenderTarget::SetClearColors(const tcb::span<const VkClearColorValue> clea
 }
 
 //-----------------------------------------------------------------------------
-void CRenderTarget::Release()
+void CRenderTarget::Release(bool bReleaseFramebuffers)
 //-----------------------------------------------------------------------------
 {
     if (m_pVulkan == nullptr)
@@ -311,30 +279,34 @@ void CRenderTarget::Release()
 
     for (auto& ColorAttachment : m_ColorAttachments)
     {
-        ReleaseTexture(m_pVulkan, &ColorAttachment);
+        ColorAttachment.Release(m_pVulkan);
     }
     m_ColorAttachments.clear();
     m_ClearColorValues.clear();
+    m_pLayerFormats.clear();
+    m_FilterMode.clear();
 
     for (auto& ResolveAttachment : m_ResolveAttachments)
     {
-        ReleaseTexture(m_pVulkan, &ResolveAttachment);
+        ResolveAttachment.Release(m_pVulkan);
     }
     m_ResolveAttachments.clear();
 
-    m_pLayerFormats.clear();
+    m_Msaa.clear();
 
-    ReleaseTexture(m_pVulkan, &m_DepthAttachment);
+    m_DepthAttachment.Release(m_pVulkan);
+    m_DepthFormat = TextureFormat::UNDEFINED;
 
-    if (m_FrameBufferDepthOnly != VK_NULL_HANDLE)
+    if (m_FrameBufferDepthOnly != VK_NULL_HANDLE && bReleaseFramebuffers)
         vkDestroyFramebuffer(m_pVulkan->m_VulkanDevice, m_FrameBufferDepthOnly, NULL);
     m_FrameBufferDepthOnly = VK_NULL_HANDLE;
 
-    if (m_FrameBuffer != VK_NULL_HANDLE)
+    if (m_FrameBuffer != VK_NULL_HANDLE && bReleaseFramebuffers)
         vkDestroyFramebuffer(m_pVulkan->m_VulkanDevice, m_FrameBuffer, NULL);
     m_FrameBuffer = VK_NULL_HANDLE;
 
-    // Clear everything back to starting state
-    HardReset();
+    m_Height = 0;
+    m_Width = 0;
+    m_Name = std::string{};
 }
 

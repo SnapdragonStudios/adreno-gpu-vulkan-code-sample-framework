@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,6 +9,7 @@
 
 #include "vertexFormat.hpp"
 #include "descriptorSetDescription.hpp"
+#include "specializationConstantDescription.hpp"
 #include <string>
 #include <map>
 #include <vector>
@@ -52,6 +53,7 @@ public:
         bool                depthTestEnable = false;
         bool                depthWriteEnable = false;
         DepthCompareOp      depthCompareOp = DepthCompareOp::LessEqual;
+        bool                depthClampEnable = false;
         // Depth Bias
         bool                depthBiasEnable = false;
         float               depthBiasConstant = 0.0f;
@@ -87,8 +89,12 @@ public:
     {
         std::array<uint32_t, 3> localSize = {};
     };
+    struct RayTracingSettings
+    {
+        uint32_t maxRayRecursionDepth = 1;
+    };
 
-    ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, WorkGroupSettings workGroupSettings, std::vector<uint32_t> vertexFormatBindings);
+    ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, std::string rayGenerationName, std::string rayClosestHitName, std::string rayAnyHitName, std::string rayMissName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, WorkGroupSettings workGroupSettings, RayTracingSettings rayTracingSettings, std::vector<uint32_t> vertexFormatBindings, std::vector<SpecializationConstantDescription> specializationConstants);
     ShaderPassDescription(ShaderPassDescription&&) = default;
 
     std::vector<DescriptorSetDescription> m_sets;
@@ -96,10 +102,16 @@ public:
     std::string m_computeName;                      ///< Name of the compute shader (optional, not valid if m_vertexName or m_fragmentName are set)
     std::string m_vertexName;                       ///< Name of the vertex shader used by this shader pass (optional, not valid if m_computeName set)
     std::string m_fragmentName;                     ///< Name of the fragment shader used by this shader pass (optional, only valid if m_vertexName set)
+    std::string m_rayGenerationName;
+    std::string m_rayClosestHitName;
+    std::string m_rayAnyHitName;
+    std::string m_rayMissName;
     FixedFunctionSettings m_fixedFunctionSettings;
     SampleShadingSettings m_sampleShadingSettings;
     WorkGroupSettings     m_workGroupSettings;
+    RayTracingSettings    m_rayTracingSettings;
     std::vector<uint32_t> m_vertexFormatBindings;   //< Indices of the vertex buffers bound by this shader pass (index in to ShaderDescription::m_vertexFormats)
+    std::vector<SpecializationConstantDescription> m_constants;
     //std::vector<uint32_t> m_vertexInstanceFormatBindings;  ///TODO: support more than one buffer of instance rate data
 };
 

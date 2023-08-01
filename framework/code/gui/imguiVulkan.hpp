@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,34 +9,33 @@
 
 #include <memory>
 #include <vector>
-#include <vulkan/vulkan.h>
 #include "imguiPlatform.hpp"
-#include "vulkan/vulkan_support.hpp"
-
-// forward declarations
-class Vulkan;
+#include "vulkan/vulkan.hpp"
+#include "vulkan/commandBuffer.hpp"
 
 ///
-/// @brief Vulkan specific implementation of imgui rendering.
+/// @brief Vulkan specialized implementation of imgui rendering.
 /// Derives from the Windows / Android (or whatever) platform specific class implementation.
 /// @ingroup GUI
 ///
-class GuiImguiVulkan : public GuiImguiPlatform
+template<>
+class GuiImguiGfx<Vulkan> : public GuiImguiPlatform
 {
 public:
-    GuiImguiVulkan(Vulkan& vulkan, VkRenderPass renderPass);
-    ~GuiImguiVulkan();
+    GuiImguiGfx(Vulkan&, VkRenderPass renderPass);
+    ~GuiImguiGfx();
 
     bool Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint32_t renderHeight) override;
-    VkCommandBuffer Render(uint32_t frameIdx, VkFramebuffer frameBuffer) override;
-    void Render(VkCommandBuffer cmdBuffer) override;
     void Update() override;
+
+    VkCommandBuffer Render(uint32_t frameIdx, VkFramebuffer frameBuffer);
+    void Render(VkCommandBuffer cmdBuffer);
 
 private:
     const VkRenderPass                  m_RenderPass;
     VkDescriptorPool                    m_DescriptorPool = VK_NULL_HANDLE;
     Wrap_VkCommandBuffer                m_UploadCommandBuffer;
     std::vector<Wrap_VkCommandBuffer>   m_CommandBuffer;
-    Vulkan&                             m_Vulkan;      
+    Vulkan&                             m_GfxApi;      
 };
 

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,6 +9,7 @@
 #include "extensionHelpers.hpp"
 #include "system/os_common.h"
 #include <cassert>
+#include <cinttypes>
 
 void VulkanFunctionPointerExtensionHelper::Register(Vulkan& vulkan)
 {
@@ -28,6 +29,15 @@ namespace ExtensionHelper {
         LOGI( "    shaderInt8: %s", this->AvailableFeatures.shaderInt8 ? "True" : "False" );
     }
 #endif // VK_KHR_shader_float16_int8
+
+#if VK_EXT_shader_image_atomic_int64
+    void Ext_VK_EXT_shader_image_atomic_int64::PrintFeatures() const
+    {
+        LOGI( "FeaturesShaderImageAtomicInt64: " );
+        LOGI( "    shaderImageInt64Atomics: %s", this->AvailableFeatures.shaderImageInt64Atomics ? "True" : "False" );
+        LOGI( "    sparseImageInt64Atomics: %s", this->AvailableFeatures.sparseImageInt64Atomics ? "True" : "False" );
+    }
+#endif // VK_EXT_shader_image_atomic_int64
 
 #if VK_EXT_index_type_uint8
     void Ext_VK_EXT_index_type_uint8::PrintFeatures() const
@@ -110,7 +120,7 @@ namespace ExtensionHelper {
     }
 #endif // VK_KHR_8bit_storage
 
-#if VK_KHR_portability_subset && VK_ENABLE_BETA_EXTENSIONS
+#if VK_KHR_portability_subset
     void Ext_VK_KHR_portability_subset::PrintFeatures() const
     {
         LOGI( "VK_KHR_portability_subset (VkPhysicalDevicePortabilitySubsetFeaturesKHR): " );
@@ -194,22 +204,86 @@ namespace ExtensionHelper {
     }
 #endif // VK_EXT_debug_marker
 
+    static std::string GetSubgroupStagesString( VkShaderStageFlags Stages )
+    {
+        std::string StagesString;
+        static const char* SubgroupStages[] = { "Vertex", "Tessellation Control", "Tessellation Evaluation", "Geometry", "Fragment", "Compute" };
+        int i = 0;
+        for (; i < sizeof( SubgroupStages ) / sizeof( *SubgroupStages ); ++i)
+        {
+            if ((Stages & (1 << i)) != 0)
+            {
+                StagesString.append( SubgroupStages[i] );
+                StagesString.append( ", " );
+            }
+        }
+        // remainder
+        if ((Stages & ~((1 << i) - 1)) != 0)
+        {
+            StagesString.append( std::to_string( Stages & ~((1 << i) - 1) ) );
+        }
+        return StagesString;
+    }
+
+
+#if VK_EXT_subgroup_size_control
+    void Ext_VK_EXT_subgroup_size_control::PrintFeatures() const
+    {
+        LOGI( "VK_EXT_subgroup_size_control (VkPhysicalDeviceSubgroupSizeControlFeaturesEXT): " );
+        LOGI( "    subgroupSizeControl: %s", this->AvailableFeatures.subgroupSizeControl ? "True" : "False" );
+        LOGI( "    computeFullSubgroups: %s", this->AvailableFeatures.computeFullSubgroups ? "True" : "False" );
+    }
+
+    void Ext_VK_EXT_subgroup_size_control::PrintProperties() const
+    {
+        LOGI( "VK_EXT_subgroup_size_control (VkPhysicalDeviceSubgroupSizeControlPropertiesEXT): " );
+        LOGI( "    minSubgroupSize: %u", this->Properties.minSubgroupSize );
+        LOGI( "    maxSubgroupSize: %u", this->Properties.maxSubgroupSize );
+        LOGI( "    maxComputeWorkgroupSubgroups: %u", this->Properties.maxComputeWorkgroupSubgroups );
+        auto SupportedStages = GetSubgroupStagesString( this->Properties.requiredSubgroupSizeStages );
+        LOGI( "    requiredSubgroupSizeStages: %s", SupportedStages.c_str() );
+    }
+#endif // VK_EXT_subgroup_size_control
+
+#if VK_EXT_host_query_reset
+    void Ext_VK_EXT_host_query_reset::PrintFeatures() const
+    {
+        LOGI( "VK_EXT_host_query_reset (VkPhysicalDeviceHostQueryResetFeaturesEXT): " );
+        LOGI( "    hostQueryReset: %s", this->AvailableFeatures.hostQueryReset ? "True" : "False" );
+    }
+#endif // VK_EXT_host_query_reset
+
+#if VK_KHR_timeline_semaphore
+    void Ext_VK_KHR_timeline_semaphore::PrintFeatures() const
+    {
+        LOGI("VK_KHR_timeline_semaphore (VkPhysicalDeviceTimelineSemaphoreFeaturesKHR): ");
+        LOGI("    timelineSemaphore: %s", this->AvailableFeatures.timelineSemaphore ? "True" : "False");
+    }
+    void Ext_VK_KHR_timeline_semaphore::PrintProperties() const
+    {
+        LOGI("VK_KHR_timeline_semaphore (VkPhysicalDeviceTimelineSemaphorePropertiesKHR): ");
+        LOGI("    maxTimelineSemaphoreValueDifference: %" PRIu64, this->Properties.maxTimelineSemaphoreValueDifference);
+    }
+#endif // VK_KHR_timeline_semaphore
+
+#if VK_KHR_synchronization2
+    void Ext_VK_KHR_synchronization2::PrintFeatures() const
+    {
+        LOGI("Ext_VK_KHR_synchronization2 (VkPhysicalDeviceSynchronization2FeaturesKHR): ");
+        LOGI("    synchronization2: %s", this->AvailableFeatures.synchronization2 ? "True" : "False");
+    }
+    void Ext_VK_KHR_synchronization2::LookupFunctionPointers(VkInstance vkInstance)
+    {
+        m_vkQueueSubmit2KHR = (PFN_vkQueueSubmit2KHR)vkGetInstanceProcAddr(vkInstance, "vkQueueSubmit2KHR");
+    }
+#endif // VK_KHR_synchronization2
+
 
     void Vulkan_SubgroupPropertiesHook::PrintProperties() const
     {
         LOGI( "VkPhysicalDeviceSubgroupProperties: " );
         LOGI( "    subgroupSize: %d", Properties.subgroupSize );
-
-        std::string SupportedStages;
-        static const char* SubgroupStages[] = { "Vertex", "Tessellation Control", "Tessellation Evaluation", "Geometry", "Fragment", "Compute" };
-        for (int i = 0; i < sizeof( SubgroupStages ) / sizeof( *SubgroupStages ); ++i)
-        {
-            if ((Properties.supportedStages & (1 << i)) != 0)
-            {
-                SupportedStages.append( SubgroupStages[i] );
-                SupportedStages.append( ", " );
-            }
-        }
+        auto SupportedStages = GetSubgroupStagesString( Properties.supportedStages );
         LOGI( "        supportedStages: %s", SupportedStages.c_str() );
 
         std::string SupportedOperations;

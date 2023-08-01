@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -25,11 +25,12 @@ struct AnimationFrameData {
 /// @ingroup Animation
 struct AnimationNodeData
 {
-    AnimationNodeData(AnimationNodeData&&) = default;
-    AnimationNodeData& operator=(AnimationNodeData&&) = default;
+    AnimationNodeData(AnimationNodeData&&) noexcept = default;
+    AnimationNodeData& operator=(AnimationNodeData&&) noexcept = default;
     AnimationNodeData(const AnimationNodeData&) = delete;
     AnimationNodeData& operator=(const AnimationNodeData&) = delete;
-
+    AnimationNodeData( std::vector<AnimationFrameData>&& frames, uint32_t NodeId ) noexcept : Frames( std::move( frames ) ), NodeId( NodeId ) {}
+    
     std::vector<AnimationFrameData> Frames;     ///< Frames of animation data associated with this node (for a single animation)
     uint32_t NodeId;                            ///< gltf node index
 };

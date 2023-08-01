@@ -1,13 +1,14 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 #include "vulkan.hpp"
 #include "system/os_common.h"
+#include <array>
 #include <cassert>
 
 class Vulkan;
@@ -21,11 +22,11 @@ template<typename T_BASESTRUCTURE>
 class ExtensionHook
 {
 public:
-    typedef T_BASESTRUCTURE tBase;
+    using tBase = T_BASESTRUCTURE;
 
     virtual VkStructureType StructureType() const = 0;
     virtual VkBaseOutStructure* Obtain( tBase* ) = 0;
-    void Release(VkBaseOutStructure* pObtainedStructure) {};
+    virtual void Release(VkBaseOutStructure* pObtainedStructure) {};
 
     ExtensionHook<tBase>* pNext = nullptr;
 };
@@ -91,13 +92,13 @@ public:
         assert(pBase);
         size_t extensionsPopped = 0;
         VkBaseOutStructure* pNext = (VkBaseOutStructure*) pBase->pNext;
-        for (auto* pHook = pExtensionsHooks; pHook != nullptr; pHook = pHook->pNext)
+        for (auto* pHook = pExtensionsHooks; pHook != nullptr && pNext != nullptr; pHook = pHook->pNext)
         {
             if (pHook->StructureType() == pNext->sType)
             {
-                pHook->Release(pNext);
+                pHook->Release( pNext );
                 pBase->pNext = pNext->pNext;
-                pNext = (VkBaseOutStructure*)pBase->pNext;
+                pNext = (VkBaseOutStructure*) pBase->pNext;
                 ++extensionsPopped;
             }
         }
@@ -142,13 +143,18 @@ class VulkanExtension
     VulkanExtension( const VulkanExtension& ) = delete;             // Functionality built on VulkanExtension assumes this class remains fixed in memory
     VulkanExtension& operator=( const VulkanExtension& ) = delete;
 public:
-    enum eStatus { eUninitialized, eOptional, eRequired, eLoaded } Status = eUninitialized;
+    enum eStatus { eUninitialized, eOptional, eRequired, eLoaded };
+    static constexpr std::array<const char* const, 4> cStatusNames { "Uninitialized", "Optional", "Required", "Loaded" };
 
-    VulkanExtension(std::string name, VulkanExtension::eStatus status = eUninitialized, uint32_t version = 0) noexcept : Name(name), Status(status), Version(version) {}
-    const std::string   Name; 
-    uint32_t            Version;            // Extension version (from Driver)
+    VulkanExtension( std::string name, VulkanExtension::eStatus status = eUninitialized, uint32_t version = 0 ) noexcept : Status( status ), Name( name ), Version( version ) {}
+    virtual ~VulkanExtension() = default;
 
-    virtual void Register(Vulkan& vulkan) {}
+    eStatus             Status = eUninitialized;
+    const std::string   Name;
+    uint32_t            Version = 0;            ///< Extension version (from Driver)
+
+    /// Register this extension with Vulkan. Typically will call Vulkan::AddExtensionHooks if the extension needs to hook in to any functionality.
+    virtual void Register( Vulkan& vulkan ) {/*does not have to be derived from (or do anything)*/ }
 };
 
 

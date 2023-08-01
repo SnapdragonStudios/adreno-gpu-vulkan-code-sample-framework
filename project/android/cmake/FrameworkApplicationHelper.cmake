@@ -7,6 +7,7 @@
 #  SHADERS_SRC   - list of 'shader' (.vert, .frag, .comp) source files
 #  NATVIS_SCHEMA - list of application specific Visual Studio visualization schemas (for debuffer)
 #  PROJECT_NAME  - name of the application being compiled (from the 'project(...)' command)
+#  FRAMEWORK_LIB - name of the helper framework library (eg framework_vulkan or framework_dx12)
 
 
 # Windows and Android differ in terms of output.
@@ -21,6 +22,7 @@ elseif(ANDROID)
     set( TARGET_NAME native-lib )
     add_library( ${TARGET_NAME} SHARED ${CPP_SRC} ${SHADERS_SRC} )
     target_compile_definitions(${TARGET_NAME} PRIVATE OS_ANDROID)
+    target_compile_options(${TARGET_NAME} PRIVATE -Wno-nullability-completeness;-Wno-deprecated-volatile;-Wno-deprecated-anon-enum-enum-conversion)
 
     # Generate build time stamp as 2 part process.  CMake file that exe depends upon and the header file that cmake writes the header to be included by code.  This way we only rebuild what is needed.
     file (WRITE ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "string(TIMESTAMP TIMEZ UTC)\n")
@@ -47,9 +49,13 @@ else()
     message(FATAL_ERROR "(currently) Unsupported platform")
 endif()
 
+if(NOT DEFINED FRAMEWORK_LIB)
+    set(FRAMEWORK_LIB framework_vulkan)
+endif()
+
 #
 # Link the framework (to our application)
 #
-target_link_libraries( ${TARGET_NAME} framework )
+target_link_libraries( ${TARGET_NAME} ${FRAMEWORK_LIB} )
 
 include_directories(.)

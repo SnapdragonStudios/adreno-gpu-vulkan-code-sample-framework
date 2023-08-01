@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.10)
+cmake_minimum_required (VERSION 3.21)
 
 project (vkSampleFramework)
 
@@ -18,6 +18,27 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 endif()
 endif()
 
+# Determine which graphics API we can support and set appropriate defines
+set(FRAMEWORK_ENABLE_VULKAN OFF)
+set(FRAMEWORK_ENABLE_DX12 OFF)
+set(FRAMEWORK_WINDOWS_ARM64 OFF)
+if(ANDROID)
+  # Android target (Vulkan only)
+  set(FRAMEWORK_ENABLE_VULKAN ON)
+elseif(WIN32)
+  # Windows target (Dx12 for sure, maybe Vulkan too)
+  set(FRAMEWORK_ENABLE_DX12 ON)
+  #if (NOT CMAKE_GENERATOR_PLATFORM MATCHES "ARM64")
+    set(FRAMEWORK_ENABLE_VULKAN ON)
+  #endif()
+  if (CMAKE_GENERATOR_PLATFORM MATCHES "ARM64")
+    set(FRAMEWORK_WINDOWS_ARM64 ON)
+  endif()
+endif()
+
+message("FRAMEWORK_ENABLE_VULKAN - ${FRAMEWORK_ENABLE_VULKAN}") 
+message("FRAMEWORK_ENABLE_DX12   - ${FRAMEWORK_ENABLE_DX12}")
+
 # Generate build time stamp as 2 part process.  CMake file that exe depends upon and the header file that cmake writes the header to be included by code.  This way we only rebuild what is needed.
 file (WRITE ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "string(TIMESTAMP TIMEZ UTC)\n")
 file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(WRITE  ../../buildtimestamp.h \"#ifndef _BUILDTIMESTAMP_H_\\n\")\n")
@@ -32,12 +53,17 @@ add_custom_target (
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+# Add in all the child subdirectories
 set(FRAMEWORK_DIR ../../framework)
 add_subdirectory( ${FRAMEWORK_DIR} framework )
-add_subdirectory(../../samples/empty/ samples/empty)
-add_subdirectory(../../samples/hello-gltf/ samples/hello-gltf)
-add_subdirectory(../../samples/shaderResolveTonemap/ samples/shaderResolveTonemap)
-add_subdirectory(../../samples/hdrSwapchain/ samples/hdrSwapchain)
-add_subdirectory(../../samples/SubPass/ samples/SubPass)
-add_subdirectory(../../samples/rotatedCopy/ samples/rotatedCopy)
-add_subdirectory(../../samples/BloomImageProcessing/ samples/BloomImageProcessing)
+if(FRAMEWORK_ENABLE_VULKAN)
+  add_subdirectory(../../samples/empty/ samples/empty)
+  add_subdirectory(../../samples/hdrSwapchain/ samples/hdrSwapchain)
+  add_subdirectory(../../samples/rotatedCopy/ samples/rotatedCopy)
+  add_subdirectory(../../samples/shaderResolveTonemap/ samples/shaderResolveTonemap)
+  add_subdirectory(../../samples/hello-gltf/ samples/hello-gltf)
+  add_subdirectory(../../samples/SubPass/ samples/SubPass)
+  add_subdirectory(../../samples/BloomImageProcessing/ samples/BloomImageProcessing)
+  add_subdirectory(../../samples/rayQueryShadows/ samples/rayQueryShadows)
+  add_subdirectory(../../samples/rayReflections/ samples/rayReflections)
+endif()

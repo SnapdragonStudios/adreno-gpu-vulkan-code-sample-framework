@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -11,14 +11,15 @@
 #include "postProcess.hpp"
 #include "vulkan/vulkan.hpp"
 #include "vulkan/vulkan_support.hpp"
+#include "memory/vulkan/uniform.hpp"
 #include "system/glm_common.hpp"
+#include "texture/vulkan/texture.hpp"
 #include <memory>
 
 // Forward declarations
 class Computable;
-class MaterialManager;
 class Shader;
-class VulkanTexInfo;
+template<typename T_GFXAPI> class MaterialManagerT;
 
 
 class PostProcessSMAA : public PostProcess
@@ -29,19 +30,19 @@ public:
     PostProcessSMAA(Vulkan& vulkan);
     ~PostProcessSMAA();
 
-    bool Init(const Shader& shader, MaterialManager& materialManager, VulkanTexInfo* diffuseRenderTarget, VulkanTexInfo* depthRenderTarget);
+    bool Init(const Shader& shader, MaterialManagerT<Vulkan>& materialManager, TextureVulkan* diffuseRenderTarget, TextureVulkan* depthRenderTarget);
     bool UpdateUniforms(uint32_t WhichFrame, float ElapsedTime) override { return UpdateUniforms(WhichFrame, ElapsedTime, glm::mat4(1.0f)); }
     bool UpdateUniforms(uint32_t WhichFrame, float ElapsedTime, const glm::mat4& clipToPrevClip);
     void UpdateGui() override;
 
     const Computable* const GetComputable() const override;
-    tcb::span<const VulkanTexInfo> GetOutput() const;
+    std::span<const TextureVulkan> GetOutput() const;
 
 protected:
     Vulkan&                         m_Vulkan;
 
     std::unique_ptr<Computable>     m_Computable;
-    std::array<VulkanTexInfo, 2>    m_historyDiffuse;
+    std::array<TextureVulkan, 2>    m_historyDiffuse;
 
     struct UniformData {
         glm::mat4 ClipToPrevClip;
@@ -56,5 +57,5 @@ protected:
         int       _Pad0;
         float     PlusWeights[5];
     } m_UniformData;
-    UniformArrayT<UniformData, NUM_VULKAN_BUFFERS> m_Uniform;
+    UniformArrayT<Vulkan, UniformData, NUM_VULKAN_BUFFERS> m_Uniform;
 };

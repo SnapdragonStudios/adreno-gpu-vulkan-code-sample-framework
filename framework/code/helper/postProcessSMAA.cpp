@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -11,7 +11,7 @@
 #include "material/materialManager.hpp"
 #include "material/computable.hpp"
 #include "system/os_common.h"
-#include "vulkan/MeshObject.h"
+#include "texture/vulkan/textureManager.hpp"
 
 
 PostProcessSMAA::PostProcessSMAA(Vulkan& vulkan) : m_Vulkan(vulkan)
@@ -20,20 +20,20 @@ PostProcessSMAA::PostProcessSMAA(Vulkan& vulkan) : m_Vulkan(vulkan)
 PostProcessSMAA::~PostProcessSMAA()
 {
     m_Computable.reset();
-    ReleaseTexture(&m_Vulkan, &m_historyDiffuse[0]);
-    ReleaseTexture(&m_Vulkan, &m_historyDiffuse[1]);
+    ReleaseTexture(m_Vulkan, &m_historyDiffuse[0]);
+    ReleaseTexture(m_Vulkan, &m_historyDiffuse[1]);
     ReleaseUniformBuffer(&m_Vulkan, m_Uniform);
 }
 
-bool PostProcessSMAA::Init(const Shader& shader, MaterialManager& materialManager, VulkanTexInfo* diffuseRenderTarget, VulkanTexInfo* depthRenderTarget)
+bool PostProcessSMAA::Init(const Shader& shader, MaterialManagerT<Vulkan>& materialManager, TextureVulkan* diffuseRenderTarget, TextureVulkan* depthRenderTarget)
 {
     assert(diffuseRenderTarget);
     assert(depthRenderTarget);
 
     //
     // Create the history texture (last frame color)
-    m_historyDiffuse[0] = CreateTextureObject(&m_Vulkan, diffuseRenderTarget->Width, diffuseRenderTarget->Height, VK_FORMAT_A2B10G10R10_UNORM_PACK32, TT_COMPUTE_TARGET, "History0");
-    m_historyDiffuse[1] = CreateTextureObject(&m_Vulkan, diffuseRenderTarget->Width, diffuseRenderTarget->Height, VK_FORMAT_A2B10G10R10_UNORM_PACK32, TT_COMPUTE_TARGET, "History1");
+    m_historyDiffuse[0] = CreateTextureObject(m_Vulkan, diffuseRenderTarget->Width, diffuseRenderTarget->Height, TextureFormat::A2B10G10R10_UNORM_PACK32, TT_COMPUTE_TARGET, "History0");
+    m_historyDiffuse[1] = CreateTextureObject(m_Vulkan, diffuseRenderTarget->Width, diffuseRenderTarget->Height, TextureFormat::A2B10G10R10_UNORM_PACK32, TT_COMPUTE_TARGET, "History1");
 
     //
     // Create the uniform buffer (control)
@@ -41,7 +41,7 @@ bool PostProcessSMAA::Init(const Shader& shader, MaterialManager& materialManage
         return false;
 
     auto blitShaderMaterial = materialManager.CreateMaterial(m_Vulkan, shader, (uint32_t) m_historyDiffuse.size(),
-        [&](const std::string& texName) -> const MaterialManager::tPerFrameTexInfo {
+        [&](const std::string& texName) -> const MaterialManagerT<Vulkan>::tPerFrameTexInfo {
             if (texName == "Diffuse") {
                 return { diffuseRenderTarget };
             }
@@ -57,7 +57,7 @@ bool PostProcessSMAA::Init(const Shader& shader, MaterialManager& materialManage
             assert(0);
             return {};
         },
-        [this](const std::string& bufferName) -> MaterialManager::tPerFrameVkBuffer {
+        [this](const std::string& bufferName) -> tPerFrameVkBuffer {
             return { m_Uniform.vkBuffers.begin(), m_Uniform.vkBuffers.end() };
         }
         );
@@ -103,7 +103,7 @@ const Computable* const PostProcessSMAA::GetComputable() const
     return m_Computable.get();
 }
 
-tcb::span<const VulkanTexInfo> PostProcessSMAA::GetOutput() const
+std::span<const TextureVulkan> PostProcessSMAA::GetOutput() const
 {
     return {m_historyDiffuse.data(), m_historyDiffuse.size()};
 }

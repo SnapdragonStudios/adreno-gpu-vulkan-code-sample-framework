@@ -6,6 +6,9 @@ android {
         abortOnError false
     }
 
+    String rootDir = "${project.rootDir}"
+    rootDir = rootDir.replace("\\", "/")
+
     defaultConfig {
         applicationId "com.quic.hellogltf"
         minSdkVersion 26
@@ -18,7 +21,7 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments "-DPROJECT_ROOT_DIR=${project.rootDir}", "-DFRAMEWORK_DIR=${project.rootDir}/../../framework"
+                arguments "-DPROJECT_ROOT_DIR=${rootDir}", "-DFRAMEWORK_DIR=${rootDir}/../../framework"
             }
         }
      }

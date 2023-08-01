@@ -5,9 +5,9 @@
 # Input:
 #  CPP_SRC       - list of cpp/hpp files
 #  SHADERS_SRC   - list of 'shader' (.vert, .frag, .comp) source files
+#  FRAMEWORK_LIB    - name of the framework to link against (eg framework_vulkan)
 #  NATVIS_SCHEMA - list of application specific Visual Studio visualization schemas (for debuffer)
 #  PROJECT_NAME  - name of the application being compiled (from the 'project(...)' command)
-
 
 # Windows and Android differ in terms of output.
 # Windows generates an executable, Android generates a library (that the AndroidManifest references)
@@ -33,9 +33,13 @@ else()
     message(FATAL_ERROR "(currently) Unsupported platform")
 endif()
 
+if(NOT DEFINED FRAMEWORK_LIB)
+    set(FRAMEWORK_LIB framework_vulkan)
+endif()
+
 #
 # Link the framework (to our application)
 #
-target_link_libraries( ${TARGET_NAME} framework )
+target_link_libraries( ${TARGET_NAME} ${FRAMEWORK_LIB} )
 
 include_directories(.)

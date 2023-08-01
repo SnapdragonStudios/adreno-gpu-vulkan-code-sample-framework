@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,7 +12,7 @@
 #include <vector>
 #include <memory>
 #include "system/glm_common.hpp"
-#include "tcb/span.hpp"
+#include <span>
 
 
 /// Skeleton node data container.  All the data needed to describe one nodes worth of data in a skeleton.
@@ -29,7 +29,7 @@ private:
 public:
     SkeletonNodeData(SkeletonNodeData&&) = default; // not ideal that this is public but emplace_back needs this
 
-    tcb::span<const SkeletonNodeData> Children() const  { return { m_Children, m_NumChildren }; }
+    std::span<const SkeletonNodeData> Children() const  { return { m_Children, m_NumChildren }; }
     const SkeletonNodeData* const Parent() const        { return const_cast<const SkeletonNodeData* const>(m_Parent); }
     auto NodeId() const                                 { return m_NodeId;}
     auto& LocalTransform() const                        { return m_LocalTransform; }

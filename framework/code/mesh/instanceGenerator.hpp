@@ -1,16 +1,16 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
 #include <vector>
-#include <tcb/span.hpp>
+#include <span>
 #include "system/glm_common.hpp"
-#include "mesh/meshObjectIntermediate.hpp"
+#include "mesh/meshIntermediate.hpp"
 
 
 /// Container for a single mesh and the positions of all its instances.

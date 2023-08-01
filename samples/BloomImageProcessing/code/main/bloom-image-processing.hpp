@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -22,30 +22,12 @@
 #endif // VK_ENABLE_BETA_EXTENSIONS
 #endif // OS_WINDOWS
 
-// framework
-#include "memory/vertexBufferObject.hpp"
-#include "system/glm_common.hpp"
-#include "camera/camera.hpp"
-#include "light/lightList.hpp"
-#include "animation/animation.hpp"
-#include "shadow/shadow.hpp"
-#include "shadow/shadowVsm.hpp"
-#include "system/Worker.h"
-#include "material/drawable.hpp"
-
-// vulkan
-#include "vulkan/MeshObject.h"
-#include "vulkan/vulkan_support.hpp"
-#include "vulkan/TextureFuncts.h"
-#include "vulkan/extensionHelpers.hpp"
-
-// std
-#include <algorithm>
-#include <map>
-#include <cassert>
-
-// application
 #include "main/applicationHelperBase.hpp"
+#include "memory/vulkan/uniform.hpp"
+#include "vulkan/commandBuffer.hpp"
+#include "vulkan/extensionHelpers.hpp"
+#include "vulkan/vulkan_support.hpp"
+#include <unordered_map>
 
 class BloomImageprocessing : public ApplicationHelperBase
 {
@@ -55,7 +37,7 @@ public:
 
     /// @brief Ticked every frame (by the Framework)
     /// @param fltDiffTime time (in seconds) since the last call to Render.
-    virtual bool Initialize(uintptr_t windowHandle) override;
+    virtual bool Initialize(uintptr_t windowHandle, uintptr_t hInstance) override;
     virtual void Destroy() override;
     virtual  void Render(float fltDiffTime) override;
     virtual void  PreInitializeSetVulkanConfiguration(Vulkan::AppConfiguration& config) override;
@@ -72,9 +54,9 @@ private:
         return ((a < b) ? a : b);
     }
 
-    static const VkFormat k_RtFormat = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
-    static const uint32_t k_FullImageWidth = 1920;
-    static const uint32_t k_FullImageHeight = 1080;
+    static const TextureFormat k_RtFormat = TextureFormat::B10G11R11_UFLOAT_PACK32;
+    static const uint32_t      k_FullImageWidth = 1920;
+    static const uint32_t      k_FullImageHeight = 1080;
 
     enum Passes
     {
@@ -194,9 +176,9 @@ private:
     CRenderTargetArray<1>             m_IntermediateRts[Pass_Count];
     Uniform                           m_uniforms[Pass_Count];
     ShaderInfo                        m_shaders[ShaderPair_Count];
-    VulkanTexInfo                     m_weightTextures[NumWeightImages];
+    std::unique_ptr<TextureT<Vulkan>> m_weightTextures[NumWeightImages];
     VkImageView                       m_weightTextureViews[NumWeightImages];
-    VulkanTexInfo                     m_sourceTexture;
+    const TextureT<Vulkan>*           m_sourceTexture = nullptr;
     PassInfo*                         m_passes[Pass_Count];
     Wrap_VkCommandBuffer              m_commandBuffers[NUM_VULKAN_BUFFERS];
 

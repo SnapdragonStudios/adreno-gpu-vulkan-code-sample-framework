@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -14,39 +14,28 @@
 #include "camera/cameraController.hpp"
 #include "camera/cameraControllerTouch.hpp"
 #include "gui/imguiVulkan.hpp"
+#include "mesh/meshHelper.hpp"
+#include "mesh/meshLoader.hpp"
 #include "material/drawable.hpp"
 #include "material/materialManager.hpp"
 #include "material/shader.hpp"
 #include "material/shaderDescription.hpp"
 #include "material/shaderManager.hpp"
 #include "system/math_common.hpp"
+#include "texture/textureManager.hpp"
 #include "imgui.h"
 #include <bitset>
 #include <filesystem>
 
 // Global Variables From Config File
-//VAR(glm::vec3,  gCameraStartPos,    glm::vec3(0.0f, 0.0f, 2.5f), kVariableNonpersistent);
-//VAR(glm::vec3,  gCameraStartRot,    glm::vec3(0.0f, 0.0f, 0.0f), kVariableNonpersistent);
-//VAR(glm::vec3, gCameraStartPos, glm::vec3(-33.7f, 7.6f, 34.7f), kVariableNonpersistent);
-//VAR(glm::vec3, gCameraStartRot, glm::vec3(-10.0f, 200.0f, 0.0f), kVariableNonpersistent);
-//VAR(glm::vec3, gCameraStartPos, glm::vec3(46.9f, 4.8f, 34.7f), kVariableNonpersistent);
-//VAR(glm::vec3, gCameraStartRot, glm::vec3(0.0f, -30.0f, 0.0f), kVariableNonpersistent);
 VAR(glm::vec3, gCameraStartPos, glm::vec3(26.48f, 20.0f, -5.21f), kVariableNonpersistent);
 VAR(glm::vec3, gCameraStartRot, glm::vec3(0.0f, 110.0f, 0.0f), kVariableNonpersistent);
-//glm::vec3 gCameraStartPos = glm::vec3(26.48f, 20.0f, -5.21f);
-//glm::vec3 gCameraStartRot = glm::vec3(0.0f, 110.0f, 0.0f);
 
-VAR(float,      gFOV,               PI_DIV_4, kVariableNonpersistent);
-VAR(float,      gNearPlane,         0.1f, kVariableNonpersistent);
-VAR(float,      gFarPlane,          80.0f, kVariableNonpersistent);
+VAR(float, gFOV, PI_DIV_4, kVariableNonpersistent);
+VAR(float, gNearPlane, 0.1f, kVariableNonpersistent);
+VAR(float, gFarPlane, 80.0f, kVariableNonpersistent);
 
-VAR(bool,       gRotatedFinalBlit,  true, kVariableNonpersistent);
-
-namespace
-{
-    const char* gMuseumAssetsPath = "Media\\Meshes";
-    const char* gTextureFolder = "Media\\Textures\\";
-}
+VAR(bool, gRotatedFinalBlit, true, kVariableNonpersistent);
 
 ///
 /// @brief Implementation of the Application entrypoint (called by the framework)
@@ -67,19 +56,19 @@ Application::~Application()
 }
 
 //-----------------------------------------------------------------------------
-int Application::PreInitializeSelectSurfaceFormat(tcb::span<const VkSurfaceFormatKHR> formats)
+int Application::PreInitializeSelectSurfaceFormat(std::span<const SurfaceFormat> formats)
 //-----------------------------------------------------------------------------
 {
     // On Snapdragon if the surfaceflinger has to do the rotation to the display native orientation then it will do it at 8bit colordepth.
     // To avoid this we need to enable the 'pre-rotation' of the display (and the use of VK_QCOM_render_pass_transform so we dont have to rotate our buffers/passes manually).
-    m_vulkan->m_UseRenderPassTransform = false;
-    m_vulkan->m_UsePreTransform = gRotatedFinalBlit;
+    GetVulkan()->m_UseRenderPassTransform = false;
+    GetVulkan()->m_UsePreTransform = gRotatedFinalBlit;
 
     // We want to select a SRGB output format (if one exists)
     int index = 0;
     for (const auto& format : formats)
     {
-        if (format.format == VK_FORMAT_B8G8R8A8_SRGB)
+        if (format.format == TextureFormat::B8G8R8A8_SRGB)
             return index;
         ++index;
     }
@@ -92,22 +81,25 @@ void Application::PreInitializeSetVulkanConfiguration( Vulkan::AppConfiguration&
 {
     ApplicationHelperBase::PreInitializeSetVulkanConfiguration( config );
     config.RequiredExtension( "VK_KHR_copy_commands2" );
-    config.RequiredExtension( "VK_QCOM_rotated_copy_commands" );
+    config.OptionalExtension( "VK_QCOM_rotated_copy_commands" );
 }
 
 //-----------------------------------------------------------------------------
-bool Application::Initialize( uintptr_t windowHandle )
+bool Application::Initialize( uintptr_t windowHandle, uintptr_t hInstance )
 //-----------------------------------------------------------------------------
 {
-    if( !ApplicationHelperBase::Initialize( windowHandle ) )
+    if( !ApplicationHelperBase::Initialize( windowHandle, hInstance ) )
     {
         return false;
     }
 
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
     // Get the pointer to the rotated blit function.
-    m_fpCmdBlitImage2KHR = (PFN_vkCmdBlitImage2KHR)vkGetInstanceProcAddr(pVulkan->GetVulkanInstance(), "vkCmdBlitImage2KHR");
+    if (GetVulkan()->HasLoadedVulkanDeviceExtension("VK_QCOM_rotated_copy_commands"))
+        m_fpCmdBlitImage2KHR = (PFN_vkCmdBlitImage2KHR)vkGetInstanceProcAddr(pVulkan->GetVulkanInstance(), "vkCmdBlitImage2KHR");
+    else
+        m_fpCmdBlitImage2KHR = nullptr;
     if (m_fpCmdBlitImage2KHR == nullptr)
     {
         LOGE("Unable to get function pointer from instance: vkCmdBlitImage2KHR");
@@ -122,11 +114,8 @@ bool Application::Initialize( uintptr_t windowHandle )
     CreateUniformBuffer( pVulkan, m_ObjectVertUniform );
     CreateUniformBuffer( pVulkan, m_ObjectFragUniform );
 
-    m_MaterialManager = std::make_unique<MaterialManager>();
-
-    //m_TexWhite = m_LoadedTextures.emplace( "textures/white_d.ktx", LoadKTXTexture( pVulkan, *m_AssetManager, "./Media/Textures/white_d.ktx", VK_SAMPLER_ADDRESS_MODE_REPEAT ) );
-    m_TexWhite = LoadKTXTexture(pVulkan, *m_AssetManager, "./Media/Textures/white_d.ktx", VK_SAMPLER_ADDRESS_MODE_REPEAT);
-    // m_LoadedTextures.emplace( "Skull_Diffuse.ktx", LoadKTXTexture( pVulkan, *m_AssetManager, "./Media/Textures/Skull_Diffuse.ktx", VK_SAMPLER_ADDRESS_MODE_REPEAT ) );
+    m_TexWhite = LoadKTXTexture(pVulkan, *m_AssetManager, "./Media/Textures/white_d.ktx", SamplerAddressMode::Repeat);
+    m_DefaultNormal = LoadKTXTexture(pVulkan, *m_AssetManager, "./Media/Textures/normal_default.ktx", SamplerAddressMode::Repeat);
 
     InitGui(windowHandle);
 
@@ -144,9 +133,8 @@ bool Application::Initialize( uintptr_t windowHandle )
 bool Application::LoadShaders()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
-    m_ShaderManager = std::make_unique<ShaderManager>(*m_vulkan);
     //m_ShaderManager->RegisterRenderPassNames( {sRenderPassNames} );
 
     LOGI("Loading Shaders...");
@@ -170,7 +158,7 @@ bool Application::LoadShaders()
 bool Application::InitFramebuffersRenderPassesAndDrawables()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
     //
     // Clean up old render targets and render passes
@@ -182,12 +170,12 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
     // Create two seperate passes - Scene and Tonemap
     //
 
-    const VkFormat ScenePassColorFormats[] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32 };
+    const TextureFormat ScenePassColorFormats[] = { TextureFormat::A2B10G10R10_UNORM_PACK32 };
     const TEXTURE_TYPE ScenePassTextureTypes[] = { TT_RENDER_TARGET };
     const VkSampleCountFlagBits ScenePassMsaa[] = { VK_SAMPLE_COUNT_1_BIT };
-    const VkFormat ScenePassDepthFormat = pVulkan->GetBestVulkanDepthFormat();
+    const TextureFormat ScenePassDepthFormat = pVulkan->GetBestSurfaceDepthFormat();
 
-    const VkFormat TonemapPassColorFormats[] = { VK_FORMAT_A2B10G10R10_UNORM_PACK32 };
+    const TextureFormat TonemapPassColorFormats[] = { TextureFormat::A2B10G10R10_UNORM_PACK32 };
     const VkSampleCountFlagBits TonemapPassMsaa[] = { VK_SAMPLE_COUNT_1_BIT };
     const TEXTURE_TYPE TonemapPassTextureTypes[] = { TT_RENDER_TARGET_TRANSFERSRC };
 
@@ -222,7 +210,7 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
     // Tonemap render pass
     VkRenderPass TonemapRenderPass = VK_NULL_HANDLE;
     if( !pVulkan->CreateRenderPass( TonemapPassColorFormats,
-                                    VK_FORMAT_UNDEFINED,
+                                    TextureFormat::UNDEFINED,
                                     VK_SAMPLE_COUNT_1_BIT,
                                     RenderPassInputUsage::DontCare/*color*/,
                                     RenderPassOutputUsage::StoreTransferSrc,/*color*/
@@ -235,22 +223,22 @@ bool Application::InitFramebuffersRenderPassesAndDrawables()
     pVulkan->SetDebugObjectName( TonemapRenderPass, "TonemapRenderPass" );
 
     // Create the render target for the Tonemap/composite
-    if( !m_TonemapRT.Initialize( pVulkan, gRenderWidth, gRenderHeight, TonemapPassColorFormats, VK_FORMAT_UNDEFINED, TonemapRenderPass/*takes ownership*/, (VkRenderPass) VK_NULL_HANDLE, TonemapPassMsaa, "Tonemap RT", TonemapPassTextureTypes ) )
+    if( !m_TonemapRT.Initialize( pVulkan, gRenderWidth, gRenderHeight, TonemapPassColorFormats, TextureFormat::UNDEFINED, TonemapRenderPass/*takes ownership*/, (VkRenderPass) VK_NULL_HANDLE, TonemapPassMsaa, "Tonemap RT", TonemapPassTextureTypes ) )
     {
         LOGE( "Error initializing LinearColorRT" );
         return false;
     }
 
     // Tonemap drawable
-    std::map<const std::string, const VulkanTexInfo*> tonemapTex = { {"Diffuse", &m_SceneRT[0].m_ColorAttachments.front() },
-                                                                     {"Overlay", &m_GuiRT[0].m_ColorAttachments.front() } };
+    std::map<const std::string, const Texture*> tonemapTex = { {"Diffuse", &m_SceneRT[0].m_ColorAttachments.front() },
+                                                               {"Overlay", &m_GuiRT[0].m_ColorAttachments.front() } };
     m_TonemapDrawable = InitFullscreenDrawable( "Tonemap", tonemapTex, {}, m_TonemapRT.m_RenderPass, 0, TonemapPassMsaa );
 
     return true;
 }
 
 //-----------------------------------------------------------------------------
-bool Application::LoadSceneDrawables( VkRenderPass renderPass, const tcb::span<const VkSampleCountFlagBits> renderPassMultisamples )
+bool Application::LoadSceneDrawables( VkRenderPass renderPass, const std::span<const VkSampleCountFlagBits> renderPassMultisamples )
 //-----------------------------------------------------------------------------
 {
     const char* pGLTFMeshFile = "./Media/Meshes/Museum.gltf";
@@ -258,7 +246,7 @@ bool Application::LoadSceneDrawables( VkRenderPass renderPass, const tcb::span<c
 
     LOGI( "Loading Scene Drawable %s", pGLTFMeshFile );
 
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
     const auto* pObjectShader = m_ShaderManager->GetShader( "Object" );
     if( !pObjectShader )
@@ -267,74 +255,41 @@ bool Application::LoadSceneDrawables( VkRenderPass renderPass, const tcb::span<c
         return false;
     }
 
+    m_TextureManager->SetDefaultFilenameManipulators(PathManipulator_PrefixDirectory{ "Media\\" }, PathManipulator_ChangeExtension{ ".ktx" });
+
     // Lambda to load a texture for the given material (slot)
-    const auto& textureLoader = [&](const MeshObjectIntermediate::MaterialDef& materialDef, const std::string& textureSlotName) -> const MaterialPass::tPerFrameTexInfo
+    const auto& textureLoader = [&]( const MeshObjectIntermediate::MaterialDef& materialDef, const std::string& textureSlotName ) -> const MaterialPass::tPerFrameTexInfo
     {
-        std::string textureName = materialDef.diffuseFilename;
-        if (textureName.empty())
+        auto* texture = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.diffuseFilename, m_SamplerEdgeClamp);
+        if (texture)
         {
-            return { &m_TexWhite };
+            return { texture };
         }
 
-        auto texturePath = std::filesystem::path(textureName);
-        if (!texturePath.has_filename())
-        {
-            return { &m_TexWhite };
-        }
-
-        auto textureFilename = texturePath.stem();
-
-        auto textureIt = m_LoadedTextures.find(textureFilename.string());
-        if (textureIt == m_LoadedTextures.end())
-        {
-            // Prepare the texture path
-            std::string textureInternalPath = gTextureFolder;
-            textureInternalPath.append(textureFilename.string());
-            textureInternalPath.append(".ktx");
-
-            auto loadedTexture = LoadKTXTexture(pVulkan, *m_AssetManager, textureInternalPath.c_str(), VK_SAMPLER_ADDRESS_MODE_REPEAT);
-            if (!loadedTexture.IsEmpty())
-            {
-                textureIt = m_LoadedTextures.insert({ textureFilename.string() , std::move(loadedTexture) }).first;
-            }
-            else
-            {
-                return { &m_TexWhite };
-            }
-        }
-
-        assert(!textureIt->second.IsEmpty());
-
-        return { &textureIt->second };
+        return { &m_TexWhite };
     };
 
     // Lambda to associate (uniform) buffers with their shader binding/slot names.
-    const auto& bufferLoader = [&](const std::string& bufferSlotName) -> MaterialPass::tPerFrameVkBuffer {
-        if (bufferSlotName == "Vert")
+    const auto& bufferLoader = [&]( const std::string& bufferSlotName ) -> tPerFrameVkBuffer {
+        if( bufferSlotName == "Vert" )
         {
             return { m_ObjectVertUniform.buf.GetVkBuffer() };
         }
-        else if (bufferSlotName == "Frag")
+        else if( bufferSlotName == "Frag" )
         {
             return { m_ObjectFragUniform.buf.GetVkBuffer() };
         }
         else
         {
-            assert(0);
+            assert( 0 );
             return {};
         }
     };
 
-    const auto& materialLoader = [&](const MeshObjectIntermediate::MaterialDef& materialDef) -> std::optional<Material>
+    const auto& materialLoader = [&]( const MeshObjectIntermediate::MaterialDef& materialDef ) -> std::optional<Material>
     {
         using namespace std::placeholders;
-        if (materialDef.diffuseFilename.find("ChineseVaseA") == -1)
-        {
-            // render ChineseVase only to make the scene simple
-            // return {};
-        }
-
-        return std::move(m_MaterialManager->CreateMaterial(*pVulkan, *pObjectShader, NUM_VULKAN_BUFFERS, std::bind(textureLoader, std::cref(materialDef), _1), bufferLoader));
+        return m_MaterialManager->CreateMaterial( *pVulkan, *pObjectShader, NUM_VULKAN_BUFFERS, std::bind( textureLoader, std::cref( materialDef ), _1 ), bufferLoader );
     };
 
 
@@ -354,10 +309,10 @@ bool Application::LoadSceneDrawables( VkRenderPass renderPass, const tcb::span<c
 
 
 //-----------------------------------------------------------------------------
-std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShaderName, const std::map<const std::string, const VulkanTexInfo*>& ColorAttachmentsLookup, const std::map<const std::string, const ImageInfo>& ImageAttachmentsLookup, VkRenderPass renderPass, uint32_t subpassIdx, const tcb::span<const VkSampleCountFlagBits> renderPassMultisamples )
+std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShaderName, const std::map<const std::string, const Texture*>& ColorAttachmentsLookup, const std::map<const std::string, const ImageInfo>& ImageAttachmentsLookup, VkRenderPass renderPass, uint32_t subpassIdx, const std::span<const VkSampleCountFlagBits> renderPassMultisamples )
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
     LOGI("Creating %s mesh...", pShaderName);
 
@@ -370,7 +325,7 @@ std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShad
     }
 
     MeshObject mesh;
-    if (!MeshObject::CreateMesh(pVulkan, MeshObjectIntermediate::CreateScreenSpaceMesh(), 0, pShader->m_shaderDescription->m_vertexFormats, &mesh))
+    if (!MeshHelper::CreateMesh(GetVulkan()->GetMemoryManager(), MeshObjectIntermediate::CreateScreenSpaceMesh(), 0, pShader->m_shaderDescription->m_vertexFormats, &mesh))
     {
         LOGE("Error creating Fullscreen Mesh (for %s)", pShaderName);
         return nullptr;
@@ -382,7 +337,7 @@ std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShad
             assert(0);
             return {};
         },
-        []( const std::string& bufferName ) -> const MaterialPass::tPerFrameVkBuffer {
+        []( const std::string& bufferName ) -> const tPerFrameVkBuffer {
             assert(0);
             return {};
         },
@@ -409,13 +364,13 @@ std::unique_ptr<Drawable> Application::InitFullscreenDrawable( const char* pShad
 bool Application::InitCommandBuffers()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
     char szName[256];
     for( uint32_t WhichBuffer = 0; WhichBuffer < NUM_VULKAN_BUFFERS; WhichBuffer++ )
     {
         sprintf( szName, "CommandBuffer (%d of %d)", WhichBuffer + 1, NUM_VULKAN_BUFFERS );
-        if( !m_CommandBuffer[WhichBuffer].Initialize( pVulkan, szName, VK_COMMAND_BUFFER_LEVEL_PRIMARY, false ) )
+        if( !m_CommandBuffer[WhichBuffer].Initialize( pVulkan, szName, VK_COMMAND_BUFFER_LEVEL_PRIMARY ) )
         {
             return false;
         }
@@ -451,7 +406,7 @@ void Application::Render(float fltDiffTime)
 
     UpdateCamera( fltDiffTime );
 
-    auto* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
     // See if we want to change swapchain/rotate mode
     if( gRotatedFinalBlit != m_RequestedRotatedFinalBlit)
@@ -489,7 +444,7 @@ bool Application::UpdateUniforms( uint32_t bufferIdx )
     ObjectVertUniform data{ };
     data.MVPMatrix = m_Camera.ProjectionMatrix() * m_Camera.ViewMatrix();
     data.ModelMatrix = glm::identity<glm::mat4>();
-    UpdateUniformBuffer( m_vulkan.get(), m_ObjectVertUniform, data );
+    UpdateUniformBuffer( GetVulkan(), m_ObjectVertUniform, data );
 
     return true;
 }
@@ -499,7 +454,7 @@ bool Application::UpdateUniforms( uint32_t bufferIdx )
 bool Application::UpdateCommandBuffer(uint32_t bufferIdx)
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
     auto& commandBuffer = m_CommandBuffer[bufferIdx];
 
@@ -508,7 +463,7 @@ bool Application::UpdateCommandBuffer(uint32_t bufferIdx)
         return false;
     }
 
-    VkImage swapchainImage = pVulkan->m_pSwapchainBuffers[bufferIdx].image;
+    VkImage swapchainImage = pVulkan->m_SwapchainBuffers[bufferIdx].image;
 
     {
         // Need to transition the swapchain before it can be blitted to (not needed if written by a render pass)
@@ -557,7 +512,7 @@ bool Application::UpdateCommandBuffer(uint32_t bufferIdx)
         {
             return false;
         }
-        m_Gui->Render(commandBuffer.m_VkCommandBuffer);
+        GetGui()->Render(commandBuffer.m_VkCommandBuffer);
 
         commandBuffer.EndRenderPass();
     }
@@ -626,7 +581,7 @@ void Application::AddRotatedSwapchainBlitToCmdBuffer(Wrap_VkCommandBuffer& comma
     blitImageRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     blitImageRegion.dstSubresource.layerCount = 1;
     blitImageRegion.dstOffsets[0] = { 0,0,0 };
-    blitImageRegion.dstOffsets[1] = { (int)m_vulkan->m_SurfaceWidth, (int)m_vulkan->m_SurfaceHeight, 1 };
+    blitImageRegion.dstOffsets[1] = { (int)GetVulkan()->m_SurfaceWidth, (int)GetVulkan()->m_SurfaceHeight, 1 };
 
     VkBlitImageInfo2KHR blitImageInfo{ VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2_KHR };
     blitImageInfo.srcImage = srcRT.m_ColorAttachments.back().GetVkImage();
@@ -641,7 +596,7 @@ void Application::AddRotatedSwapchainBlitToCmdBuffer(Wrap_VkCommandBuffer& comma
     // structure on to the end of the VkImageBlit2KHR region to indicate we want to rotate the blit.
     VkCopyCommandTransformInfoQCOM blitRotate{ VK_STRUCTURE_TYPE_COPY_COMMAND_TRANSFORM_INFO_QCOM };
 
-    blitRotate.transform = m_vulkan->GetPreTransform();
+    blitRotate.transform = GetVulkan()->GetPreTransform();
     if (blitRotate.transform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
     {
         blitImageRegion.pNext = &blitRotate;
@@ -653,7 +608,8 @@ void Application::AddRotatedSwapchainBlitToCmdBuffer(Wrap_VkCommandBuffer& comma
     }
 
     // Add the BlitImage2 command to the command buffer.
-    m_fpCmdBlitImage2KHR(commandBuffer.m_VkCommandBuffer, &blitImageInfo);
+    if (m_fpCmdBlitImage2KHR)
+        m_fpCmdBlitImage2KHR(commandBuffer.m_VkCommandBuffer, &blitImageInfo);
 }
 
 
@@ -669,7 +625,7 @@ void Application::AddSwapchainBlitToCmdBuffer(Wrap_VkCommandBuffer& commandBuffe
     blitImageRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     blitImageRegion.dstSubresource.layerCount = 1;
     blitImageRegion.dstOffsets[0] = { 0,0,0 };
-    blitImageRegion.dstOffsets[1] = { (int)m_vulkan->m_SurfaceWidth, (int)m_vulkan->m_SurfaceHeight, 1 };
+    blitImageRegion.dstOffsets[1] = { (int)GetVulkan()->m_SurfaceWidth, (int)GetVulkan()->m_SurfaceHeight, 1 };
     vkCmdBlitImage(commandBuffer.m_VkCommandBuffer, srcRT.m_ColorAttachments.back().GetVkImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blitImageRegion, VK_FILTER_NEAREST);
 }
 
@@ -680,10 +636,10 @@ void Application::ChangeSwapchainMode()
 {
     gRotatedFinalBlit = m_RequestedRotatedFinalBlit;
 
-    m_vulkan->m_UseRenderPassTransform = false;
-    m_vulkan->m_UsePreTransform = gRotatedFinalBlit;
+    GetVulkan()->m_UseRenderPassTransform = false;
+    GetVulkan()->m_UsePreTransform = gRotatedFinalBlit;
 
-    m_vulkan->RecreateSwapChain();
+    GetVulkan()->RecreateSwapChain();
 
     InitFramebuffersRenderPassesAndDrawables();
 }
@@ -693,17 +649,17 @@ void Application::ChangeSwapchainMode()
 bool Application::InitGui(uintptr_t windowHandle)
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
-    const VkFormat GuiColorFormat[]{ VK_FORMAT_R8G8B8A8_UNORM };
+    const TextureFormat GuiColorFormat[]{ TextureFormat::R8G8B8A8_UNORM };
     const TEXTURE_TYPE GuiTextureTypes[]{ TT_RENDER_TARGET };
 
-    if( !m_GuiRT.Initialize( pVulkan, gRenderWidth, gRenderHeight, GuiColorFormat, VK_FORMAT_UNDEFINED, VK_SAMPLE_COUNT_1_BIT, "Gui RT", GuiTextureTypes ) )
+    if( !m_GuiRT.Initialize( pVulkan, gRenderWidth, gRenderHeight, GuiColorFormat, TextureFormat::UNDEFINED, VK_SAMPLE_COUNT_1_BIT, "Gui RT", GuiTextureTypes ) )
     {
         return false;
     }
 
-    m_Gui = std::make_unique<GuiImguiVulkan>(*pVulkan, m_GuiRT.m_RenderPass);
+    m_Gui = std::make_unique<GuiImguiGfx<Vulkan>>(*pVulkan, m_GuiRT.m_RenderPass);
     if (!m_Gui->Initialize(windowHandle, m_GuiRT[0].m_Width, m_GuiRT[0].m_Height))
     {
         return false;
@@ -751,17 +707,15 @@ void Application::UpdateGui()
 void Application::Destroy()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = m_vulkan.get();
+    auto* const pVulkan = GetVulkan();
 
-    vkQueueWaitIdle(m_vulkan->m_VulkanQueue);
+    pVulkan->WaitUntilIdle();
 
     m_SceneObject.clear();
     m_TonemapDrawable.reset();
 
-    for (auto& texture : m_LoadedTextures)
-    {
-        ReleaseTexture(pVulkan, &texture.second);
-    }
+    ReleaseTexture(*pVulkan, &m_TexWhite);
+    ReleaseTexture(*pVulkan, &m_DefaultNormal);
 
     ReleaseUniformBuffer( pVulkan, &m_ObjectVertUniform );
     ReleaseUniformBuffer( pVulkan, &m_ObjectFragUniform );

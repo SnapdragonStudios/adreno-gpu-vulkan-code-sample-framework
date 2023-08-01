@@ -1,0 +1,107 @@
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
+
+//
+//
+
+#version 460
+
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
+#extension GL_EXT_shader_8bit_storage : enable
+
+// Uniform buffer locations
+// Texture Locations
+// Storage Locations
+#define UNCULLED_INDIRECT_STORAGE_LOCATION  0
+#define CULLED_INSTANCES_STORAGE_LOCATION   1
+#define CULLED_INDIRECT_STORAGE_LOC         2
+
+// Compute workgroup layout
+#define WORKGROUP_SIZE (64)
+layout (local_size_x = WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1 ) in;
+
+struct VkDrawIndexedIndirectCommand
+{
+    uint    indexCount;
+    uint    instanceCount;
+    uint    firstIndex;
+    uint    vertexOffset;
+    uint    firstInstance;
+};
+
+// Inputs layout
+layout(std430, set = 0, binding = UNCULLED_INDIRECT_STORAGE_LOCATION) readonly buffer UnculledIndirectInput
+{
+    uint                            numIndirect;        // number of indirect structs
+    uint                            _pad1,_pad2,_pad3;
+    uint                            _pad4[12];          // pad to align the indirect commands to 64 byte boundary!
+    VkDrawIndexedIndirectCommand    indirectCommands[]; // Draw indirect commands for unculled meshes, must be last item in buffer
+} UnculledIndirectInputSB;
+
+layout(std430, set = 0, binding = CULLED_INSTANCES_STORAGE_LOCATION) readonly buffer CulledInstancesInput
+{
+    uint       numVisibleInstances;     // number of instances in visibleInstances[]
+    uint       _pad1,_pad2,_pad3;
+    int        visibleInstances[];      // -1 (not visible) or position within range [0...numVisibleInstances-1] (ie which visible instance this is)
+} CulledInstancesInputSB;
+
+// Outputs - maps to buffers input into vkCmdDrawIndexedIndirectCount - draw count buffer is at offset 0, draw parameter buffer at offset 16 (offsetof(visible))
+layout(std430, set = 0, binding = CULLED_INDIRECT_STORAGE_LOC) buffer CulledIndirectOutput
+{
+    uint                            numIndirect;        // atomic count of number of visible meshlets
+    uint                            _pad1,_pad2,_pad3;
+    uint                            _pad4[12];          // pad to align the indirect commands to 64 byte boundary!
+    VkDrawIndexedIndirectCommand    indirectCommands[]; // Draw indirect commands for visible meshes, must be last item in buffer
+} CulledIndirectOutputSB;
+
+
+
+//-----------------------------------------------------------------------------
+void main() 
+//-----------------------------------------------------------------------------
+{
+    uint indirectIdx = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * WORKGROUP_SIZE;
+
+    if (indirectIdx < UnculledIndirectInputSB.numIndirect)
+    {
+        VkDrawIndexedIndirectCommand IndirectCommand = UnculledIndirectInputSB.indirectCommands[indirectIdx];
+
+        uint lastInstance = IndirectCommand.firstInstance + IndirectCommand.instanceCount;
+        IndirectCommand.instanceCount = 0;
+        for(uint i = IndirectCommand.firstInstance; i < lastInstance; ++i)
+        {
+            if (CulledInstancesInputSB.visibleInstances[i] != -1)
+            {
+                ++IndirectCommand.instanceCount;
+            }
+            else if (IndirectCommand.instanceCount != 0)
+            {
+                // Write a new indirect command for the last portion of the indirect draw.
+                // Potentially we have 'swiss cheesing' of our instances, causing more culled indirect draws than the unculled input (but fewer instances).
+                uint visibleIndirectCount = atomicAdd( CulledIndirectOutputSB.numIndirect, 1 );
+                CulledIndirectOutputSB.indirectCommands[visibleIndirectCount] = IndirectCommand;
+                IndirectCommand.instanceCount = 0;
+                IndirectCommand.firstInstance = i + 1;
+            }
+            else
+            {
+                // Command is currently empty so keep bumping the start instance.
+                IndirectCommand.firstInstance = i + 1;
+            }
+        }
+        if (IndirectCommand.instanceCount != 0)
+        {
+            // Write a new indirect command for remaining indirect draw.
+            uint visibleIndirectCount = atomicAdd( CulledIndirectOutputSB.numIndirect, 1 );
+            CulledIndirectOutputSB.indirectCommands[visibleIndirectCount] = IndirectCommand;
+        }
+    }
+}

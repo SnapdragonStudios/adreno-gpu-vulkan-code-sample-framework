@@ -1,5 +1,5 @@
 {
-	"$schema": "shaderSchema.json",
+	"$schema": "../../../framework/schema/shaderSchema.json",
 	"Passes": [
 		{
 			"Name": "Fullscreen",
@@ -15,6 +15,12 @@
 							"Stages": [ "Fragment" ],
 							"Count": 1,
 							"Names": [ "Diffuse" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "Overlay" ]
 						}
 					]
 				}

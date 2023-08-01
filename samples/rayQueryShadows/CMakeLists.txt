@@ -1,0 +1,57 @@
+cmake_minimum_required (VERSION 3.21)
+
+project (rayQueryShadows C CXX)
+set(CMAKE_CXX_STANDARD 20)
+
+#
+# Source files included in this application.
+#
+
+set(CPP_SRC code/main/rayqueryshadows.cpp
+            code/main/rayqueryshadows.hpp
+            code/main/materials.hpp
+)
+
+
+
+#
+# Setup the module path to include the 'project directory' (project/windows or project/android)
+#
+if(NOT DEFINED PROJECT_ROOT_DIR)
+    set(PROJECT_ROOT_DIR ${CMAKE_SOURCE_DIR})   # Windows can use CMAKE_SOURCE_DIR, Android needs build.gradle needs "-DPROJECT_ROOT_DIR=${project.rootDir}" in call to cmake set since there is not a 'top' cmakefile (gradle is top level)
+endif()
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_ROOT_DIR}/cmake)
+
+#
+# Add in the contents of 'shaders' directory
+#
+include(AddShadersDir)
+
+#
+# Do all the build steps for a Framework application.
+# needs Framework_dir and project_name variables.
+#
+include(FrameworkApplicationHelper)
+
+#
+# Copy required models to local folders
+#
+include(ModelPackager)
+
+# ThaiCarving GLTF
+add_gltf(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/ThaiCarving/ThaiCarving)
+
+# Add supporting GLTF
+add_gltf(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/General/Floor_Separate)
+add_gltf(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/General/Skybox_Separate)
+add_gltf(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/General/UVSphere_Separate)
+
+#
+# Convert and copy textures to local folders
+#
+include(TexturePackager)
+
+# Textures
+add_textures_from_path(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/ThaiCarving/Textures_png)
+add_textures_from_path(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/General)
+add_textures_from_path(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures)

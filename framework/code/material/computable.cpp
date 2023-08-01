@@ -1,17 +1,19 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "computable.hpp"
 #include "shader.hpp"
-#include "shaderModule.hpp"
+#include "vulkan/shaderModule.hpp"
 #include "shaderDescription.hpp"
+#include "vulkan/material.hpp"
 #include "vulkan/vulkan.hpp"
 #include "vulkan/TextureFuncts.h"
+#include "texture/vulkan/texture.hpp"
 #include "system/os_common.h"
 #include <cassert>
 #include <utility>
@@ -21,8 +23,8 @@ ComputablePass::ComputablePass(ComputablePass&& other) noexcept
     : mMaterialPass(std::move(other.mMaterialPass))
     , mImageMemoryBarriers(std::move(other.mImageMemoryBarriers))
     , mBufferMemoryBarriers(std::move(other.mBufferMemoryBarriers))
-    , mNeedsExecutionBarrier(other.mNeedsExecutionBarrier)
     , mDispatchGroupCount(other.mDispatchGroupCount)
+    , mNeedsExecutionBarrier( other.mNeedsExecutionBarrier )
 {
     mPipeline = other.mPipeline;
     other.mPipeline = VK_NULL_HANDLE;
@@ -36,14 +38,14 @@ ComputablePass::~ComputablePass()
 }
 
 Computable::Computable(Vulkan& vulkan, Material&& material)
-    : mVulkan(vulkan)
-    , mMaterial(std::move(material))
+    : mMaterial(std::move(material))
+    , mVulkan(vulkan)
 {
 }
 
 Computable::Computable(Computable&& other) noexcept
-    : mVulkan(other.mVulkan)
-    , mMaterial(std::move(other.mMaterial))
+    : mMaterial(std::move(other.mMaterial))
+    , mVulkan(other.mVulkan)
     , mPasses(std::move(other.mPasses))
     , mImageInputMemoryBarriers(std::move(other.mImageInputMemoryBarriers))
     , mImageOutputMemoryBarriers(std::move(other.mImageOutputMemoryBarriers))
@@ -84,6 +86,19 @@ enum class BindingAccess {
     WriteOnly,
     ReadWrite
 };
+static VkAccessFlags BindingAccessToBufferAccessMask(BindingAccess access)
+{
+    switch (access) {
+    case BindingAccess::ReadOnly:
+        return VK_ACCESS_SHADER_READ_BIT;
+    case BindingAccess::WriteOnly:
+        return VK_ACCESS_SHADER_WRITE_BIT;
+    case BindingAccess::ReadWrite:
+    default:
+        return VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    }
+}
+
 /// @brief Structure holding the 'use' information for one binding
 /// @tparam VK_TYPE Vulkan buffer type for this list of bindings (eg VkImage, VkBuffer)
 template<typename VK_BUFFERTYPE>
@@ -111,9 +126,10 @@ bool Computable::Init()
         VkImage image;
         uint32_t numMips;
         uint32_t firstMip;
-        ImageUsage( VkImage _image, uint32_t _numMips, uint32_t _firstMip ) : image( _image ), numMips( _numMips ), firstMip( _firstMip ) {};
-        ImageUsage( const ImageInfo& other ) : image( other.image ), numMips( other.imageViewNumMips ), firstMip( other.imageViewFirstMip ) {}
-        bool operator==( const ImageUsage& other ) const {
+        VkImageLayout imageLayout;
+        ImageUsage( VkImage _image, uint32_t _numMips, uint32_t _firstMip, VkImageLayout _imageLayout ) noexcept : image( _image ), numMips( _numMips ), firstMip( _firstMip ), imageLayout(_imageLayout) {};
+        ImageUsage( const ImageInfo& other ) noexcept : image( other.image ), numMips( other.imageViewNumMips ), firstMip( other.imageViewFirstMip ), imageLayout( other.imageLayout) {}
+        bool operator==( const ImageUsage& other ) const noexcept {
             return image == other.image && ((firstMip < other.firstMip + other.numMips) && (firstMip + numMips > other.firstMip));
         }
     };
@@ -122,9 +138,9 @@ bool Computable::Init()
     prevImageUsages.reserve(64);
     prevBufferUsages.reserve(64);
 
-    // Lambda helper!  Calls emitFn when the buffer passed to 'currentUsage' was last written to by a previous pass (ie it is in prevPassUsages and was not read from in a pass between current use and the previous write).
+    // Lambda helper!  Calls emitFn when the buffer passed to 'currentUsage' was last accessed in a differnet way by a previous pass (ie it is in prevPassUsages as a write and was not read from in a pass between current use and the previous write, also applies for read in a previous pass and now a write).
     // Returns true if we need an execution barrier emitting.
-    // We want to buffer/image barrier on Write then Read patterns, and executiuon barrier on Read then Write patterns.
+    // We want to buffer/image barrier on Write then Read patterns, and on Read then write patterns (we need to do the layout transition).
     const auto& emitBarrier = [](const auto& currentUsage, const auto& prevPassUsages, const auto& emitFn) -> bool {
 
         // scan backwards looking for prior uses of this buffer/image...
@@ -147,7 +163,8 @@ bool Computable::Init()
                     else
                     {
                         // Read followed by Write or ReadWrite.
-                        // just need an execution barrier in this pass
+                        // We used to only emit an execution barrier but we now emit a barrier to do the layout transition
+                        emitFn(priorUsage, currentUsage);
                         return true;
                     }
                 }
@@ -155,7 +172,7 @@ bool Computable::Init()
                 {
                     // Write followed by something (read, write, readwrite).
                     // emit barrier.
-                    emitFn(currentUsage.buffer);
+                    emitFn(priorUsage, currentUsage);
                     return true;
                 }
             }
@@ -168,7 +185,7 @@ bool Computable::Init()
     {
         const auto& materialPass = materialPasses[materialPassIdx];
         const auto& shaderPass = materialPass.mShaderPass;
-        assert(std::holds_alternative<ComputeShaderModule>(shaderPass.m_shaders.m_modules));
+        assert(std::holds_alternative<ComputeShaderModule<Vulkan>>(shaderPass.m_shaders.m_modules));
 
         // Usually pipeline layout will be stored with the shader but if the descriptor set layout is 'dynamic' (and stored in the materialPass) the pipeline layout will also be in the materialPass.
         VkPipelineLayout pipelineLayout = shaderPass.GetPipelineLayout().GetVkPipelineLayout();
@@ -176,12 +193,13 @@ bool Computable::Init()
             pipelineLayout = materialPass.GetPipelineLayout().GetVkPipelineLayout();
 
         VkPipeline pipeline;
-        const ShaderModule& shaderModule = shaderPass.m_shaders.Get<ComputeShaderModule>();
+        const ShaderModuleT<Vulkan>& shaderModule = shaderPass.m_shaders.Get<ComputeShaderModule<Vulkan>>();
         LOGI("CreateComputePipeline: %s\n", shaderPass.m_shaderPassDescription.m_computeName.c_str());
 
         if (!mVulkan.CreateComputePipeline(VK_NULL_HANDLE,
             pipelineLayout,
             shaderModule.GetVkShaderModule(),
+            materialPass.GetSpecializationConstants().GetVkSpecializationInfo(),
             &pipeline))
         {
             // Error
@@ -202,20 +220,21 @@ bool Computable::Init()
             {
                 const auto passUsage = BindingUseData( materialPassIdx, passImageBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, ImageUsage(passImageBinding) );
 
-                passNeedsExecutionBarrier |= emitBarrier(passUsage, prevImageUsages, [&imageMemoryBarriers](const ImageUsage& imageUsage) {
+                passNeedsExecutionBarrier |= emitBarrier(passUsage, prevImageUsages, [&imageMemoryBarriers](auto& prevUsage, auto& currentUsage) {
+                    const auto& image = currentUsage.buffer;
                     imageMemoryBarriers.push_back(VkImageMemoryBarrier{
                         VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                         nullptr,
                         VK_ACCESS_SHADER_WRITE_BIT, //srcAccessMask
                         VK_ACCESS_SHADER_READ_BIT,  //dstAccessMask
-                        VK_IMAGE_LAYOUT_GENERAL,    //oldLayout;
-                        VK_IMAGE_LAYOUT_GENERAL,    //newLayout;
+                        prevUsage.buffer.imageLayout,//oldLayout;
+                        currentUsage.buffer.imageLayout,//newLayout;
                         VK_QUEUE_FAMILY_IGNORED,    //srcQueueFamilyIndex;
                         VK_QUEUE_FAMILY_IGNORED,    //dstQueueFamilyIndex;
-                        imageUsage.image,           //image;
+                        image.image,                //image;
                         { VK_IMAGE_ASPECT_COLOR_BIT,//aspect;
-                            imageUsage.firstMip,    //baseMipLevel;
-                            imageUsage.numMips,     //mipLevelCount;
+                            image.firstMip,         //baseMipLevel;
+                            image.numMips,          //mipLevelCount;
                             0,                      //baseLayer;
                             1,                      //layerCount;
                         }//subresourceRange;
@@ -232,20 +251,21 @@ bool Computable::Init()
                 const auto passUsage = BindingUseData(materialPassIdx, BindingAccess::ReadOnly/*always readonly*/, ImageUsage(*passTextureBinding));
 
                 passNeedsExecutionBarrier |= emitBarrier(passUsage, prevImageUsages,
-                    [&imageMemoryBarriers](const ImageUsage& imageUsage) {
+                    [&imageMemoryBarriers](auto& prevUsage, auto& currentUsage) {
+                        const auto& image = currentUsage.buffer;
                         imageMemoryBarriers.push_back(VkImageMemoryBarrier{
                             VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                             nullptr,
                             VK_ACCESS_SHADER_WRITE_BIT, //srcAccessMask
                             VK_ACCESS_SHADER_READ_BIT,  //dstAccessMask
-                            VK_IMAGE_LAYOUT_GENERAL,    //oldLayout;
-                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,    //newLayout;
+                            prevUsage.buffer.imageLayout,    //oldLayout;
+                            currentUsage.buffer.imageLayout, //newLayout;
                             VK_QUEUE_FAMILY_IGNORED,    //srcQueueFamilyIndex;
                             VK_QUEUE_FAMILY_IGNORED,    //dstQueueFamilyIndex;
-                            imageUsage.image,           //image;
+                            image.image,                //image;
                             { VK_IMAGE_ASPECT_COLOR_BIT,//aspect;
-                                imageUsage.firstMip,    //baseMipLevel;
-                                imageUsage.numMips,     //mipLevelCount;
+                                image.firstMip,         //baseMipLevel;
+                                image.numMips,          //mipLevelCount;
                                 0,                      //baseLayer;
                                 1,                      //layerCount;
                             }//subresourceRange;
@@ -259,19 +279,20 @@ bool Computable::Init()
         {
             for (const auto& passBufferBinding : passBufferBindings.first) // buffer binding can be an array of bindings
             {
-                const auto passUsage = BindingUseData(materialPassIdx, passBufferBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passBufferBinding);
+                const auto passUsage = BindingUseData(materialPassIdx, passBufferBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passBufferBinding.buffer);
 
                 passNeedsExecutionBarrier |= emitBarrier(passUsage, prevBufferUsages,
-                    [&](VkBuffer buffer) {
+                    [&](auto& prevUsage, auto& currentUsage) {
+                        VkBuffer bufferUsage = currentUsage.buffer;
                         //LOGI("Pass %d: Buffer Barrier: %s", materialPassIdx, materialPass.mShaderPass.m_shaderPassDescription.m_sets[0].m_descriptorTypes[tmp].names[0].c_str());
                         bufferMemoryBarriers.push_back(VkBufferMemoryBarrier{
                             VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
                             nullptr,
-                            VK_ACCESS_SHADER_WRITE_BIT, //srcAccessMask
-                            VK_ACCESS_SHADER_READ_BIT,  //dstAccessMask
+                            BindingAccessToBufferAccessMask(prevUsage.access),    //srcAccessMask
+                            BindingAccessToBufferAccessMask(currentUsage.access), //dstAccessMask
                             VK_QUEUE_FAMILY_IGNORED,    //srcQueueFamilyIndex;
                             VK_QUEUE_FAMILY_IGNORED,    //dstQueueFamilyIndex;
-                            buffer,                     //buffer;
+                            bufferUsage,                //buffer;
                             0,                          //offset
                             VK_WHOLE_SIZE               //size
                         });
@@ -290,23 +311,24 @@ bool Computable::Init()
             BindingAccess access = imageBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite;
             for (const auto& imageBinding : imageBindings.first)
             {
-                prevImageUsages.push_back( { materialPassIdx, access, ImageUsage{imageBinding.image, imageBinding.imageViewNumMips, imageBinding.imageViewFirstMip} } );
+                prevImageUsages.push_back( { materialPassIdx, access, ImageUsage{imageBinding.image, imageBinding.imageViewNumMips, imageBinding.imageViewFirstMip, imageBinding.imageLayout} } );
             }
         }
         for (const auto& textureBinding : materialPass.GetTextureBindings())
         {
-            for (const auto& texInfo : textureBinding.first)
+            for (const auto& texture : textureBinding.first)
             {
-                prevImageUsages.push_back( { materialPassIdx, BindingAccess::ReadOnly, {texInfo->GetVkImage(), texInfo->MipLevels, texInfo->FirstMip} } );
+                const auto& textureVulkan = apiCast<Vulkan>(texture);
+                prevImageUsages.push_back( { materialPassIdx, BindingAccess::ReadOnly, {textureVulkan->GetVkImage(), textureVulkan->MipLevels, textureVulkan->FirstMip, textureVulkan->GetVkImageLayout()} } );
             }
         }
         for (const auto& bufferBinding : materialPass.GetBufferBindings())
         {
             LOGI("Buffer Binding: %s", materialPass.mShaderPass.m_shaderPassDescription.m_sets[0].m_descriptorTypes[bufferBinding.second.index].names[0].c_str());
 
-            for (const VkBuffer& buffer : bufferBinding.first)
+            for (const auto& buffer : bufferBinding.first)
             {
-                prevBufferUsages.push_back({ materialPassIdx, bufferBinding.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, buffer });
+                prevBufferUsages.push_back({ materialPassIdx, bufferBinding.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, buffer.buffer });
             }
         }
     }
@@ -352,7 +374,7 @@ bool Computable::Init()
     };
 
     emitOutputBarrier(prevBufferUsages,
-        [this](VkBuffer buffer) -> void {
+        [this](const VkBuffer& buffer) -> void {
             mBufferOutputMemoryBarriers.push_back(VkBufferMemoryBarrier{
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
                 nullptr,
@@ -392,6 +414,13 @@ bool Computable::Init()
         mMaterial.UpdateDescriptorSets(whichBuffer);
     }
     return true;
+}
+
+const std::string& Computable::GetPassName( uint32_t passIdx ) const
+{
+    const auto& passNames = mMaterial.m_shader.GetShaderPassIndicesToNames();
+    assert( passIdx <= passNames.size() );
+    return passNames[passIdx];
 }
 
 void Computable::SetDispatchGroupCount(uint32_t passIdx, const std::array<uint32_t, 3>& groupCount)

@@ -7,7 +7,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.quic.SubPass"
+        applicationId "com.quic.subpass"
         minSdkVersion 26
         targetSdkVersion 30
         versionCode 1

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,11 +12,10 @@
 #include <array>
 #include <vector>
 #include <string>
-#include "vulkan/vulkan.h"
 #include "material/material.hpp"
 
 // Forward Declarations
-class Shader;
+template<typename T_GFXAPI> class ShaderT;
 class Vulkan;
 
 
@@ -79,6 +78,8 @@ public:
     const auto& GetImageInputMemoryBarriers() const { return mImageInputMemoryBarriers; }
     const auto& GetImageOutputMemoryBarriers() const { return mImageOutputMemoryBarriers; }
     const auto& GetBufferOutputMemoryBarriers() const { return mBufferOutputMemoryBarriers; }
+
+    const std::string& GetPassName( uint32_t passIdx ) const;
 
     /// number of workgroup dispatches to execute (value after the local workgroup sizes are accounted for)
     void SetDispatchGroupCount(uint32_t passIdx, const std::array<uint32_t, 3>& groupCount);

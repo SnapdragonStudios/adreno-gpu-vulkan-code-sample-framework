@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -73,19 +73,8 @@ void Shadow::Update(const glm::mat4& eyeViewMatrix)
     m_ShadowViewProj = m_ShadowProj * m_ShadowView;
 }
 
-bool Shadow::Initialize(Vulkan& vulkan, uint32_t shadowMapWidth, uint32_t shadowMapHeight, bool addColorTarget)
+bool Shadow::Initialize(uint32_t shadowMapWidth, uint32_t shadowMapHeight, bool addColorTarget)
 {
-    m_Viewport.width = (float) shadowMapWidth;
-    m_Viewport.height = (float) shadowMapHeight;
-    m_Viewport.minDepth = 0.0f;
-    m_Viewport.maxDepth = 1.0f;
-    m_Viewport.x = 0.0f;
-    m_Viewport.y = 0.0f;
-    m_Scissor.offset.x = 0;
-    m_Scissor.offset.y = 0;
-    m_Scissor.extent.width = shadowMapWidth;
-    m_Scissor.extent.height = shadowMapHeight;
-
     // This is matrix transform every coordinate x,y,z
     // x = x* 0.5 + 0.5 
     // y = y* 0.5 + 0.5 
@@ -96,14 +85,5 @@ bool Shadow::Initialize(Vulkan& vulkan, uint32_t shadowMapWidth, uint32_t shadow
                                   glm::vec4(0.0f, 0.0f, 0.5f, 0.0f),
                                   glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));
     m_shadowCameraAspect = (float)shadowMapWidth / (float)shadowMapHeight;
-    const VkFormat colorFormat[]{ VK_FORMAT_R8G8B8A8_UNORM };
-    const tcb::span<const VkFormat> emptyColorFormat {};
-    VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
-
-    if (!m_ShadowMapRT.Initialize(&vulkan, shadowMapWidth, shadowMapHeight, addColorTarget ? colorFormat : emptyColorFormat, depthFormat, VK_SAMPLE_COUNT_1_BIT, "Shadow RT"))
-    {
-        LOGE("Unable to create shadow render target");
-        return false;
-    }
     return true;
 }

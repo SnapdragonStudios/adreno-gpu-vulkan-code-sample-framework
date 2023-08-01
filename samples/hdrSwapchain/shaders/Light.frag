@@ -1,10 +1,10 @@
-//============================================================================================
+//============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
-//============================================================================================
+//============================================================================================================
 
 // Blit.frag
 
@@ -31,8 +31,8 @@ layout(set = 0, binding = SHADER_SHADOW_TEXTURE_LOC) uniform sampler2D u_ShadowM
 layout (location = 0) in vec2   v_TexCoord;
 
 // We run all the lights in the same shader, ideally we would render each light individually (using their screen space bounding area) and add each lights contribution seperately - can go to 100s of lights that way.
-#define NUM_POINT_LIGHTS 2
-#define NUM_SPOT_LIGHTS 3
+#define NUM_POINT_LIGHTS 4
+#define NUM_SPOT_LIGHTS 4
 
 // Uniforms
 layout(std140, set = 0, binding = SHADER_FRAG_UBO_LOCATION) uniform FragConstantsBuff

@@ -1,5 +1,4 @@
-include ':empty', ':hello-gltf', ':hdrSwapchain', ':SubPass', ':shaderResolveTonemap', ':rotatedCopy', ':BloomImageProcessing'
-
+include ':empty', ':hello-gltf', ':hdrSwapchain', ':SubPass', ':shaderResolveTonemap', ':rotatedCopy', ':BloomImageProcessing', ':rayQueryShadows',':rayReflections'
 
 project(':empty').projectDir = new File('../../samples/empty')
 project(':hello-gltf').projectDir = new File('../../samples/hello-gltf')
@@ -8,3 +7,5 @@ project(':SubPass').projectDir = new File('../../samples/SubPass')
 project(':shaderResolveTonemap').projectDir = new File('../../samples/shaderResolveTonemap')
 project(':rotatedCopy').projectDir = new File('../../samples/rotatedCopy')
 project(':BloomImageProcessing').projectDir = new File('../../samples/BloomImageProcessing')
+project(':rayQueryShadows').projectDir = new File('../../samples/rayQueryShadows')
+project(':rayReflections').projectDir = new File('../../samples/rayReflections')

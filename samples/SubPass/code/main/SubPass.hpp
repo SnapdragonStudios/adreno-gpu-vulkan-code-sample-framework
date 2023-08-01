@@ -1,10 +1,10 @@
-//==================================================================================================
+//============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
-//===================================================================================================
+//============================================================================================================
 #pragma once
 
 ///
@@ -15,8 +15,8 @@
 /// 
 
 #include "main/applicationHelperBase.hpp"
-#include <map>
-#include <string>
+#include "memory/vulkan/uniform.hpp"
+#include "vulkan/commandBuffer.hpp"
 
 // Forward declarations
 class Drawable;
@@ -36,18 +36,18 @@ public:
     //
 
     /// Override surface format selection.
-    int PreInitializeSelectSurfaceFormat(tcb::span<const VkSurfaceFormatKHR> formats) override;
+    int PreInitializeSelectSurfaceFormat(std::span<const SurfaceFormat>) override;
 
     /// Override Application entry point!
-    bool Initialize(uintptr_t windowHandle) override;
+    bool Initialize(uintptr_t windowHandle, uintptr_t instanceHandle) override;
 
     bool LoadShaders();
 
     bool InitFramebuffersRenderPassesAndDrawables();
     bool LoadSceneDrawables( VkRenderPass renderPass, uint32_t subpassIdx, VkSampleCountFlagBits passMsaa );
-    std::unique_ptr<Drawable> InitFullscreenDrawable( const char* pShaderName, const std::map<const std::string, const VulkanTexInfo*>& inputLookup, const std::map<const std::string, const ImageInfo>& ImageAttachmentsLookup, VkRenderPass renderPass, uint32_t subpassIdx, VkSampleCountFlagBits passMsaa );
+    std::unique_ptr<Drawable> InitFullscreenDrawable( const char* pShaderName, const std::map<const std::string, const TextureVulkan*>& inputLookup, const std::map<const std::string, const ImageInfo>& ImageAttachmentsLookup, VkRenderPass renderPass, uint32_t subpassIdx, VkSampleCountFlagBits passMsaa );
     bool InitCommandBuffers();
-    bool Create2SubpassRenderPass( const tcb::span<const VkFormat> InternalColorFormats, const tcb::span<const VkFormat> OutputColorFormats, VkFormat InternalDepthFormat, VkSampleCountFlagBits InternalMsaa, VkSampleCountFlagBits OutputMsaa, VkRenderPass* pRenderPass/*out*/ );
+    bool Create2SubpassRenderPass( const std::span<const TextureFormat> InternalColorFormats, const std::span<const TextureFormat> OutputColorFormats, TextureFormat InternalDepthFormat, VkSampleCountFlagBits InternalMsaa, VkSampleCountFlagBits OutputMsaa, VkRenderPass* pRenderPass/*out*/ );
     bool InitHdr();
 
     /// @brief Ticked every frame (by the Framework)
@@ -60,23 +60,15 @@ public:
 
     void ChangeMsaaMode();
 
-    bool InitGui( uintptr_t windowHandle );
+    bool InitGui( uintptr_t windowHandle, uintptr_t instanceHandle );
     void UpdateGui();
 
     /// Shutdown function
     void Destroy() override;
 
 private:
-    // Textures
-    std::map<std::string, VulkanTexInfo>    m_LoadedTextures;
 
-    VulkanTexInfo m_TexWhite;
-
-    // Shaders
-    std::unique_ptr<ShaderManager>          m_ShaderManager;
-
-    // Materials
-    std::unique_ptr<MaterialManager>        m_MaterialManager;
+    TextureVulkan m_TexWhite;
 
     // Drawable(s) for rendering the main scene object
     std::vector<Drawable>                   m_SceneObject;

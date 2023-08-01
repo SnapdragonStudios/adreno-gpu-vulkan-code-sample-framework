@@ -1,7 +1,7 @@
-cmake_minimum_required (VERSION 3.10)
+cmake_minimum_required (VERSION 3.21)
 
 project (hdrSwapchain C CXX)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 #
 # Source files included in this application.
@@ -11,8 +11,7 @@ set(CPP_SRC code/main/hdrSwapchain.cpp
             code/main/hdrSwapchain.hpp
             code/main/materials.hpp
 )
-
-
+set(FRAMEWORK_LIB framework_vulkan)
 
 #
 # Setup the module path to include the 'project directory' (project/windows or project/android)
@@ -34,9 +33,18 @@ include(AddShadersDir)
 include(FrameworkApplicationHelper)
 
 #
-# Copy required assets to local folders
+# Copy required models to local folders
 #
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/Museum/Museum.bin DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/Media/Meshes/)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/Museum/Museum.gltf DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/Media/Meshes/)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/Museum/Textures_ktx/ DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/Media/Textures/Textures/)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures/ DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/Media/Textures/)
+include(ModelPackager)
+
+# Museum GLTF
+add_gltf(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/Museum/Museum)
+
+#
+# Convert and copy textures to local folders
+#
+include(TexturePackager)
+
+# Textures
+add_textures_from_path(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/Museum/Textures)
+add_textures_from_path(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures)

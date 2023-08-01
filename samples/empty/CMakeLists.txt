@@ -1,7 +1,7 @@
-cmake_minimum_required (VERSION 3.10)
+cmake_minimum_required (VERSION 3.21)
 
 project (empty C CXX)
-set(CMAKE_CXX_STANDARD 17)  # need new clang (and point gradle to it if we want c++17)
+set(CMAKE_CXX_STANDARD 20)
 
 #
 # Source files included in this application.
@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD 17)  # need new clang (and point gradle to it if we want 
 set(CPP_SRC code/main/application.cpp
             code/main/application.hpp
 )
-
+set(FRAMEWORK_LIB framework)
 
 
 #

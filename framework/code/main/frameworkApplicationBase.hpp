@@ -1,23 +1,20 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
 #include <memory>
+#include <span>
 #include "system/assetManager.hpp"
-#include "vulkan/TextureFuncts.h"
-#include "vulkan/MeshObject.h"
+#include "system/glm_common.hpp"    // must be before config.h
 #include "system/config.h"
-#include "tcb/span.hpp"
-// Material Descriptions
-#include "material/materialProps.h" 
 
 // Forward declares
-class Vulkan;
+class GraphicsApiBase;
 class Gui;
 
 //#########################################################
@@ -71,10 +68,10 @@ public:
     virtual ~FrameworkApplicationBase();
 
     /// Set the AAssetManager (on android, does nothing on windows).  Do before LoadConfigFile().
-    void SetAndroidAssetManager(AAssetManager* pAAssetManager);
+    void            SetAndroidAssetManager(AAssetManager* pAAssetManager);
 
     /// Set the Android ExternalFilesDir (on android, does nothing on windows).  This is the location where the app is 'allowed' to read/write files including the app_config.txt.  Do before LoadConfigFile().
-    void SetAndroidExternalFilesDir(const std::string& pAndroidExternalFilesDir);
+    void            SetAndroidExternalFilesDir(const std::string& pAndroidExternalFilesDir);
 
     /// Override the (default) filename used by LoadConfigFile
     virtual void    SetConfigFilename(const std::string& filename);
@@ -83,17 +80,9 @@ public:
     /// This will go to derived class that can then set global parameters
     virtual bool    LoadConfigFile();
 
-    /// May be called before initialize (from Vulkan.cpp, during inital Vulkan setup).
-    /// @return index of the VkSurfaceFormatKHR you want to use, or -1 for default.
-    virtual int     PreInitializeSelectSurfaceFormat(tcb::span<const VkSurfaceFormatKHR>);
-
-    /// May be called before initialize (from Vulkan.cpp, during inital Vulkan setup).
-    /// @param configuration (if untouched, Vulkan will be setup using defaults).
-    virtual void    PreInitializeSetVulkanConfiguration( Vulkan::AppConfiguration& );
-
     /// Initialize application.
     /// This is the main entry point for your Application code!
-    virtual bool    Initialize(uintptr_t windowHandle);
+    virtual bool    Initialize(uintptr_t windowHandle, uintptr_t instanceHandle);
 
     /// Post-Initialize application.
     /// This is called immediately after Initialize and before first Render, should be lightweight (reset timers etc)
@@ -101,7 +90,7 @@ public:
 
     /// ReInitialize application.
     /// Will only be called if the app was initialized and the underlying platform requires the app be re-initialized (due to Vulkan window changing)
-    virtual bool    ReInitialize(uintptr_t windowHandle);
+    virtual bool    ReInitialize(uintptr_t windowHandle, uintptr_t instanceHandle);
 
     /// Destroy application (opposite of Initialize, must get back to state that is re-Initializable)
     virtual void    Destroy();
@@ -113,6 +102,9 @@ public:
     /// Called every frame.
     /// Application should derive from this and issue their renderring commands from this function.
     virtual void    Render(float frameTimeSeconds) = 0;
+
+    /// Logging function for FPS (frames per second) that is periodically called and can be overridden for other profile/performance logging
+    virtual void    LogFps();
 
     /// Keyboard Input 'down' event call (application should override to recieve these events)
     virtual void    KeyDownEvent(uint32_t key);
@@ -127,25 +119,16 @@ public:
     /// Touch (or mouse) input 'up' event call (application should override to recieve these events)
     virtual void    TouchUpEvent(int iPointerID, float xPos, float yPos);
 
-    // Helper Functions
-    void    InitOneLayout(MaterialProps* pMaterial);
-    bool    InitOnePipeline(MaterialProps* pMaterial, MeshObject* pMesh, uint32_t TargetWidth, uint32_t TargetHeight, VkRenderPass RenderPass);
-    bool    InitDescriptorPool(MaterialProps* pMaterial);
-    bool    InitDescriptorSet(MaterialProps* pMaterial);
-    void    SetOneImageLayout(VkImage WhichImage,
-        VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-        VkImageLayout oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        VkImageLayout newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
     /// Main thread 'render' loop (eg ALooper_pollAll loop on Android)
     /// Wraps 'Render(float frameTimeSeconds)' with frame timers.  Applications should derive from Render(float frameTimeSeconds).
     /// @returns false if Render fails or is done (requesting to exit app).
     bool            Render();
 
     // Accessors
-    Vulkan*         GetVulkan() const { return m_vulkan.get(); }
-    Gui*            GetGui() const { return m_Gui.get(); }
+    GraphicsApiBase*GetGraphicsApi() const  { return m_gfxBase.get(); }
+    Gui*            GetGui() const          { return m_Gui.get(); }
     uint32_t        GetFrameCount() const { return m_FrameCount; }
+
 public:
     // Frame timings
     bool                    m_LogFPS = true;
@@ -154,14 +137,14 @@ public:
     /// @brief Timestamp string filled in by cmake build process (time this application was build at).
     static const char* const sm_BuildTimestamp;
 protected:
-    std::unique_ptr<Vulkan> m_vulkan;
+    std::unique_ptr<GraphicsApiBase> m_gfxBase;
     std::unique_ptr<Gui>    m_Gui;
     std::unique_ptr<AssetManager> m_AssetManager;
     std::string             m_ConfigFilename;
 
     uint32_t                m_WindowWidth = 0;              ///< Window width in pixels.  MAY not be the resolution of the render buffer or the rendering/backbuffer surface.  In an Android app MAY not be the full screeen device size.  DOES match the mouse/touch co-oordinates (mouse 0,0 is the edge of this window area)
     uint32_t                m_WindowHeight = 0;             ///< Window width in pixels.  MAY not be the resolution of the render buffer or the rendering/backbuffer surface.  In an Android app MAY not be the full screeen device size.  DOES match the mouse/touch co-oordinates (mouse 0,0 is the edge of this window area)
-    float                   m_FpsEvaluateInterval = 0.5f;   // In seconds
+    float                   m_FpsEvaluateInterval = 1.0f;   // In seconds
 
 private:
     uint64_t                m_LastUpdateTimeUS = 0;         // In microseconds.
@@ -170,4 +153,5 @@ private:
     uint32_t                m_LastFpsCalcTimeMS = 0;        // In milliseconds.
     uint32_t                m_FpsFrameCount = 0;
     uint32_t                m_LastFpsLogTimeMS = 0;
+    float                   m_FixedFramerateCorrectionMs = 0.0f;
 };

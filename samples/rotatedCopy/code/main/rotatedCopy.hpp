@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -15,9 +15,12 @@
 /// 
 
 #include "main/applicationHelperBase.hpp"
+#include "vulkan/renderTarget.hpp"
+#include "memory/vulkan/uniform.hpp"
+#include "vulkan/commandBuffer.hpp"
+
 #include <map>
 #include <string>
-#include "tcb/span.hpp" // replace with c++20 <span>
 
 // Forward declarations
 class Drawable;
@@ -38,15 +41,15 @@ public:
     /// Override Vulkan application configuration
     void PreInitializeSetVulkanConfiguration(Vulkan::AppConfiguration&) override;
     /// Override surface format selection.
-    int PreInitializeSelectSurfaceFormat(tcb::span<const VkSurfaceFormatKHR> formats) override;
+    int PreInitializeSelectSurfaceFormat(std::span<const SurfaceFormat> formats) override;
     /// Override Application entry point!
-    bool Initialize(uintptr_t windowHandle) override;
+    bool Initialize(uintptr_t windowHandle, uintptr_t hInstance) override;
 
     bool LoadShaders();
 
     bool InitFramebuffersRenderPassesAndDrawables();
-    bool LoadSceneDrawables( VkRenderPass renderPass, const tcb::span<const VkSampleCountFlagBits> renderPassMultisamples );
-    std::unique_ptr<Drawable> InitFullscreenDrawable( const char* pShaderName, const std::map<const std::string, const VulkanTexInfo*>& inputLookup, const std::map<const std::string, const ImageInfo>& ImageAttachmentsLookup, VkRenderPass renderPass, uint32_t subpassIdx, const tcb::span<const VkSampleCountFlagBits> renderPassMultisamples);
+    bool LoadSceneDrawables( VkRenderPass renderPass, const std::span<const VkSampleCountFlagBits> renderPassMultisamples );
+    std::unique_ptr<Drawable> InitFullscreenDrawable( const char* pShaderName, const std::map<const std::string, const Texture*>& inputLookup, const std::map<const std::string, const ImageInfo>& ImageAttachmentsLookup, VkRenderPass renderPass, uint32_t subpassIdx, const std::span<const VkSampleCountFlagBits> renderPassMultisamples);
     bool InitCommandBuffers();
     bool InitCamera() override;
 
@@ -80,16 +83,13 @@ public:
     void Destroy() override;
 
 private:
-    // Textures
-    std::map<std::string, VulkanTexInfo>    m_LoadedTextures;
-    VulkanTexInfo                           m_TexWhite;
 
-    // Shaders
-    std::unique_ptr<ShaderManager>          m_ShaderManager;
+    // Textures
+    TextureVulkan           m_TexWhite;
+    TextureVulkan           m_DefaultNormal;
 
     // Materials
-    std::unique_ptr<MaterialManager>        m_MaterialManager;
-
+    
     // Drawable(s) for rendering the main scene object
     std::vector<Drawable>                   m_SceneObject;
 

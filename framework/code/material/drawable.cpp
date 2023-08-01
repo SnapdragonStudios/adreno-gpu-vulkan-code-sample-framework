@@ -1,17 +1,18 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "drawable.hpp"
-#include "material.hpp"
+#include "vulkan/material.hpp"
 #include "shader.hpp"
 #include "shaderDescription.hpp"
-#include "shaderModule.hpp"
+#include "vulkan/shaderModule.hpp"
 #include "system/os_common.h"
+#include "mesh/meshHelper.hpp"
 #include "mesh/instanceGenerator.hpp"
 #include "vulkan/extensionHelpers.hpp"
 #include <cassert>
@@ -34,14 +35,14 @@ const DrawablePass* Drawable::GetDrawablePass(const std::string& passName) const
 
 
 Drawable::Drawable(Vulkan& vulkan, Material&& material)
-    : mVulkan(vulkan)
-    , mMaterial(std::move(material))
+    : mMaterial(std::move(material))
+    , mVulkan(vulkan)
 {
 }
 
 Drawable::Drawable(Drawable&& other) noexcept
-    : mVulkan(other.mVulkan)
-    , mMaterial(std::move(other.mMaterial))
+    : mMaterial(std::move(other.mMaterial))
+    , mVulkan( other.mVulkan )
     , mMeshObject(std::move(other.mMeshObject))
     , mPasses(std::move(other.mPasses))
     , mPassNameToIndex(std::move(other.mPassNameToIndex))
@@ -82,7 +83,7 @@ static VkBlendFactor BlendFactorToVk( ShaderPassDescription::BlendFactor bf)
     return VK_BLEND_FACTOR_ZERO;
 }
 
-bool Drawable::Init(VkRenderPass vkRenderPass, const char* passName, MeshObject meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses, int nodeId)
+bool Drawable::Init(VkRenderPass vkRenderPass, const char* passName, Mesh<Vulkan> meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses, int nodeId)
 {
     mMeshObject = std::move(meshObject);
     mVertexInstanceBuffer = std::move(vertexInstanceBuffer);
@@ -91,7 +92,7 @@ bool Drawable::Init(VkRenderPass vkRenderPass, const char* passName, MeshObject 
     return ReInit( vkRenderPass, passName, passMultisample, subpasses );
 }
 
-bool Drawable::Init(tcb::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, MeshObject meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, tcb::span<const VkSampleCountFlagBits> passMultisample, tcb::span<const uint32_t> subpasses, int nodeId)
+bool Drawable::Init(std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, Mesh<Vulkan> meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses, int nodeId)
 {
     mMeshObject = std::move(meshObject);
     mVertexInstanceBuffer = std::move(vertexInstanceBuffer);
@@ -102,13 +103,13 @@ bool Drawable::Init(tcb::span<VkRenderPass> vkRenderPasses, const char* const* p
 
 bool Drawable::ReInit( VkRenderPass vkRenderPass, const char* passName, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses )
 {
-    auto multisampleSpan = passMultisample ? tcb::span<const VkSampleCountFlagBits>(passMultisample, 1) : tcb::span<const VkSampleCountFlagBits>{};
-    auto subpassesSpan = subpasses ? tcb::span<const uint32_t>( subpasses, 1 ) : tcb::span<const uint32_t>{};
+    auto multisampleSpan = passMultisample ? std::span<const VkSampleCountFlagBits>(passMultisample, 1) : std::span<const VkSampleCountFlagBits>{};
+    auto subpassesSpan = subpasses ? std::span<const uint32_t>( subpasses, 1 ) : std::span<const uint32_t>{};
 
     return ReInit( { &vkRenderPass,1 }, &passName, 1, multisampleSpan, subpassesSpan );
 }
 
-bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, tcb::span<const VkSampleCountFlagBits> passMultisample, tcb::span<const uint32_t> subpasses )
+bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses )
 {
     assert( passMultisample.empty() || passMultisample.size() == vkRenderPasses.size() );
     mPassMask = passMask;
@@ -120,21 +121,21 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
     }
     mPasses.clear();
 
-    const Shader& shader = mMaterial.m_shader;
+    const auto& shader = mMaterial.m_shader;
     mPasses.reserve(shader.GetShaderPasses().size());
     for (uint32_t passIdx = 0; passIdx < sizeof(passMask) * 8; ++passIdx)
     {
         if (passMask & (1 << passIdx))
         {
             // LOGI("Creating Mesh Object PipelineState and Pipeline for pass... %s", passNames[passIdx]);
-            const MaterialPass* pMaterialPass = mMaterial.GetMaterialPass(passNames[passIdx]);
+            MaterialPass* pMaterialPass = const_cast<MaterialPass*>(mMaterial.GetMaterialPass(passNames[passIdx]));
             if (!pMaterialPass)
             {
                 LOGE("  Pass does not exist in shader");
                 continue;
             }
             assert(pMaterialPass);
-            const ShaderPass& shaderPass = pMaterialPass->mShaderPass;
+            const auto& shaderPass = pMaterialPass->mShaderPass;
 
             // Common to all pipelines
             // State for rasterization, such as polygon fill mode is defined.
@@ -143,7 +144,7 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
             rs.polygonMode = VK_POLYGON_MODE_FILL;
             rs.cullMode = (fixedFunctionSettings.cullBackFace?VK_CULL_MODE_BACK_BIT:0) | (fixedFunctionSettings.cullFrontFace ? VK_CULL_MODE_FRONT_BIT : 0);
             rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-            rs.depthClampEnable = VK_FALSE;
+            rs.depthClampEnable = fixedFunctionSettings.depthClampEnable ? VK_TRUE : VK_FALSE;
             rs.rasterizerDiscardEnable = VK_FALSE;
             rs.depthBiasEnable = fixedFunctionSettings.depthBiasEnable ? VK_TRUE : VK_FALSE;
             if (fixedFunctionSettings.depthBiasEnable)
@@ -261,7 +262,7 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
                     // Vertex rate data (ie the mesh)
                     passVertexBuffers.push_back(mMeshObject.m_VertexBuffers[bufferIdx].GetVkBuffer());
 
-                    // Double check the mesh is supplying the data we expect in the shader, may mismatch if the mesh was not built using the vertex format (eg MeshObject::CreateScreenSpaceMesh)
+                    // Double check the mesh is supplying the data we expect in the shader, may mismatch if the mesh was not built using the vertex format (eg Mesh<Vulkan>::CreateScreenSpaceMesh)
                     // We could dive even deeper, for now check the span and the number of attributes match
                     assert(mMeshObject.m_VertexBuffers[bufferIdx].GetAttributes().size() == shader.m_shaderDescription->m_vertexFormats[formatBindingIdx].elements.size());
                     assert(mMeshObject.m_VertexBuffers[bufferIdx].GetSpan() == shader.m_shaderDescription->m_vertexFormats[formatBindingIdx].span);
@@ -283,7 +284,7 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
             if (mMeshObject.m_IndexBuffer)
             {
                 indexBuffer = mMeshObject.m_IndexBuffer->GetVkBuffer();
-                indexBufferType = mMeshObject.m_IndexBuffer->GetIndexType();
+                indexBufferType = mMeshObject.m_IndexBuffer->GetVkIndexType();
                 indexCount = mMeshObject.m_IndexBuffer->GetNumIndices();
             }
 
@@ -300,36 +301,35 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
                 pipelineLayout = pMaterialPass->GetPipelineLayout().GetVkPipelineLayout();
 
             // add the DrawablePass
-            DrawablePass& pass = mPasses.emplace_back(DrawablePass{ *pMaterialPass,
-                                                                    VK_NULL_HANDLE,
-                                                                    pipelineLayout,
-                                                                    pMaterialPass->GetVkDescriptorSets(),
-                                                                    shaderPass.GetPipelineVertexInputState(),
-                                                                    //std::move(passVertexBufferLookup),
-                                                                    std::move(passVertexBuffers),
-                                                                    std::move(passVertexBufferOffsets),
-                                                                    indexBuffer,
-                                                                    indexBufferType,
-                                                                    drawIndirectBuffer,
-                                                                    drawIndirectCountBuffer,
-                                                                    (uint32_t)mMeshObject.m_NumVertices,
-                                                                    (uint32_t)indexCount,
-                                                                    (uint32_t)drawIndirectCount,
-                                                                    (uint32_t)drawIndirectOffset,
-                                                                    passIdx
-                                                      });
+            DrawablePass& pass = mPasses.emplace_back( *pMaterialPass,
+                                                        (VkPipeline) VK_NULL_HANDLE,
+                                                        pipelineLayout,
+                                                        pMaterialPass->GetVkDescriptorSets(),
+                                                        shaderPass.GetPipelineVertexInputState(),
+                                                        DrawablePassVertexBuffers { std::move( passVertexBuffers ),
+                                                                                    std::move( passVertexBufferOffsets ) },
+                                                        indexBuffer,
+                                                        indexBufferType,
+                                                        drawIndirectBuffer,
+                                                        drawIndirectCountBuffer,
+                                                        (uint32_t)mMeshObject.m_NumVertices,
+                                                        (uint32_t)indexCount,
+                                                        (uint32_t)drawIndirectCount,
+                                                        (uint32_t)drawIndirectOffset,
+                                                        passIdx
+                                                      );
             VkShaderModule vkVertShader = VK_NULL_HANDLE;
             VkShaderModule vkFragShader = VK_NULL_HANDLE;
 
             std::visit( [&](auto& m)
             {
                 using T = std::decay_t<decltype(m)>;
-                if constexpr (std::is_same_v<T, GraphicsShaderModules>)
+                if constexpr (std::is_same_v<T, GraphicsShaderModules<Vulkan>>)
                 {
                     vkVertShader = m.vert.GetVkShaderModule();
                     vkFragShader = m.frag.GetVkShaderModule();
                 }
-                else if constexpr (std::is_same_v<T, GraphicsShaderModuleVertOnly>)
+                else if constexpr (std::is_same_v<T, GraphicsShaderModuleVertOnly<Vulkan>>)
                 {
                     vkVertShader = m.vert.GetVkShaderModule();
                 }
@@ -352,6 +352,7 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
                 nullptr, nullptr,
                 vkVertShader,
                 vkFragShader,
+                pMaterialPass->GetSpecializationConstants().GetVkSpecializationInfo(),
                 false,
                 VK_NULL_HANDLE,
                 &pass.mPipeline))
@@ -365,7 +366,7 @@ bool Drawable::ReInit( tcb::span<VkRenderPass> vkRenderPasses, const char* const
     return true;
 }
 
-void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawablePass, uint32_t bufferIdx, const tcb::span<DrawablePassVertexBuffers> vertexBufferOverrides) const
+void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawablePass, uint32_t bufferIdx, const std::span<DrawablePassVertexBuffers> vertexBufferOverrides) const
 {
     // Bind the pipeline for this material
     vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, drawablePass.mPipeline);
@@ -453,7 +454,7 @@ void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawableP
     }
 }
 
-bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, tcb::span<VkRenderPass> vkRenderPasses, const char* const* renderPassNames, const std::string& meshFilename, const std::function<std::optional<Material>(const MeshObjectIntermediate::MaterialDef&)>& materialLoader, std::vector<Drawable>& drawables, tcb::span<const VkSampleCountFlagBits> renderPassMultisample, /*DrawableLoader::LoaderFlags*/uint32_t loaderFlags, tcb::span<const uint32_t> renderPassSubpasses, const glm::vec3 globalScale)
+bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, std::span<VkRenderPass> vkRenderPasses, const char* const* renderPassNames, const std::string& meshFilename, const std::function<std::optional<Material>(const MeshObjectIntermediate::MaterialDef&)>& materialLoader, std::vector<Drawable>& drawables, std::span<const VkSampleCountFlagBits> renderPassMultisample, /*DrawableLoader::LoaderFlags*/uint32_t loaderFlags, std::span<const uint32_t> renderPassSubpasses, const glm::vec3 globalScale)
 {
     LOGI("Loading Object mesh: %s...", meshFilename.c_str());
 
@@ -485,21 +486,26 @@ bool DrawableLoader::LoadDrawables(Vulkan& vulkan, AssetManager& assetManager, t
     return true;    // success
 }
 
-bool DrawableLoader::CreateDrawables(Vulkan & vulkan, std::vector<MeshObjectIntermediate>&&intermediateMeshObjects, tcb::span<VkRenderPass> vkRenderPasses, const char* const* renderPassNames, const std::function<std::optional<Material>(const MeshObjectIntermediate::MaterialDef&)>&materialLoader, std::vector<Drawable>&drawables, const tcb::span<const VkSampleCountFlagBits> renderPassMultisample, /*DrawableLoader::LoaderFlags*/uint32_t loaderFlags, const tcb::span<const uint32_t> renderPassSubpasses)
+bool DrawableLoader::CreateDrawables(Vulkan& vulkan, std::vector<MeshObjectIntermediate>&& intermediateMeshObjects, std::span<VkRenderPass> vkRenderPasses, const char* const* renderPassNames, const std::function<std::optional<Material>(const MeshObjectIntermediate::MaterialDef&)>& materialLoader, std::vector<Drawable>& drawables, const std::span<const VkSampleCountFlagBits> renderPassMultisample, /*DrawableLoader::LoaderFlags*/uint32_t loaderFlags, const std::span<const uint32_t> renderPassSubpasses)
 {
     // See if we can find instances, we assume there is no instance information in the gltf!
     auto instancedFatObjects = (loaderFlags & LoaderFlags::FindInstances) ? MeshInstanceGenerator::FindInstances(std::move(intermediateMeshObjects)) : MeshInstanceGenerator::NullFindInstances(std::move(intermediateMeshObjects));
     intermediateMeshObjects.clear();
 
-    drawables.reserve(instancedFatObjects.size() );
-    for (auto& [fatObject, instances] : instancedFatObjects)
+    return CreateDrawables(vulkan, std::move(instancedFatObjects), vkRenderPasses, renderPassNames, materialLoader, drawables, renderPassMultisample, loaderFlags, renderPassSubpasses);
+}
+
+bool DrawableLoader::CreateDrawables(Vulkan& vulkan, std::vector<MeshInstance>&& intermediateMeshInstances, std::span<VkRenderPass> vkRenderPasses, const char* const* renderPassNames, const std::function<std::optional<Material>(const MeshObjectIntermediate::MaterialDef&)>& materialLoader, std::vector<Drawable>& drawables, const std::span<const VkSampleCountFlagBits> renderPassMultisample, /*DrawableLoader::LoaderFlags*/uint32_t loaderFlags, const std::span<const uint32_t> renderPassSubpasses)
+{
+    drawables.reserve(intermediateMeshInstances.size() );
+    for (auto& [fatObject, instances] : intermediateMeshInstances)
     {
         // Get the material for this mesh
         std::optional<Material> material;
         if (fatObject.m_Materials.size() == 0)
         {
-            // default material
-            auto loadedMaterial = materialLoader( MeshObjectIntermediate::MaterialDef{ "textures/white_d.ktx" } );
+            // default material (materialId = 0)
+            auto loadedMaterial = materialLoader( MeshObjectIntermediate::MaterialDef{ "", 0, "textures/white_d.ktx"});
             if (loadedMaterial.has_value())
                 material.emplace( std::move(loadedMaterial.value()) );
         }
@@ -518,14 +524,14 @@ bool DrawableLoader::CreateDrawables(Vulkan & vulkan, std::vector<MeshObjectInte
             // It is valid for the material loader to return a null material - denotes we dont want to render this object!
             continue;
         }
-        const Shader& shader = material->m_shader;
+        const auto& shader = material->m_shader;
 
         uint32_t passMask = 0;  // max 32 passes!
-        const ShaderPass* pFirstPass = nullptr;
+        const ShaderPass<Vulkan>* pFirstPass = nullptr;
         for (uint32_t pass = 0; pass < vkRenderPasses.size(); ++pass)
         {
             const char* pRenderPassName = renderPassNames[pass];
-            const ShaderPass* pShaderPass = shader.GetShaderPass(pRenderPassName); ///TODO: std::string generated here!
+            const auto* pShaderPass = shader.GetShaderPass(pRenderPassName); ///TODO: std::string generated here!
             if (pShaderPass)
             {
                 passMask |= 1 << pass;
@@ -566,9 +572,9 @@ bool DrawableLoader::CreateDrawables(Vulkan & vulkan, std::vector<MeshObjectInte
 
             const auto nodeId = fatObject.m_NodeId; // grab the nodeId before it goes away!
 
-            MeshObject meshObject;
+            Mesh<Vulkan> meshObject;
             const auto& vertexFormats = shader.m_shaderDescription->m_vertexFormats;
-            MeshObject::CreateMesh(&vulkan, fatObject, (uint32_t)pFirstPass->m_shaderPassDescription.m_vertexFormatBindings[0], vertexFormats, &meshObject);
+            MeshHelper::CreateMesh<Vulkan>(vulkan.GetMemoryManager(), fatObject, (uint32_t)pFirstPass->m_shaderPassDescription.m_vertexFormatBindings[0], vertexFormats, &meshObject);
 
             // We are done with the FatObject here, Release it to save some memory earlier.
             fatObject.Release();
@@ -585,7 +591,7 @@ bool DrawableLoader::CreateDrawables(Vulkan & vulkan, std::vector<MeshObjectInte
                     return false;
                 }
                 // Create the instance data
-                auto instancesSpan = tcb::make_span(instances);
+                std::span instancesSpan = instances;
                 if( instancesSpan.empty() )
                 {
                     // Even if we are not instancing there should be one instance per mesh
@@ -619,7 +625,7 @@ bool DrawableLoader::CreateDrawables(Vulkan & vulkan, std::vector<MeshObjectInte
     return true;
 }
 
-DrawableLoader::MeshStatistics DrawableLoader::GatherStatistics(const tcb::span<MeshObjectIntermediate> meshObjects)
+DrawableLoader::MeshStatistics DrawableLoader::GatherStatistics(const std::span<MeshObjectIntermediate> meshObjects)
 {
     MeshStatistics stats;
     stats.totalVerts = 0;
@@ -648,7 +654,7 @@ DrawableLoader::MeshStatistics DrawableLoader::GatherStatistics(const tcb::span<
     return stats;
 }
 
-void DrawableLoader::PrintStatistics(const tcb::span<MeshObjectIntermediate> meshObjects)
+void DrawableLoader::PrintStatistics(const std::span<MeshObjectIntermediate> meshObjects)
 {
     MeshStatistics stats = GatherStatistics(meshObjects);
     LOGI("Model total Vertices: %zu", stats.totalVerts);

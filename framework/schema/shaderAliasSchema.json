@@ -1,0 +1,34 @@
+{
+    "$id": "shaderAliasSchema.json",
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "title": "Shader Alias Schema",
+    "version": "1.0.0",
+
+    "type": "object",
+    "properties": {
+        "Shader": {
+            "type": "string",
+            "description": "Filename of shader that we are aliasing",
+            "minLength": 1
+        },
+        "Defines": {
+            "type": "array",
+            "description": "Defines to pass to Shader when compiling",
+            "items": {
+                "type": "string",
+                "description": "Define (eg \"RGB=1\")"
+            }
+        },
+        "TargetEnv": {
+            "type": "string",
+            "description": "Value to pass to --target-env when compiling shader",
+            "examples": [ "vulkan1.1", "spirv1.4" ],
+            "minLength": 1
+        },
+        "$schema": {
+            "type": "string"
+        }
+    },
+    "required": [ "Shader" ],
+    "additionalProperties": false
+}
