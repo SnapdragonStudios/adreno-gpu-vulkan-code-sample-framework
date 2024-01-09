@@ -28,8 +28,8 @@ VAR(bool, gUseExtension, true, kVariableNonpersistent);
 VAR(unsigned, gBlurFilterSize, 7, kVariableNonpersistent);
 
 #if OS_ANDROID
-#define SHADERFILE(f) "./Shaders/" f
-#define TEXTUREFILE(f) "./Textures/" f
+#define SHADERFILE(f) "./Media/Shaders/" f
+#define TEXTUREFILE(f) "./Media/Textures/" f
 #else
 #define SHADERFILE(f) "./Media/Shaders/" f
 #define TEXTUREFILE(f) "./Media/Textures/" f
@@ -177,7 +177,22 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle, uintptr_t hInstanc
 
             if (ii == 1) // H
             {
-                m_weightTextures[ii] = apiCast<Vulkan>(m_TextureManager->CreateTextureFromBuffer(*pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16), gBlurFilterSize, 1, 1, weightFormat, SamplerAddressMode::ClampEdge, SamplerFilter::Nearest/*, usageFlags, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL*/, nullptr));
+#if 0
+              m_weightTextures[ii] = LoadTextureFromBuffer(
+                  pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16),
+                  gBlurFilterSize, 1, 1, weightFormat,
+                  VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_FILTER_NEAREST,
+                  usageFlags, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+#endif
+                m_weightTextures[ii] =
+                  apiCast<Vulkan>(m_TextureManager->CreateTextureFromBuffer(
+                      *pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16),
+                      gBlurFilterSize, 1, 1, weightFormat,
+                      SamplerAddressMode::ClampEdge,
+                      SamplerFilter::Nearest,
+                      nullptr,
+                      (uint32_t)usageFlags));
+              
 
                 weightViewInfo.filterCenter.x = gBlurFilterSize / 2;
                 weightViewInfo.filterCenter.y = 0;
@@ -186,7 +201,22 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle, uintptr_t hInstanc
             }
             else // V
             {
-                m_weightTextures[ii] = apiCast<Vulkan>(m_TextureManager->CreateTextureFromBuffer(*pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16), 1, gBlurFilterSize, 1, weightFormat, SamplerAddressMode::ClampEdge, SamplerFilter::Nearest/*, usageFlags, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL*/, nullptr));
+#if 0
+              m_weightTextures[ii] = LoadTextureFromBuffer(
+                  pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16), 1,
+                  gBlurFilterSize, 1, weightFormat,
+                  VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_FILTER_NEAREST,
+                  usageFlags, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+#endif
+
+              m_weightTextures[ii] =
+                  apiCast<Vulkan>(m_TextureManager->CreateTextureFromBuffer(
+                      *pVulkan, pHalfTexData, gBlurFilterSize * sizeof(float16),
+                      1, gBlurFilterSize, 1, weightFormat,
+                      SamplerAddressMode::ClampEdge,
+                      SamplerFilter::Nearest,
+                      nullptr,
+                      (uint32_t)usageFlags));
 
                 weightViewInfo.filterCenter.x = 0;
                 weightViewInfo.filterCenter.y = gBlurFilterSize / 2;
@@ -203,8 +233,9 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle, uintptr_t hInstanc
             }
         }
     }
+
     
-    if (pVulkan->IsTextureFormatSupported(TextureFormat::ASTC_4x4_UNORM_BLOCK))
+    if (/*pVulkan->IsTextureFormatSupported(TextureFormat::ASTC_4x4_UNORM_BLOCK)*/ false)
     {
         m_sourceTexture = apiCast<Vulkan>(m_TextureManager->GetOrLoadTexture(*m_AssetManager, TEXTUREFILE("painting_astc.ktx"), SamplerAddressMode::ClampEdge));
     }
