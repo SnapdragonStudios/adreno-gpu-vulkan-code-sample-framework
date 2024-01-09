@@ -58,7 +58,7 @@ auto* apiCast(T* rBase) {
 template<class T_GFXAPI, typename T>
 auto apiCast(std::unique_ptr<T>&& rBase) {
     using tDerived = typename T::template tApiDerived<T_GFXAPI>;
-    return std::unique_ptr<tDerived>(static_cast<tDerived*>(rBase.get()));
+    return std::unique_ptr<tDerived>(static_cast<tDerived*>(rBase.release()));
 }
 
 

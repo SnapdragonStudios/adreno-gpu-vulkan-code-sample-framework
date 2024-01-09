@@ -200,11 +200,11 @@ std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureObject(GraphicsAp
 }
 
 //-----------------------------------------------------------------------------
-std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName )
+std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName, uint32_t extraFlags)
 //-----------------------------------------------------------------------------
 {
     auto pTexture = std::make_unique<TextureT<Vulkan>>();
-    *pTexture = ::CreateTextureFromBuffer( static_cast<Vulkan&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName );
+    *pTexture = ::CreateTextureFromBuffer( static_cast<Vulkan&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName, extraFlags);
     return pTexture;
 }
 

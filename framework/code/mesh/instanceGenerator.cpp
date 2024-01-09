@@ -11,6 +11,11 @@
 #include <glm/gtx/norm.hpp>
 #define EIGEN_INITIALIZE_MATRICES_BY_ZERO
 #define EIGEN_MPL2_ONLY
+
+#if defined(_WIN32)
+#define EIGEN_HAS_STD_RESULT_OF 0
+#endif
+
 #include <eigen/Eigen/Dense>
 #include <map>
 #include <algorithm>

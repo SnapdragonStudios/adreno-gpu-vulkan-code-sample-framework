@@ -17,20 +17,6 @@ The following dependencies must be installed and the appropriate locations shoul
 * CMake
 * Android Studio
 
-### Pre-Build
-
-Compile the underlying shaders to .spv by running the batch file below:
-
-```
-01_CompileShaders.bat
-```
-
-And convert the needed textures to the correct format using the batch file below:
-
-```
-02_PrepareMedia.bat
-```
-
 ### Build
 
 Once the dependencies are installed and shaders compiled, building this sample .apk/.exe is as simple as running any of the batch files from the framework root directory, accordingly to your target system:
@@ -45,13 +31,13 @@ Once the dependencies are installed and shaders compiled, building this sample .
 To deploy the media files and the .apk to a connected device, run the batch file below:
 
 ```
-03_Install_APK.bat
+01_Install_APK.bat
 ```
 
 Optionally you can change the default configurations for this sample by upating the file **app_config.txt** and running the batch file below:
 
 ```
-04_InstallConfig.bat
+02_InstallConfig.bat
 ```
 
 ## Android Studio

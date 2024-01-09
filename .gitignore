@@ -116,3 +116,7 @@ samples/hello-gltf/assets_tmp/
 samples/rotatedCopy/assets_tmp/
 samples/shaderResolveTonemap/assets_tmp/
 samples/SubPass/assets_tmp/
+samples/BloomImageProcessing/assets_tmp/
+project/tools/ktx.dll
+project/tools/ktxinfo.exe
+project/tools/toktx.exe

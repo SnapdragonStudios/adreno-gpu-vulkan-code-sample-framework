@@ -8,7 +8,7 @@ adb uninstall com.quic.BloomImageProcessing
 @echo ****************************************
 @echo Install ..\..\build\android\BloomImageProcessing\outputs\apk\debug\BloomImageProcessing-debug.apk
 @echo ****************************************
-adb install -r ..\..\build\android\BloomImageProcessing\outputs\apk\debug\BloomImageProcessing-debug.apk
+adb install -r -g ..\..\build\android\BloomImageProcessing\outputs\apk\debug\BloomImageProcessing-debug.apk
 
 @echo.
 @echo ****************************************
