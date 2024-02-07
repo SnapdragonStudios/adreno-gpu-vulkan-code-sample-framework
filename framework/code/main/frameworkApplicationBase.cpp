@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -13,7 +13,13 @@
 #include "system/os_common.h"
 
 // Bring in the timestamp (and assign to a variable)
+// Temporary fix for Android not building the timestamp, upstream cmake update will fix this in a future update
+#if defined(_WIN32)
 #include "../../project/buildtimestamp.h"
+#else
+#define BUILD_TIMESTAMP "UNDEFINED"
+#endif
+
 const char* const FrameworkApplicationBase::sm_BuildTimestamp = BUILD_TIMESTAMP;
 
 

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -81,7 +81,7 @@ public:
     virtual std::unique_ptr<Texture> CreateTextureObjectView( GraphicsApiBase& gfxApi, const Texture& original, TextureFormat viewFormat ) = 0;
 
     /// Create texture from a block of texture data in memory (with correct format, span etc).
-    virtual std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase&, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName) = 0;
+    virtual std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase&, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName, uint32_t extraFlags = 0) = 0;
 
     /// Get a 'default' sampler for the given address mode (all other sampler settings assumed to be 'normal' ie linearly sampled etc)
     virtual const Sampler* const GetSampler( SamplerAddressMode ) const = 0;

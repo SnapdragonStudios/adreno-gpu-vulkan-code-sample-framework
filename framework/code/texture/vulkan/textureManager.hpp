@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -49,7 +49,7 @@ public:
 
     /// Create texture from a block of texture data in memory (with correct format, span etc).
     /// Implements the base class virtual function.
-    std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase&, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName ) override;
+    std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase&, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName, uint32_t extraFlags = 0 ) override;
 
     /// Create a texture that views (aliases) another texture but using a different texture format (must be 'related' formats, which formats are related is dependant on graphics api)
     /// Implements the base class virtual function.

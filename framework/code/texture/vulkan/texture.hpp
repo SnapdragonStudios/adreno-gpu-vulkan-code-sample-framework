@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -110,7 +110,7 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>( Vulkan&, const CreateTexObjectInfo
 
 /// Template specialization for Vulkan CreateTextureFromBuffer
 template<>
-TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan&, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName );
+TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan&, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName, uint32_t extraFlags );
 
 /// Create a texture that views (aliases) another texture but using a different texture format (must be 'related' formats, which formats are related is dependant on graphics api)
 TextureT<Vulkan> CreateTextureObjectView( Vulkan&, const TextureT<Vulkan>& original, TextureFormat viewFormat );

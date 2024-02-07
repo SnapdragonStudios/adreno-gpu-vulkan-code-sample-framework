@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -202,7 +202,7 @@ std::unique_ptr<Texture> CreateTextureObject(GraphicsApiBase& gfxApi, const Crea
 
 /// Create texture from a memory buffer.
 template<typename T_GFXAPI>
-TextureT<T_GFXAPI> CreateTextureFromBuffer( T_GFXAPI& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName = nullptr )
+TextureT<T_GFXAPI> CreateTextureFromBuffer( T_GFXAPI& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName = nullptr, uint32_t extraFlags = 0 )
 {
     assert( 0 && "Expecting CreateTextureFromBuffer (per graphics api) to be used" );
     return {};
@@ -210,10 +210,10 @@ TextureT<T_GFXAPI> CreateTextureFromBuffer( T_GFXAPI& gfxApi, const void* pData,
 
 /// Create texture (unique_ptr) (generally for render target usage).  Uses CreateTexObjectInfo structure to define texture creation parameters.
 template<typename T_GFXAPI>
-std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName = nullptr )
+std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName = nullptr, uint32_t extraFlags = 0 )
 {
     auto pTexture = std::make_unique<TextureT<T_GFXAPI>>();
-    *pTexture = std::move( CreateTextureFromBuffer( static_cast<T_GFXAPI&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName ) );
+    *pTexture = std::move( CreateTextureFromBuffer( static_cast<T_GFXAPI&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName, extraFlags) );
     return pTexture;
 }
 

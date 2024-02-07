@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -58,7 +58,7 @@ auto* apiCast(T* rBase) {
 template<class T_GFXAPI, typename T>
 auto apiCast(std::unique_ptr<T>&& rBase) {
     using tDerived = typename T::template tApiDerived<T_GFXAPI>;
-    return std::unique_ptr<tDerived>(static_cast<tDerived*>(rBase.get()));
+    return std::unique_ptr<tDerived>(static_cast<tDerived*>(rBase.release()));
 }
 
 

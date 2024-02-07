@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -730,7 +730,7 @@ TextureT<Vulkan> CreateTextureObjectView( Vulkan& vulkan, const TextureT<Vulkan>
 
 //-----------------------------------------------------------------------------
 template<>
-TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName )
+TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName, uint32_t extraFlags )
 //-----------------------------------------------------------------------------
 {
     if (pName == nullptr)
@@ -742,6 +742,7 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
     uint32_t MipLevels = 1;
     VkFormat vkFormat = TextureFormatToVk( Format );
     VkImageUsageFlags FinalUsage = ( VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT );
+    FinalUsage |= (VkImageUsageFlags)extraFlags;
     VkImageLayout FinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     // Image creation info.  Will change below based on need

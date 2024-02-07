@@ -1,9 +1,13 @@
-# VK_QCOM_Image_Processing Bloom Sample
+# Snapdragon™ Game Super Resolution
+
+![Screenshot](img/screenshot.png)
 
 ## Overview
 
-This demonstrates how to use the VK_QCOM_Image_Processing extension in a simple bloom shader.
-Setting gUseExtension to false will use a standard method, setting to true will use the extension in the downsample and blur passes.
+This sample demonstrates how to use the [Snapdragon™ Game Super Resolution](https://github.com/quic/snapdragon-gsr) and offers a comparison with the traditional *Bilinear Interpolation*.
+
+- Toggle **SGSR Active** to activate Snapdragon™ GSR
+- Toggle **SGSR Edge Direction** to use an optional edge direction calculation on the SGSR shader that helps reducing banding
 
 ## Building
 
@@ -16,6 +20,20 @@ The following dependencies must be installed and the appropriate locations shoul
 * Gradle
 * CMake
 * Android Studio
+
+### Pre-Build
+
+Compile the underlying shaders to .spv by running the batch file below:
+
+```
+01_CompileShaders.bat
+```
+
+And convert the needed textures to the correct format using the batch file below:
+
+```
+02_PrepareMedia.bat
+```
 
 ### Build
 
@@ -31,13 +49,13 @@ Once the dependencies are installed and shaders compiled, building this sample .
 To deploy the media files and the .apk to a connected device, run the batch file below:
 
 ```
-01_Install_APK.bat
+03_Install_APK.bat
 ```
 
 Optionally you can change the default configurations for this sample by upating the file **app_config.txt** and running the batch file below:
 
 ```
-02_InstallConfig.bat
+04_InstallConfig.bat
 ```
 
 ## Android Studio
