@@ -69,7 +69,7 @@ void  BloomImageprocessing::PreInitializeSetVulkanConfiguration(Vulkan::AppConfi
 {
     ApplicationHelperBase::PreInitializeSetVulkanConfiguration(config);
     config.RequiredExtension(VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME);
-    // config.RequiredExtension("VK_KHR_format_feature_flags2");
+    config.RequiredExtension("VK_KHR_format_feature_flags2");
     if (m_bUseExtension)
     {
         config.RequiredExtension<Ext_VK_QCOM_image_processing>();
@@ -360,27 +360,26 @@ bool BloomImageprocessing::Initialize(uintptr_t windowHandle, uintptr_t hInstanc
 void BloomImageprocessing::Destroy()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* pVulkan = GetVulkan();
-
-    vkDeviceWaitIdle(pVulkan->m_VulkanDevice);
+    vkDeviceWaitIdle(GetVulkan()->m_VulkanDevice);
 
     // Textures
     for (uint32_t ii = 0; ii < NumWeightImages; ++ii)
     {
-        m_weightTextures[ii] = nullptr;
-        vkDestroyImageView(pVulkan->m_VulkanDevice, m_weightTextureViews[ii], NULL);
+        m_sourceTexture = nullptr;
+        vkDestroyImageView(GetVulkan()->m_VulkanDevice, m_weightTextureViews[ii], NULL);
     }
+    m_sourceTexture = nullptr;
 
     // Shaders
     for (uint32_t ss = 0; ss < ShaderPair_Count; ++ss)
     {
-        ReleaseShader(pVulkan, &m_shaders[ss]);
+        ReleaseShader(GetVulkan(), &m_shaders[ss]);
     }
 
     // Uniform Buffers
     for (uint32_t ii = 0; ii < Pass_Count; ++ii)
     {
-        ReleaseUniformBuffer(pVulkan, &m_uniforms[ii]);
+        ReleaseUniformBuffer(GetVulkan(), &m_uniforms[ii]);
     }
 
     for (uint32_t pp = 0; pp < Pass_Count; ++pp)
@@ -642,7 +641,8 @@ void BloomImageprocessing::FinalizePass(PassInfo* pPass)
     ds.depthTestEnable = VK_FALSE;
     ds.depthWriteEnable = VK_FALSE;
 
-    pVulkan->CreatePipeline(VK_NULL_HANDLE,
+    pVulkan->CreatePipeline(
+        VK_NULL_HANDLE,
         &visci,
         pPass->pLayout,
         pPass->renderpass,
@@ -660,6 +660,7 @@ void BloomImageprocessing::FinalizePass(PassInfo* pPass)
         false,
         VK_NULL_HANDLE,
         & pPass->pipeline);
+
 }
 
 void BloomImageprocessing::DrawPass(Wrap_VkCommandBuffer* cmd, const PassInfo* pPass, uint32_t idx)
@@ -684,17 +685,13 @@ void BloomImageprocessing::DrawPass(Wrap_VkCommandBuffer* cmd, const PassInfo* p
     Scissor.extent.width = pPass->renderArea.width;
     Scissor.extent.height = pPass->renderArea.height;
 
-    cmd->BeginRenderPass(
-        Scissor, 
-        0.0f, 
-        1.0f, 
-        { &clear_color,1 }, 
-        1, 
-        pPass->pRt == NULL ? true : false, 
-        pPass->renderpass, 
-        pPass->pRt == NULL ? true : false, 
-        pPass->pRt == NULL ? pVulkan->m_SwapchainBuffers[idx].framebuffer : pPass->fbo,
-        VK_SUBPASS_CONTENTS_INLINE);
+    cmd->BeginRenderPass(Scissor, 0.0f, 1.0f, {&clear_color, 1}, 1,
+                         pPass->pRt == NULL ? true : false, pPass->renderpass,
+                         pPass->pRt == NULL ? true : false,
+                         pPass->pRt == NULL
+                             ? pVulkan->m_SwapchainBuffers[idx].framebuffer
+                             : pPass->fbo,
+                         VK_SUBPASS_CONTENTS_INLINE);
 
     vkCmdSetViewport(cmd->m_VkCommandBuffer, 0, 1, &Viewport);
     vkCmdSetScissor(cmd->m_VkCommandBuffer, 0, 1, &Scissor);
