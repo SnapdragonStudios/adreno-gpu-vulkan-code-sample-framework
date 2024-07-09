@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD 20)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+add_compile_definitions(IMGUI_DEFINE_MATH_OPERATORS)
+
 # Platform and Graphics API independant source here
 # Graphics API independant (base functionality) source here
 set(CPP_BASE_SRC
@@ -260,6 +262,12 @@ set(EXTERNAL_SRC
     external/imgui/imgui_draw.cpp
     external/imgui/imgui_tables.cpp
     external/imgui/imgui_widgets.cpp
+
+    external/implot/implot.h
+    external/implot/implot.cpp
+    external/implot/implot_items.cpp
+    external/implot/implot_internal.h
+    external/implot/implot_demo.cpp
 )
 set(EXTERNAL_VULKAN_SRC
     external/imgui/backends/imgui_impl_vulkan.cpp
@@ -331,6 +339,7 @@ target_include_directories(framework        PUBLIC external)
 target_include_directories(framework        PUBLIC external/glm)  # so code can do #include "glm/mat3x3.hpp" etc
 target_include_directories(framework        PUBLIC external/json/single_include)
 target_include_directories(framework        PUBLIC external/imgui)
+target_include_directories(framework        PUBLIC external/implot)
 
 # Make sure our graphics api flags are set (Android in particular may/will not have gone through a top level CMakeLists.txt to set these)
 if(NOT DEFINED FRAMEWORK_ENABLE_VULKAN)
@@ -345,6 +354,7 @@ if(FRAMEWORK_ENABLE_VULKAN)
   target_include_directories(framework_vulkan PUBLIC external/glm)  # so code can do #include "glm/mat3x3.hpp" etc
   target_include_directories(framework_vulkan PUBLIC external/json/single_include)
   target_include_directories(framework_vulkan PUBLIC external/imgui)
+  target_include_directories(framework_vulkan PUBLIC external/implot)
 
   target_link_libraries(framework_vulkan framework)
   find_package(Vulkan REQUIRED)

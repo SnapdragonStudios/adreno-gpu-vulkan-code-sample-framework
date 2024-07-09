@@ -111,8 +111,9 @@ bool GuiImguiGfx<Vulkan>::Initialize(uintptr_t windowHandle, uint32_t renderWidt
         init_info.Allocator = nullptr;// g_Allocator;
         init_info.MinImageCount = m_GfxApi.m_SwapchainImageCount;   //unused?
         init_info.ImageCount = m_GfxApi.m_SwapchainImageCount;
+        init_info.RenderPass = m_RenderPass;
         init_info.CheckVkResultFn = check_vk_result;
-        if (!ImGui_ImplVulkan_Init(&init_info, m_RenderPass))
+        if (!ImGui_ImplVulkan_Init(&init_info))
         {
             vkDestroyDescriptorPool(m_GfxApi.m_VulkanDevice, m_DescriptorPool, nullptr);
             m_DescriptorPool = VK_NULL_HANDLE;
@@ -127,7 +128,7 @@ bool GuiImguiGfx<Vulkan>::Initialize(uintptr_t windowHandle, uint32_t renderWidt
             return false;
         }
 
-        if (!ImGui_ImplVulkan_CreateFontsTexture(m_UploadCommandBuffer.m_VkCommandBuffer))
+        if (!ImGui_ImplVulkan_CreateFontsTexture())
         {
             return false;
         }
@@ -144,7 +145,6 @@ bool GuiImguiGfx<Vulkan>::Initialize(uintptr_t windowHandle, uint32_t renderWidt
 
         err = vkDeviceWaitIdle(m_GfxApi.m_VulkanDevice);
         check_vk_result(err);
-        ImGui_ImplVulkan_DestroyFontUploadObjects();
         m_UploadCommandBuffer.Reset();
     }
 
