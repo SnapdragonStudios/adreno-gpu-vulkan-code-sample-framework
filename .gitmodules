@@ -30,3 +30,9 @@
 [submodule "framework/external/KTX-Software"]
 	path = framework/external/KTX-Software
 	url = https://github.com/KhronosGroup/KTX-Software
+[submodule "framework/external/portable-file-dialogs"]
+	path = framework/external/portable-file-dialogs
+	url = https://github.com/samhocevar/portable-file-dialogs
+[submodule "framework/external/implot"]
+	path = framework/external/implot
+	url = https://github.com/epezent/implot

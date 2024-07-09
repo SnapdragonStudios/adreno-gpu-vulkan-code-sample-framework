@@ -142,11 +142,19 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_PAINT:
         if (gpApplication && gAppInitialized)
         {
+            static bool is_rendering = false;
+            if (is_rendering)
+            {
+                return DefWindowProc(hWnd, uMsg, wParam, lParam);
+            }
+
+            is_rendering = true;
             if (!gpApplication->Render())
             {
                 // Exit requested.
                 DestroyWindow(hWnd);
             }
+            is_rendering = false;
         }
         break;
 
