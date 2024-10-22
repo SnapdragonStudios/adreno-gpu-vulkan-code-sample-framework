@@ -1,0 +1,93 @@
+{
+	"$schema": "../../../framework/schema/shaderSchema.json",
+	"Passes": [
+		{
+			"Name": "CONVERT",
+			"Shaders": {
+				"Vertex": "Media/Shaders/Blit.vert.spv",
+				"Fragment": "Media/Shaders/sgsr2_convert2.frag.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Fragment", "Vertex" ],
+							"Count": 1,
+							"Names": [ "ShaderData" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "IN_Depth" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "IN_Velocity" ]
+						}
+					]
+				}
+			],
+			"VertexBindings": [ "VB0" ]
+		},
+		{
+			"Name": "UPSCALE",
+			"Shaders": {
+				"Vertex": "Media/Shaders/Blit.vert.spv",
+				"Fragment": "Media/Shaders/sgsr2_upscale2.frag.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Fragment", "Vertex" ],
+							"Count": 1,
+							"Names": [ "ShaderData" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "VAR_PrevOutput" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "VAR_MotionDepthClipAlphaBuffer" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "IN_Color" ]
+						}
+					]
+				}
+			],
+			"VertexBindings": [ "VB0" ]
+		}
+	],
+	"Vertex": [
+		{
+			"Span": 20,
+			"Name": "VB0",
+			"Elements": [
+				{
+					"Name": "Position",
+					"Offset": 0,
+					"Type": "Vec3"
+				},
+				{
+					"Name": "UV",
+					"Offset": 12,
+					"Type": "Vec2"
+				}
+			]
+		}
+	]
+}

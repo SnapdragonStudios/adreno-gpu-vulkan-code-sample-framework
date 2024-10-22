@@ -1,0 +1,156 @@
+{
+	"$schema": "../../../framework/schema/shaderSchema.json",
+	"Passes": [
+		{
+			"Name": "DP_CONVERT",
+			"Shaders": {
+				"Compute": "Media/Shaders/sgsr2_convert.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "ShaderData" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "IN_OpaqueColor" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "IN_Color" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "IN_Depth" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "IN_Velocity" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_YCoCgColor" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_MotionDepthAlphaBuffer" ]
+						}
+					]
+				}
+			]
+		},
+		{
+			"Name": "DP_ACTIVATE",
+			"Shaders": {
+				"Compute": "Media/Shaders/sgsr2_activate.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "ShaderData" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_PrevLumaHistory" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_MotionDepthAlphaBuffer" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_YCoCgColor" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_MotionDepthClipAlphaBuffer" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_LumaHistory" ]
+						}
+					]
+				}
+			]
+		},
+		{
+			"Name": "DP_UPSCALE",
+			"Shaders": {
+				"Compute": "Media/Shaders/sgsr2_upscale.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "ShaderData" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_PrevHistory" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_MotionDepthClipAlphaBuffer" ]
+						},
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VAR_YCoCgColor" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "OUT_HistoryOutput" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "OUT_SceneColor" ]
+						}
+					]
+				}
+			]
+		}
+	]
+  }
+  
