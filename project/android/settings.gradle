@@ -10,3 +10,4 @@ project(':BloomImageProcessing').projectDir = new File('../../samples/BloomImage
 project(':rayQueryShadows').projectDir = new File('../../samples/rayQueryShadows')
 project(':rayReflections').projectDir = new File('../../samples/rayReflections')
 project(':sgsr').projectDir = new File('../../samples/sgsr')
+project(':sgsr2').projectDir = new File('../../samples/sgsr2')
