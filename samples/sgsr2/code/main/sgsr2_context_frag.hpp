@@ -46,6 +46,7 @@ struct UpscalerShaderData
     glm::vec2                   scaleRatio;
     float                       cameraFovAngleHor;
     float                       minLerpContribution;
+    float                       reset;
     uint32_t                    bSameCamera;
 };
 

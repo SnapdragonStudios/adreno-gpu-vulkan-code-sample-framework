@@ -1,16 +1,14 @@
 #version 320 es
 
 //============================================================================================================
-//   DO NOT REMOVE THIS HEADER UNDER QUALCOMM PRODUCT KIT LICENSE AGREEMENT
 //
-//                  Copyright (c) 2023 QUALCOMM Technologies Inc.
-//                              All Rights Reserved.
 //
-//                       Developed by Snapdragon Studios™
-//               
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
 //============================================================================================================
 
-#define SGSR_VULKAN
+#define REQUEST_NDC_Y_UP
 
 precision highp float;
 precision highp int;
@@ -18,10 +16,10 @@ precision highp int;
 layout(location = 0) out vec4 MotionDepthClipAlphaBuffer;
 layout(location = 0) in highp vec2 texCoord;
 
-layout(binding = 1) uniform mediump sampler2D InputDepth;
-layout(binding = 2) uniform mediump sampler2D InputVelocity;
+layout(set = 0, binding = 1) uniform mediump sampler2D InputDepth;
+layout(set = 0, binding = 2) uniform mediump sampler2D InputVelocity;
 
-layout(binding = 0) uniform Params
+layout(std140, set = 0, binding = 0) uniform Params
 {
     vec4                 clipToPrevClip[4];
     vec2                 renderSize;
@@ -32,6 +30,7 @@ layout(binding = 0) uniform Params
     vec2                 scaleRatio;
     float                cameraFovAngleHor;
     float                minLerpContribution;
+    float                reset;
     uint                 bSameCamera;
 } params;
 
@@ -42,7 +41,6 @@ vec2 decodeVelocityFromTexture(vec2 ev) {
     //dv.z = uintBitsToFloat((uint(round(ev.z * 65535.0f)) << 16) | uint(round(ev.w * 65535.0f)));
     return dv;
 }
-
 
 void main()
 {
@@ -104,10 +102,10 @@ void main()
     }
     else
     {
-#ifdef SGSR_VULKAN
-        vec2 ScreenPos = vec2(2.0f * texCoord.x - 1.0f, 1.0f - 2.0f * texCoord.y);  // NDC Y+ down from viewport Y+ up
+#ifdef REQUEST_NDC_Y_UP
+        vec2 ScreenPos = vec2(2.0f * texCoord.x - 1.0f, 1.0f - 2.0f * texCoord.y);
 #else
-        vec2 ScreenPos = vec2(2.0f * texCoord - 1.0f);  // NDC Y+ down from viewport Y+ down
+        vec2 ScreenPos = vec2(2.0f * texCoord - 1.0f);
 #endif
         vec3 Position = vec3(ScreenPos, btmLeftMax9);    //this_clip
         vec4 PreClip = params.clipToPrevClip[3] + ((params.clipToPrevClip[2] * Position.z) + ((params.clipToPrevClip[1] * ScreenPos.y) + (params.clipToPrevClip[0] * ScreenPos.x)));
