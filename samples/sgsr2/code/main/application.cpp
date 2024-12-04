@@ -949,7 +949,18 @@ void Application::Render(float fltDiffTime)
     const auto prev_view_proj_matrix = m_Camera.ProjectionMatrixNoJitter() * m_Camera.ViewMatrix();
 
     // Update camera
-    m_Camera.SetJitter( m_sgsr2_context->GetJitter() / glm::vec2(gRenderWidth, gRenderHeight));
+    switch (gUpscaleMode)
+    {
+        case 0:
+        default:
+            break;
+        case 1:
+            m_Camera.SetJitter(m_sgsr2_context->GetJitter() / glm::vec2(gRenderWidth, gRenderHeight));
+            break;
+        case 2:
+            m_Camera.SetJitter(m_sgsr2_context_frag->GetJitter() / glm::vec2(gRenderWidth, gRenderHeight));
+            break;
+    } 
     m_Camera.UpdateController(fltDiffTime, *m_CameraController);
     m_Camera.UpdateMatrices();
     

@@ -309,6 +309,7 @@ void SGSR2_Frag::Context::UpdateUniforms(
     m_upscaler_uniform_data.clipToPrevClip              = mt;
     m_upscaler_uniform_data.cameraFovAngleHor           = camera_fov_angle_horizontal;
     m_upscaler_uniform_data.minLerpContribution         = m_camera_still_frame_count > 5 ? 0.3f : 0.0f;
+    m_upscaler_uniform_data.reset                       = false;
     m_upscaler_uniform_data.bSameCamera                 = is_camera_still ? 1 : 0;
 
     UpdateUniformBuffer(&vulkan, m_upscaler_uniform, m_upscaler_uniform_data, m_buffer_index % vulkan.m_SwapchainImageCount);
