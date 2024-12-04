@@ -1,4 +1,4 @@
-include ':empty', ':hello-gltf', ':hdrSwapchain', ':SubPass', ':shaderResolveTonemap', ':rotatedCopy', ':BloomImageProcessing', ':rayQueryShadows',':rayReflections',':sgsr'
+include ':empty', ':hello-gltf', ':hdrSwapchain', ':SubPass', ':shaderResolveTonemap', ':rotatedCopy', ':BloomImageProcessing', ':rayQueryShadows',':rayReflections',':sgsr',':sgsr2'
 
 project(':empty').projectDir = new File('../../samples/empty')
 project(':hello-gltf').projectDir = new File('../../samples/hello-gltf')
