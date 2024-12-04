@@ -1,4 +1,5 @@
 #version 320 es
+
 //============================================================================================================
 //
 //
@@ -7,9 +8,7 @@
 //
 //============================================================================================================
 
-#define SGSR_VULKAN
-
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+#define REQUEST_NDC_Y_UP
 
 float FastLanczos(float base)
 {
@@ -32,7 +31,15 @@ vec3 DecodeColor(uint sample32)
 	return samplecolor;
 }
 
-layout(std140, set = 0, binding = 0) uniform readonly ShaderData
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 1) uniform highp sampler2D PrevHistoryOutput;
+layout(set = 0, binding = 2) uniform highp sampler2D MotionDepthClipAlphaBuffer;
+layout(set = 0, binding = 3) uniform highp usampler2D YCoCgColor;
+layout(set = 0, binding = 4, rgba16f) uniform writeonly mediump image2D HistoryOutput;
+layout(set = 0, binding = 5, rgba16f) uniform writeonly mediump image2D SceneColorOutput;
+
+layout(std140, set = 0, binding = 0) uniform readonly Params
 {
     uvec2                renderSize;
     uvec2                displaySize;
@@ -49,12 +56,6 @@ layout(std140, set = 0, binding = 0) uniform readonly ShaderData
     uint                 reset;
 } params;
 
-layout(set = 0, binding = 1) uniform highp sampler2D PrevHistoryOutput;
-layout(set = 0, binding = 2) uniform highp sampler2D MotionDepthClipAlphaBuffer;
-layout(set = 0, binding = 3) uniform highp usampler2D YCoCgColor;
-layout(set = 0, binding = 4, rgba16f) uniform writeonly mediump image2D HistoryOutput;
-layout(set = 0, binding = 5, rgba16f) uniform writeonly mediump image2D SceneColorOutput;
-
 void main()
 {
     float Biasmax_viewportXScale = min(float(params.displaySize.x) / float(params.renderSize.x), 1.99);  //Biasmax_viewportXScale
@@ -69,7 +70,6 @@ void main()
     Jitteruv.x = clamp(Hruv.x + (InputJitter.x * HistoryInfoViewportSizeInverse.x), 0.0, 1.0);
     Jitteruv.y = clamp(Hruv.y + (InputJitter.y * HistoryInfoViewportSizeInverse.y), 0.0, 1.0);
 
-    uvec4 InputInfoViewportMin = uvec4(0, 0, 0, 0);      //TODO
     ivec2 InputPos = ivec2(Jitteruv * InputInfoViewportSize);
 
     //vec2 Motion = texelFetch(MotionDepthClipAlphaBuffer, InputPos, 0).xy;
@@ -80,10 +80,10 @@ void main()
     ///ScreenPosToViewportScale&Bias
     vec2 PrevUV;
     PrevUV.x = clamp(-0.5 * Motion.x + Hruv.x, 0.0, 1.0);
-#ifdef SGSR_VULKAN
-    PrevUV.y = clamp(0.5 * Motion.y + Hruv.y, 0.0, 1.0);    // NDC Y+ down from viewport Y+ up
+#ifdef REQUEST_NDC_Y_UP
+    PrevUV.y = clamp(0.5 * Motion.y + Hruv.y, 0.0, 1.0);
 #else
-    PrevUV.y = clamp(-0.5 * Motion.y + Hruv.y, 0.0, 1.0);   // NDC Y+ down from viewport Y+ down
+    PrevUV.y = clamp(-0.5 * Motion.y + Hruv.y, 0.0, 1.0);
 #endif
 
     float depthfactor = mda.z;
