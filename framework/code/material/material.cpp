@@ -144,7 +144,7 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 		VkDescriptorType bindingType = textureBinding.second.type;
 
 		uint32_t numTexToBind = textureBinding.second.isArray ? (uint32_t)textureBinding.first.size() : 1;
-		uint32_t texIndex = textureBinding.second.isArray ? 0 : (bufferIdx < textureBinding.first.size() ? bufferIdx : 0);
+		uint32_t texIndex = textureBinding.second.isArray ? 0 : (bufferIdx % textureBinding.first.size());
 
 		writeInfo[writeInfoIdx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writeInfo[writeInfoIdx].descriptorType = bindingType;
@@ -156,7 +156,9 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 		writeInfo[writeInfoIdx].pImageInfo = &imageInfo[imageInfoCount];
 		for (uint32_t t = 0; t < numTexToBind; ++t, ++imageInfoCount, ++texIndex)
         {
-            if (imageInfoCount >= cMAX_IMAGE_INFOS)
+			if (texIndex >= textureBinding.first.size())
+				texIndex = 0;
+			if (imageInfoCount >= cMAX_IMAGE_INFOS)
             {
                 LOGE("Max number (%d) of VkDescriptorImageInfo elements reached!", cMAX_IMAGE_INFOS);
                 assert(0);
@@ -184,7 +186,7 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 		//assert(imageBinding.first.imageLayout == VK_IMAGE_LAYOUT_GENERAL);
 
 		uint32_t numImgToBind = imageBinding.second.isArray ? (uint32_t)imageBinding.first.size() : 1;
-		uint32_t imgIndex = imageBinding.second.isArray ? 0 : (bufferIdx < imageBinding.first.size() ? bufferIdx : 0);
+		uint32_t imgIndex = imageBinding.second.isArray ? 0 : (bufferIdx % imageBinding.first.size());
 
 		writeInfo[writeInfoIdx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writeInfo[writeInfoIdx].descriptorType = bindingType;
@@ -196,6 +198,8 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 		writeInfo[writeInfoIdx].pImageInfo = &imageInfo[imageInfoCount];
 		for (uint32_t t = 0; t < numImgToBind; ++t, ++imageInfoCount, ++imgIndex)
 		{
+			if (imgIndex >= imageBinding.first.size())
+				imgIndex = 0;
             if (imageInfoCount >= cMAX_IMAGE_INFOS)
             {
                 LOGE("Max number (%d) of VkDescriptorImageInfo elements reached!", cMAX_IMAGE_INFOS);
@@ -236,7 +240,7 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 		VkDescriptorType bindingType = bufferBinding.second.type;
 
 		uint32_t numBuffersToBind = bufferBinding.second.isArray ? (uint32_t)bufferBinding.first.size() : 1;
-		uint32_t bufferIndex = bufferBinding.second.isArray ? 0 : (bufferIdx < bufferBinding.first.size() ? bufferIdx : 0);
+		uint32_t bufferIndex = bufferBinding.second.isArray ? 0 : (bufferIdx % bufferBinding.first.size());
 
 		writeInfo[writeInfoIdx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writeInfo[writeInfoIdx].descriptorType = bindingType;
@@ -249,6 +253,8 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 
 		for (uint32_t t = 0; t < numBuffersToBind; ++t, ++bufferIndex)
 		{
+			if (bufferIndex >= bufferBinding.first.size())
+				bufferIndex = 0;
 			pBufferInfo->buffer = bufferBinding.first[bufferIndex].buffer;
             pBufferInfo->offset = bufferBinding.first[bufferIndex].offset;
             pBufferInfo->range = VK_WHOLE_SIZE;
