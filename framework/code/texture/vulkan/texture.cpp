@@ -1,19 +1,22 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2023 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 
 #include "memory/vulkan/memoryMapped.hpp"
 #include "texture.hpp"
 #include "imageWrapper.hpp"
 #include "vulkan/vulkan.hpp"
 
-constexpr VkFilter EnumToVk(SamplerFilter s) { assert(s != SamplerFilter::Undefined); return VkFilter(int(s) - 1); }
+VkFilter EnumToVk(SamplerFilter s) { assert(s != SamplerFilter::Undefined); return VkFilter(int( s ) - 1); }
 static_assert(VK_FILTER_NEAREST == int(SamplerFilter::Nearest) - 1);
 static_assert(VK_FILTER_LINEAR == int(SamplerFilter::Linear) - 1);
+
+VkSamplerMipmapMode EnumToVkSamplerMipmapMode(SamplerFilter s) { assert(s != SamplerFilter::Undefined); return VkSamplerMipmapMode(int(s) - 1); }
+static_assert(VK_SAMPLER_MIPMAP_MODE_NEAREST == int(SamplerFilter::Nearest) - 1);
+static_assert(VK_SAMPLER_MIPMAP_MODE_LINEAR == int(SamplerFilter::Linear) - 1);
 
 constexpr VkSamplerAddressMode EnumToVk(SamplerAddressMode s) { assert(s != SamplerAddressMode::Undefined); return VkSamplerAddressMode(int(s) - 1); }
 static_assert(VK_SAMPLER_ADDRESS_MODE_REPEAT == int(SamplerAddressMode::Repeat) -1);
@@ -31,20 +34,21 @@ static_assert(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE == int(SamplerBorderColor::Opaq
 static_assert(VK_BORDER_COLOR_INT_OPAQUE_WHITE == int(SamplerBorderColor::OpaqueWhiteInt));
 
 
-TextureT<Vulkan>::TextureT() noexcept : VmaImage()
+TextureT<Vulkan>::TextureT() noexcept
 {}
 
-TextureT<Vulkan>::TextureT(uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevels, TextureFormat format, VkImageLayout imageLayout, MemoryAllocatedBuffer<Vulkan, VkImage> vmaImage, const SamplerT<Vulkan>& sampler, VkImageView imageView) noexcept
+TextureT<Vulkan>::TextureT(uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevels, uint32_t firstMip, uint32_t faces, uint32_t firstFace, TextureFormat format, VkImageLayout imageLayout, ImageT<Vulkan> image, SamplerT<Vulkan> sampler, ImageViewT<Vulkan> imageView) noexcept
     : Texture()
     , Width(width)
     , Height(height)
     , Depth(depth)
     , MipLevels(mipLevels)
+    , Faces(faces)
     , Format(format)
     , ImageLayout(imageLayout)
-    , VmaImage(std::move(vmaImage))
-    , Sampler(sampler)
-    , ImageView(imageView)
+    , Image(std::move(image))
+    , Sampler(std::move(sampler))
+    , ImageView(std::move(imageView))
 {
 }
 
@@ -52,19 +56,20 @@ TextureT<Vulkan>::TextureT(uint32_t width, uint32_t height, uint32_t depth, uint
 /// @param image - ownership NOT passed in to this TextureT, beware of lifetime issues.
 /// @param sampler - ownership passed to this TextureT.
 /// @param imageView - ownership passed to this TextureT.
-TextureT<Vulkan>::TextureT(uint32_t width, uint32_t height, uint32_t mipLevels, uint32_t firstMip, TextureFormat format, VkImageLayout imageLayout, VkImage image, VkDeviceMemory memory, const SamplerT<Vulkan>& sampler, VkImageView imageView) noexcept
+TextureT<Vulkan>::TextureT(uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevels, uint32_t firstMip, uint32_t faces, uint32_t firstFace, TextureFormat format, VkImageLayout imageLayout, VkImage image, VkDeviceMemory memory, SamplerT<Vulkan> sampler, ImageViewT<Vulkan> imageView) noexcept
     : Texture()
     , Width(width)
     , Height(height)
-    , Depth(1)
-    , MipLevels(mipLevels)
-    , FirstMip(firstMip)
+    , Depth(depth)
+    , MipLevels( mipLevels )
+    , FirstMip( firstMip )
+    , Faces( faces)
+    , FirstFace( firstFace )
     , Format(format)
     , ImageLayout(imageLayout)
-    , Sampler(sampler)
-    , ImageView(imageView)
-    , Image(image)
-    , Memory(memory)
+    , Sampler(std::move(sampler))
+    , ImageView(std::move(imageView))
+    , Image({image, memory})
 {
 }
 
@@ -86,18 +91,14 @@ TextureT<Vulkan>& TextureT<Vulkan>::operator=(TextureT<Vulkan>&& other) noexcept
         Depth = other.Depth;
         MipLevels = other.MipLevels;
         FirstMip = other.FirstMip;
+        Faces = other.Faces;
+        FirstFace = other.FirstFace;
         Format = other.Format;
         ImageLayout = other.ImageLayout;
         // Actually transfer ownership from 'other'
-        VmaImage = std::move(other.VmaImage);
-        Sampler = other.Sampler;
-        other.Sampler = VK_NULL_HANDLE;
-        ImageView = other.ImageView;
-        other.ImageView = VK_NULL_HANDLE;
-        Image = other.Image;
-        other.Image = VK_NULL_HANDLE;
-        Memory = other.Memory;
-        other.Memory = VK_NULL_HANDLE;
+        Image = std::move(other.Image);
+        Sampler = std::move(other.Sampler);
+        ImageView = std::move(other.ImageView);
     }
     return *this;
 }
@@ -105,31 +106,21 @@ TextureT<Vulkan>& TextureT<Vulkan>::operator=(TextureT<Vulkan>&& other) noexcept
 TextureT<Vulkan>::~TextureT() noexcept
 {
     // Asserts to ensure we called ReleaseTexture on this already.
-    assert(!VmaImage);
+    assert(Image.IsEmpty());
+    assert(ImageView.IsEmpty());
     assert(Sampler.IsEmpty());
-    assert(ImageView == VK_NULL_HANDLE);
 }
 
 void TextureT<Vulkan>::Release(GraphicsApiBase* pGraphicsApi)
 {
     auto* pVulkan = static_cast<Vulkan*>(pGraphicsApi);
 
-    if (ImageView != VK_NULL_HANDLE)
-        vkDestroyImageView(pVulkan->m_VulkanDevice, ImageView, NULL);
-    ImageView = VK_NULL_HANDLE;
+    ReleaseSampler( *pVulkan, &Sampler );
 
-    //if (Sampler != VK_NULL_HANDLE)
-    //    vkDestroySampler(pVulkan->m_VulkanDevice, Sampler, NULL);
-    //Sampler = VK_NULL_HANDLE;
-    Sampler = {};
+    ReleaseImageView(*pVulkan, &ImageView);
 
-    if (VmaImage)
-        pVulkan->GetMemoryManager().Destroy(std::move(VmaImage));
-
-    Image = VK_NULL_HANDLE;
-    Memory = VK_NULL_HANDLE;
+    ReleaseImage(*pVulkan, &Image);
 }
-
 
 static_assert(int(SamplerAddressMode::Repeat) == VK_SAMPLER_ADDRESS_MODE_REPEAT + 1);
 static_assert(int(SamplerAddressMode::MirroredRepeat) == VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT + 1);
@@ -146,6 +137,16 @@ static_assert(int(SamplerBorderColor::OpaqueBlackFloat) == VK_BORDER_COLOR_FLOAT
 static_assert(int(SamplerBorderColor::OpaqueBlackInt) == VK_BORDER_COLOR_INT_OPAQUE_BLACK);
 static_assert(int(SamplerBorderColor::OpaqueWhiteFloat) == VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE);
 static_assert(int(SamplerBorderColor::OpaqueWhiteInt) == VK_BORDER_COLOR_INT_OPAQUE_WHITE);
+
+constexpr VkImageViewType EnumToVk(ImageViewType t) { return VkImageViewType(int( t )); }
+constexpr ImageViewType VkToEnum(VkImageViewType t) { return ImageViewType( int( t ) ); }
+static_assert(int(ImageViewType::View1D) == VK_IMAGE_VIEW_TYPE_1D);
+static_assert(int( ImageViewType::View2D ) == VK_IMAGE_VIEW_TYPE_2D);
+static_assert(int( ImageViewType::View3D ) == VK_IMAGE_VIEW_TYPE_3D);
+static_assert(int( ImageViewType::ViewCube ) == VK_IMAGE_VIEW_TYPE_CUBE);
+static_assert(int( ImageViewType::View1DArray ) == VK_IMAGE_VIEW_TYPE_1D_ARRAY);
+static_assert(int( ImageViewType::View2DArray ) == VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+static_assert(int( ImageViewType::ViewCubeArray ) == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY);
 
 static constexpr std::array<VkFormat, 247> sTextureFormatToVk {
     VK_FORMAT_UNDEFINED,
@@ -548,17 +549,18 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>(Vulkan& vulkan, const CreateTexObje
     if ((texInfo.Flags & TEXTURE_FLAGS::ForceLinearTiling) != 0)
         ImageInfo.tiling = VK_IMAGE_TILING_LINEAR;
 
-    // Need the return image
-    Wrap_VkImage RetImage;
-    bool ImageInitialized = RetImage.Initialize(&vulkan, ImageInfo, MemoryUsage, texInfo.pName);
-    if (!ImageInitialized && MemoryUsage == MemoryUsage::GpuLazilyAllocated)
+    // Create the Image
+    auto& memoryManager = vulkan.GetMemoryManager();
+    auto VmaImage = memoryManager.CreateImage( ImageInfo, MemoryUsage );
+
+    if (!VmaImage && MemoryUsage == MemoryUsage::GpuLazilyAllocated)
     {
         LOGI("Unable to initialize GpuLazilyAllocated image (probably not supported by GPU hardware).  Falling back to GpuExclusive");
         MemoryUsage = MemoryUsage::GpuExclusive;
         ImageInfo.usage &= ~VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
-        ImageInitialized = RetImage.Initialize(&vulkan, ImageInfo, MemoryUsage, texInfo.pName);
+        VmaImage = memoryManager.CreateImage( ImageInfo, MemoryUsage );
     }
-    if (!ImageInitialized)
+    if (!VmaImage)
     {
         LOGE("Unable to initialize image (Not from file)");
         return {};
@@ -568,24 +570,24 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>(Vulkan& vulkan, const CreateTexObje
     switch (texInfo.TexType)
     {
     case TT_SHADING_RATE_IMAGE:
-        vulkan.SetImageLayout(RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, ImageInfo.mipLevels, 0, ImageInfo.arrayLayers);
+        vulkan.SetImageLayout(VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, ImageInfo.mipLevels, 0, ImageInfo.arrayLayers);
         RetImageLayout = VK_IMAGE_LAYOUT_GENERAL;
         break;
     case TT_CPU_UPDATE:
-        vulkan.SetImageLayout(RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, ImageInfo.mipLevels, 0, ImageInfo.arrayLayers);
+        vulkan.SetImageLayout(VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, ImageInfo.mipLevels, 0, ImageInfo.arrayLayers);
         RetImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         break;
     case TT_NORMAL:
-        vulkan.SetImageLayout(RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, ImageInfo.mipLevels, 0, ImageInfo.arrayLayers);
+        vulkan.SetImageLayout(VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, ImageInfo.mipLevels, 0, ImageInfo.arrayLayers);
         RetImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         break;
     case TT_RENDER_TARGET:
     case TT_RENDER_TARGET_WITH_STORAGE:
-        vulkan.SetImageLayout(RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, 1, 0, 1);
+        vulkan.SetImageLayout(VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, 1, 0, 1);
         RetImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         break;
     case TT_RENDER_TARGET_TRANSFERSRC:
-        vulkan.SetImageLayout(RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, 1, 0, 1);
+        vulkan.SetImageLayout(VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, 1, 0, 1);
         RetImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         break;
     case TT_RENDER_TARGET_SUBPASS:
@@ -593,19 +595,19 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>(Vulkan& vulkan, const CreateTexObje
         break;
     case TT_COMPUTE_TARGET:
     case TT_COMPUTE_STORAGE:
-        vulkan.SetImageLayout(RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_GENERAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, ImageInfo.mipLevels, 0, ImageInfo.arrayLayers);
+        vulkan.SetImageLayout(VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_GENERAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, ImageInfo.mipLevels, 0, ImageInfo.arrayLayers);
         RetImageLayout = VK_IMAGE_LAYOUT_GENERAL;
         break;
     case TT_DEPTH_TARGET:
         if (FormatHasStencil( texInfo.Format))
         {
             // Can have depth and stencil flag
-            vulkan.SetImageLayout(RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, 1, 0, 1);
+            vulkan.SetImageLayout(VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, 1, 0, 1);
         }
         else if (FormatHasDepth(texInfo.Format))
         {
             // Only has the depth flag set
-            vulkan.SetImageLayout(RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_DEPTH_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, 1, 0, 1);
+            vulkan.SetImageLayout(VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_DEPTH_BIT, ImageInfo.initialLayout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, (VkPipelineStageFlags)0/*unused param*/, (VkPipelineStageFlags)0/*unused param*/, 0, 1, 0, 1);
         }
         else
         {
@@ -620,11 +622,16 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>(Vulkan& vulkan, const CreateTexObje
 
     vulkan.FinishSetupCommandBuffer(SetupCmdBuffer);
 
+    // Create the Image wrapper (containing the vmaimage)
+    ImageT<Vulkan> Image{ std::move( VmaImage ) };
+    vulkan.SetDebugObjectName( Image.GetVkImage(), texInfo.pName );
+
     // ... and an ImageView
+    const ImageViewType ViewType = (texInfo.uiDepth == 1) ? ImageViewType::View2D : ImageViewType::View3D; // <== No support for VK_IMAGE_VIEW_TYPE_CUBE
     VkImageViewCreateInfo ImageViewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     ImageViewInfo.flags = 0;
-    ImageViewInfo.image = RetImage.m_VmaImage.GetVkBuffer();
-    ImageViewInfo.viewType = (texInfo.uiDepth == 1) ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_3D; // <== No support for VK_IMAGE_VIEW_TYPE_CUBE
+    ImageViewInfo.image = Image.GetVkImage();
+    ImageViewInfo.viewType = EnumToVk( ViewType );
     ImageViewInfo.format = ImageInfo.format;
     ImageViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY; // VK_COMPONENT_SWIZZLE_R;
     ImageViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY; // VK_COMPONENT_SWIZZLE_G;
@@ -634,7 +641,7 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>(Vulkan& vulkan, const CreateTexObje
     ImageViewInfo.subresourceRange.baseMipLevel = 0;
     ImageViewInfo.subresourceRange.levelCount = ImageInfo.mipLevels;
     ImageViewInfo.subresourceRange.baseArrayLayer = 0;
-    ImageViewInfo.subresourceRange.layerCount = 1;
+    ImageViewInfo.subresourceRange.layerCount = ImageInfo.arrayLayers;
 
     SamplerAddressMode SamplerMode = texInfo.SamplerMode;
 
@@ -669,6 +676,7 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>(Vulkan& vulkan, const CreateTexObje
     {
         return {};
     }
+    ImageViewT<Vulkan> ImageView{RetImageView, ImageViewInfo.viewType};
 
     // LOGI("vkCreateImageView: %s -> %p", pName, RetImageView);
 
@@ -689,7 +697,7 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>(Vulkan& vulkan, const CreateTexObje
         return {};
     }
 
-    return{ texInfo.uiWidth, texInfo.uiHeight, texInfo.uiDepth, texInfo.uiMips, texInfo.Format, RetImageLayout, std::move(RetImage.m_VmaImage), Sampler, RetImageView };
+    return{ texInfo.uiWidth, texInfo.uiHeight, texInfo.uiDepth, texInfo.uiMips, 0/*first mip*/, texInfo.uiFaces, 0/*first face*/, texInfo.Format, RetImageLayout, std::move(Image), std::move(Sampler), std::move(ImageView)};
 }
 
 
@@ -697,24 +705,8 @@ TextureT<Vulkan> CreateTextureObject<Vulkan>(Vulkan& vulkan, const CreateTexObje
 TextureT<Vulkan> CreateTextureObjectView( Vulkan& vulkan, const TextureT<Vulkan>& original, TextureFormat viewFormat )
 //-----------------------------------------------------------------------------
 {
-    VkImageView imageView = VK_NULL_HANDLE;
-
-    VkImageViewCreateInfo imageViewCreateInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    imageViewCreateInfo.image = original.GetVkImage();
-    imageViewCreateInfo.viewType = ( original.Depth == 1 ) ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_3D; // <== No support for VK_IMAGE_VIEW_TYPE_CUBE
-    imageViewCreateInfo.format = TextureFormatToVk(viewFormat);
-    imageViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    imageViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    imageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    imageViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    imageViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    imageViewCreateInfo.subresourceRange.levelCount = original.MipLevels;
-    imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    imageViewCreateInfo.subresourceRange.layerCount = 1;
-
-    auto RetVal = vkCreateImageView( vulkan.m_VulkanDevice, &imageViewCreateInfo, NULL, &imageView );
-    if (!CheckVkError( "vkCreateImageView()", RetVal ))
+    auto imageView = CreateImageView( vulkan, original.Image, viewFormat, original.MipLevels, original.FirstMip, original.Faces, original.FirstFace, original.ImageView.GetImageViewType() );
+    if (imageView.IsEmpty())
     {
         return {};
     }
@@ -725,12 +717,31 @@ TextureT<Vulkan> CreateTextureObjectView( Vulkan& vulkan, const TextureT<Vulkan>
         return {};
     }
 
-    return { original.Width, original.Height, original.Depth, original.MipLevels, original.Format, original.GetVkImageLayout(), original.GetVkImage(), VK_NULL_HANDLE, sampler, imageView };
+    return { original.Width, original.Height, original.Depth, original.MipLevels, original.FirstMip, original.Faces, original.FirstFace, original.Format, original.GetVkImageLayout(), original.GetVkImage(), VK_NULL_HANDLE, std::move(sampler), std::move(imageView) };
 }
+
+
+//-----------------------------------------------------------------------------
+TextureT<Vulkan> CreateTextureObjectView( Vulkan& vulkan, const TextureT<Vulkan>& original, uint32_t mipLevels, uint32_t firstMip, uint32_t faces, uint32_t firstFace )
+//-----------------------------------------------------------------------------
+{
+    ImageViewVulkan imageView = CreateImageView( vulkan, original.Image, original.Format, mipLevels, firstMip, faces, firstFace, original.ImageView.GetImageViewType() );
+    if (imageView.IsEmpty())
+    {
+        return {};
+    }
+    SamplerVulkan sampler = CreateSampler( vulkan, SamplerAddressMode::ClampEdge, SamplerFilter::Linear, SamplerBorderColor::TransparentBlackFloat, 0.0f );
+    if (sampler.IsEmpty())
+    {
+        return {};
+    }
+    return {original.Width, original.Height, original.Depth, original.MipLevels, original.FirstMip, original.Faces, original.FirstFace, original.Format, original.GetVkImageLayout(), original.GetVkImage(), VK_NULL_HANDLE, std::move( sampler ), std::move( imageView )};
+}
+
 
 //-----------------------------------------------------------------------------
 template<>
-TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName, uint32_t extraFlags )
+TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName )
 //-----------------------------------------------------------------------------
 {
     if (pName == nullptr)
@@ -738,11 +749,12 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
     else
         LOGI( "CreateTextureFromBuffer (%dx%d): %s", Width, Height, pName );
 
+    auto& memorymanager = vulkan.GetMemoryManager();
+
     uint32_t Faces = 1;
     uint32_t MipLevels = 1;
     VkFormat vkFormat = TextureFormatToVk( Format );
     VkImageUsageFlags FinalUsage = ( VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT );
-    FinalUsage |= (VkImageUsageFlags)extraFlags;
     VkImageLayout FinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     // Image creation info.  Will change below based on need
@@ -770,7 +782,7 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
         const auto& GetImage( uint32_t depth, uint32_t mip ) const { return images[depth * mipsPerDepthSlice]; }
         auto& GetImage( uint32_t depth, uint32_t mip ) { return images[depth * mipsPerDepthSlice + mip]; }
         const uint32_t mipsPerDepthSlice;
-        std::vector<Wrap_VkImage> images;
+        std::vector<MemoryAllocatedBuffer<Vulkan, VkImage>> images;
     };
 
     // Allocate the depth slices (and contained mips) for each face
@@ -810,8 +822,9 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
                 ImageInfo.extent.height = Height;
                 ImageInfo.extent.depth = 1;
 
-                Wrap_VkImage& faceImage = cubeFaces[WhichFace].GetImage( WhichDepth, WhichMip );
-                if (!faceImage.Initialize( &vulkan, ImageInfo, MemoryUsage::CpuToGpu ))
+                MemoryAllocatedBuffer<Vulkan, VkImage>& faceImage = cubeFaces[WhichFace].GetImage( WhichDepth, WhichMip );
+                faceImage.operator=( std::move( memorymanager.CreateImage( ImageInfo, MemoryUsage::CpuToGpu ) ) );
+                if (!faceImage)
                 {
                     LOGE( "CreateTextureFromBuffer: Unable to initialize mip %d of face %d", WhichMip + 1, WhichFace + 1 );
                     return {};
@@ -824,12 +837,10 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
                 SubresInfo.arrayLayer = 0;
 
                 VkSubresourceLayout SubResLayout = {};
-                auto& faceImageMem = faceImage.m_VmaImage;
-                vkGetImageSubresourceLayout( vulkan.m_VulkanDevice, faceImageMem.GetVkBuffer(), &SubresInfo, &SubResLayout );
+                vkGetImageSubresourceLayout( vulkan.m_VulkanDevice, faceImage.GetVkBuffer(), &SubresInfo, &SubResLayout );
 
                 {
-                    auto& memorymanager = vulkan.GetMemoryManager();
-                    auto mappedMemory = memorymanager.Map<uint8_t>( faceImageMem );
+                    auto mappedMemory = memorymanager.Map<uint8_t>( faceImage );
                     if (SubResLayout.rowPitch == Width * formatBytesPerPixel)
                     {
                         memcpy( mappedMemory.data(), pData8, SubResLayout.size );
@@ -845,7 +856,7 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
                             pData8 += Width * formatBytesPerPixel;
                         }
                     }
-                    memorymanager.Unmap( faceImageMem, std::move( mappedMemory ) );
+                    memorymanager.Unmap( faceImage, std::move( mappedMemory ) );
                 }
 
                 // Image barrier for linear image (base)
@@ -855,7 +866,7 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
                 uint32_t baseMipLevel = 0;
                 uint32_t mipLevelCount = 1;
 
-                vulkan.SetImageLayout( faceImageMem.GetVkBuffer(),
+                vulkan.SetImageLayout( faceImage.GetVkBuffer(),
                     SetupCmdBuffer,
                     VK_IMAGE_ASPECT_COLOR_BIT,
                     VK_IMAGE_LAYOUT_PREINITIALIZED,
@@ -888,9 +899,9 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
 
     ImageInfo.arrayLayers = Faces;
 
-    // Need the return image
-    Wrap_VkImage RetImage;
-    if (!RetImage.Initialize( &vulkan, ImageInfo, MemoryUsage::GpuExclusive ))
+    // Create the 'final' image
+    auto FinalVmaImage = memorymanager.CreateImage( ImageInfo, MemoryUsage::GpuExclusive );
+    if (!FinalVmaImage)
     {
         LOGE( "CreateTextureFromBuffer: Unable to initialize texture image" );
         return {};
@@ -905,7 +916,7 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
     uint32_t baseLayer = 0;
     uint32_t layerCount = Faces;
 
-    vulkan.SetImageLayout( RetImage.m_VmaImage.GetVkBuffer(),
+    vulkan.SetImageLayout( FinalVmaImage.GetVkBuffer(),
         SetupCmdBuffer,
         VK_IMAGE_ASPECT_COLOR_BIT,
         VK_IMAGE_LAYOUT_PREINITIALIZED,
@@ -955,8 +966,8 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
                 // Put image copy into command buffer
                 vkCmdCopyImage(
                     SetupCmdBuffer,
-                    cubeFaces[WhichFace].GetImage( WhichDepth, WhichMip ).m_VmaImage.GetVkBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    RetImage.m_VmaImage.GetVkBuffer(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    cubeFaces[WhichFace].GetImage( WhichDepth, WhichMip ).GetVkBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    FinalVmaImage.GetVkBuffer(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     1, &copyRegion );
             }   // Each mipmap in each depth slice
         }   // Each depth slice in each face
@@ -970,7 +981,7 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
     baseLayer = 0;
     layerCount = Faces;
 
-    vulkan.SetImageLayout( RetImage.m_VmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, FinalLayout,
+    vulkan.SetImageLayout( FinalVmaImage.GetVkBuffer(), SetupCmdBuffer, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, FinalLayout,
         srcMask,
         dstMask,
         baseMipLevel,
@@ -981,24 +992,27 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
     // Submit the command buffer we have been working on
     vulkan.FinishSetupCommandBuffer( SetupCmdBuffer );
 
+    // Create the Image wrapper (takes ownership of FinalVmaImage)
+    ImageT<Vulkan> Image{ std::move(FinalVmaImage) };
+
     // Need a sampler...
-    SamplerVulkan Sampler = CreateSampler( vulkan, SamplerMode, Filter, SamplerBorderColor::TransparentBlackFloat, 0.0f );
-    if (Sampler.IsEmpty())
+    SamplerVulkan sampler = CreateSampler( vulkan, SamplerMode, Filter, SamplerBorderColor::TransparentBlackFloat, 0.0f );
+    if (sampler.IsEmpty())
     {
         return {};
     }
 
-    VkImageViewType viewType;
+    ImageViewType viewType;
     if (Depth > 1)
-        viewType = VK_IMAGE_VIEW_TYPE_3D;
+        viewType = ImageViewType::View3D;
     else if (Faces == 6)
-        viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        viewType = ImageViewType::ViewCube;
     else
-        viewType = VK_IMAGE_VIEW_TYPE_2D;
-    VkImageView RetImageView;
-    if (!CreateImageView(vulkan, RetImage.m_VmaImage.GetVkBuffer(), vkFormat, baseMipLevel, MipLevels, Faces, viewType, &RetImageView))
+        viewType = ImageViewType::View2D;
+    ImageViewVulkan imageView = CreateImageView( vulkan, Image, Format, MipLevels, baseMipLevel, layerCount, baseLayer, viewType );
+    if (imageView.IsEmpty())
     {
-        ReleaseSampler(vulkan, &Sampler);
+        ReleaseSampler(vulkan, &sampler);
         return {};
     }
 
@@ -1006,48 +1020,13 @@ TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan& vulkan, const void* pD
     cubeFaces.clear();
 
     // Set the return values
-    TextureVulkan RetTex{ Width, Height, Depth, MipLevels, Format, FinalLayout, std::move( RetImage.m_VmaImage ), Sampler, RetImageView };
-    return RetTex;
+    return { Width, Height, Depth, MipLevels, 0/*firstmip*/, Faces, 0/*firstface*/, Format, FinalLayout, std::move(Image), std::move(sampler), std::move(imageView)};
 }
 
-
 //-----------------------------------------------------------------------------
-/// Create a vulkan image view object
-bool CreateImageView(Vulkan& vulkan, VkImage image, VkFormat format, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t numFaces, VkImageViewType viewType, VkImageView* pRetImageView)
-//-----------------------------------------------------------------------------
-{
-    assert(pRetImageView);
-    VkImageViewCreateInfo ImageViewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    ImageViewInfo.flags = 0;
-    ImageViewInfo.image = image;
-    ImageViewInfo.viewType = viewType;
-
-    ImageViewInfo.format = format;
-    ImageViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
-    ImageViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
-    ImageViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
-    ImageViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
-    ImageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    ImageViewInfo.subresourceRange.baseMipLevel = baseMipLevel;
-    ImageViewInfo.subresourceRange.levelCount = numMipLevels;
-    ImageViewInfo.subresourceRange.baseArrayLayer = 0;
-    ImageViewInfo.subresourceRange.layerCount = 1;
-    if (numFaces == 6)
-        ImageViewInfo.subresourceRange.layerCount = 6;
-    else
-        ImageViewInfo.subresourceRange.layerCount = 1;
-
-    auto RetVal = vkCreateImageView(vulkan.m_VulkanDevice, &ImageViewInfo, NULL, pRetImageView);
-    if (!CheckVkError("vkCreateImageView()", RetVal))
-    {
-        return false;
-    }
-    return true;
-}
-
-// Implementation of template function specialization
 template<>
 void ReleaseTexture<Vulkan>( Vulkan& vulkan, TextureT<Vulkan>* pTexture )
+//-----------------------------------------------------------------------------
 {
     if (!pTexture)
         return;
@@ -1056,27 +1035,143 @@ void ReleaseTexture<Vulkan>( Vulkan& vulkan, TextureT<Vulkan>* pTexture )
 }
 
 
-// Implementation of template function specialization
+//-----------------------------------------------------------------------------
+ImageT<Vulkan>::ImageT( MemoryAllocatedBuffer<Vulkan, VkImage> vmaImage ) noexcept : VmaImage( std::move(vmaImage) )
+//-----------------------------------------------------------------------------
+{}
+
+//-----------------------------------------------------------------------------
+ImageT<Vulkan>::ImageT( VkImage image, VkDeviceMemory memory ) noexcept : VmaImage(), Image(image)/*no change of ownership*/, Memory(memory)/*no change of ownership*/
+//-----------------------------------------------------------------------------
+{}
+
+//-----------------------------------------------------------------------------
+ImageT<Vulkan>::~ImageT()
+//-----------------------------------------------------------------------------
+{
+    assert( !VmaImage );    // expecting ReleaseImage to have been called already (and so this is empty)
+    Image = VK_NULL_HANDLE;
+    Memory = VK_NULL_HANDLE;
+}
+
+//-----------------------------------------------------------------------------
+template<>
+void ReleaseImage<Vulkan>( Vulkan& vulkan, ImageT<Vulkan>* pImage )
+//-----------------------------------------------------------------------------
+{
+    if (pImage->VmaImage)
+        vulkan.GetMemoryManager().Destroy( std::move( pImage->VmaImage ) );
+
+    // We dont own Image or Memory, so just clear them!
+    pImage->Image = VK_NULL_HANDLE;
+    pImage->Memory = VK_NULL_HANDLE;
+
+    *pImage = ImageT<Vulkan>{};    // destroy and clear
+}
+
+
+//-----------------------------------------------------------------------------
+ImageViewT<Vulkan>::ImageViewT( VkImageView imageView, VkImageViewType viewType ) noexcept : m_ImageView( imageView ), m_ImageViewType( VkToEnum(viewType) )
+//-----------------------------------------------------------------------------
+{}
+
+//-----------------------------------------------------------------------------
+ImageViewT<Vulkan>::~ImageViewT()
+//-----------------------------------------------------------------------------
+{
+    assert( m_ImageView == VK_NULL_HANDLE );
+}
+
+//-----------------------------------------------------------------------------
+/// Create a vulkan image view object
+template<>
+ImageViewT<Vulkan> CreateImageView<Vulkan>(Vulkan& vulkan, const ImageT<Vulkan>& image, TextureFormat format, uint32_t numMipLevels, uint32_t baseMipLevel, uint32_t numFaces, uint32_t baseFace, ImageViewType viewType )
+//-----------------------------------------------------------------------------
+{
+    VkImageViewCreateInfo ImageViewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    ImageViewInfo.flags = 0;
+    ImageViewInfo.image = image.GetVkImage();
+    ImageViewInfo.viewType = EnumToVk(viewType);
+
+    ImageViewInfo.format = TextureFormatToVk(format);
+    ImageViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    ImageViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    ImageViewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    ImageViewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    ImageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    ImageViewInfo.subresourceRange.baseMipLevel = baseMipLevel;
+    ImageViewInfo.subresourceRange.levelCount = numMipLevels;
+    ImageViewInfo.subresourceRange.baseArrayLayer = baseFace;
+    ImageViewInfo.subresourceRange.layerCount = numFaces;
+
+    VkImageView imageView;
+    auto RetVal = vkCreateImageView(vulkan.m_VulkanDevice, &ImageViewInfo, NULL, &imageView);
+    if (!CheckVkError("vkCreateImageView()", RetVal))
+    {
+        return {};
+    }
+    return { imageView, ImageViewInfo.viewType };
+}
+
+//-----------------------------------------------------------------------------
+template<>
+void ReleaseImageView( Vulkan& vulkan, ImageViewT<Vulkan>* pImageView )
+//-----------------------------------------------------------------------------
+{
+    if (!pImageView || pImageView->IsEmpty())
+        return;
+    vkDestroyImageView( vulkan.m_VulkanDevice, pImageView->m_ImageView, nullptr );
+    pImageView->m_ImageView = VK_NULL_HANDLE;
+    pImageView->m_ImageViewType = ImageViewType::View1D;
+}
+
+//
+// Constructors/move-operators for SamplerT<Vulkan>.
+//
+SamplerT<Vulkan>::SamplerT() noexcept : m_Sampler( VK_NULL_HANDLE )
+{}
+SamplerT<Vulkan>::~SamplerT() noexcept
+{
+}
+SamplerT<Vulkan>::SamplerT(VkSampler sampler) noexcept : m_Sampler( sampler )
+{}
+SamplerT<Vulkan>::SamplerT(SamplerT<Vulkan>&& src) noexcept
+{
+    *this = std::move( src );
+}
+SamplerT<Vulkan>& SamplerT<Vulkan>::operator=(SamplerT<Vulkan>&& src ) noexcept
+{
+    if (this != &src)
+    {
+        m_Sampler = src.m_Sampler;
+        src.m_Sampler = VK_NULL_HANDLE;
+    }
+    return *this;
+}
+
+
+//-----------------------------------------------------------------------------
 template<>
 SamplerT<Vulkan> CreateSampler<Vulkan>(Vulkan& vulkan, const CreateSamplerObjectInfo& createInfo)
+//-----------------------------------------------------------------------------
 {
-    const bool anisotropyEnable = createInfo.Filter == SamplerFilter::Linear;
+    const bool anisotropyEnable = createInfo.Anisotropy > 1.0f && createInfo.Filter == SamplerFilter::Linear;
     const VkSamplerCreateInfo SamplerInfo{
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
         .flags = 0,
         .magFilter = EnumToVk(createInfo.Filter),
         .minFilter = EnumToVk(createInfo.Filter),
-        .mipmapMode = createInfo.Filter == SamplerFilter::Linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .mipmapMode = EnumToVkSamplerMipmapMode(createInfo.MipFilter),
         .addressModeU = EnumToVk(createInfo.Mode),
         .addressModeV = EnumToVk(createInfo.Mode),
         .addressModeW = EnumToVk(createInfo.Mode),
         .mipLodBias = createInfo.MipBias,
         .anisotropyEnable = anisotropyEnable ? VK_TRUE : VK_FALSE,
-        .maxAnisotropy = anisotropyEnable == VK_TRUE ? 4.0f : 1.0f,
+        .maxAnisotropy = anisotropyEnable == VK_TRUE ? createInfo.Anisotropy : 1.0f,
         .compareEnable = VK_FALSE,
         .compareOp = VK_COMPARE_OP_NEVER,
-        .minLod = 0.0f,
-        .maxLod = FLT_MAX,
+        .minLod = createInfo.MinLod,
+        .maxLod = createInfo.MaxLod,
         .borderColor = EnumToVk(createInfo.BorderColor),
         .unnormalizedCoordinates = createInfo.UnnormalizedCoordinates ? VK_TRUE : VK_FALSE };
 
@@ -1087,12 +1182,41 @@ SamplerT<Vulkan> CreateSampler<Vulkan>(Vulkan& vulkan, const CreateSamplerObject
     return { vkSampler };
 }
 
+//-----------------------------------------------------------------------------
 // Implementation of template function specialization
 template<>
 void ReleaseSampler<Vulkan>( Vulkan& vulkan, SamplerT<Vulkan>* pSampler)
+//-----------------------------------------------------------------------------
 {
     if (!pSampler)
         return;
     vkDestroySampler(vulkan.m_VulkanDevice, pSampler->m_Sampler, nullptr);
     *pSampler = SamplerT<Vulkan>{};    // destroy and clear
+}
+
+//-----------------------------------------------------------------------------
+std::vector<TextureT<Vulkan>> MakeTextureMipViews( Vulkan& vulkan, const TextureT<Vulkan>& source, uint32_t maxMips )
+//-----------------------------------------------------------------------------
+{
+    TextureVulkan               m_ReducedZBuffer;           ///< half sized 'depth' buffer (half in each dimension of original ZBuffer size) with mips.  Populated by the reduce.
+    std::vector<TextureVulkan>  mips;
+
+    const auto numMips = std::min( source.MipLevels, maxMips );
+    mips.reserve( numMips );
+
+    CreateSamplerObjectInfo samplerCreateInfo{
+        .Mode = SamplerAddressMode::ClampEdge,
+        .Filter = SamplerFilter::Nearest
+    };
+    for (int mipLevel = 0; mipLevel < numMips; ++mipLevel)
+    {
+        // Create an imageview and sampler to point to this mip.  Assigned/stored in a TextureVulkan per mip (all pointing to the same VkImage).
+        samplerCreateInfo.MinLod = float( mipLevel );
+        samplerCreateInfo.MaxLod = float( mipLevel );
+
+        auto imageView = CreateImageView( vulkan, source.Image, source.Format, 1, mipLevel, source.Faces, 0, source.ImageView.GetImageViewType() );
+        SamplerT<Vulkan> sampler = CreateSampler( vulkan, samplerCreateInfo );
+        mips.emplace_back( source.Width, source.Height, source.Depth, 1, mipLevel, 1, 0, source.Format, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, source.GetVkImage(), (VkDeviceMemory)VK_NULL_HANDLE, std::move( sampler ), std::move( imageView ) );
+    }
+    return mips;
 }

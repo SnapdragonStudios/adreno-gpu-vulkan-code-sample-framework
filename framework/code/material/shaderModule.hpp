@@ -31,7 +31,7 @@ public:
     ~ShaderModule() {}
 
     enum class ShaderType {
-        Fragment, Vertex, Compute, RayGeneration, RayClosestHit, RayAnyHit, RayMiss
+        Fragment, Vertex, Compute, RayGeneration, RayClosestHit, RayAnyHit, RayMiss, Task, Mesh
     };
 
     void Destroy()

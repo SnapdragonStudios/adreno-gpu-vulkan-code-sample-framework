@@ -1,6 +1,5 @@
 //============================================================================================================
 //
-//
 //                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
@@ -65,18 +64,18 @@ public:
     /// @brief Do the necessary upload etc to go from a cpu texture representation to Vulkan format
     /// WE EXPECT THERE TO BE A SPECIALIZED IMPLEMENTATION OF THIS TEMPLATE for each supported T_GFXAPI.
     /// @param textureFile ktx file data we want to load as a vulkan texture
-    /// @param sampler sampler that loaded texture will take OWNERSHIP of, may be VK_NULL_HANDLE (in which case LoadKtx creates an appropriate sampler)
+    /// @param sampler sampler that loaded texture will take OWNERSHIP of
     /// @returns a &TextureVulkan, will be empty on failure
     template<typename T_GFXAPI>
-    TextureT<T_GFXAPI> LoadKtx(T_GFXAPI& vulkan, const TextureKtxFileWrapper& textureFile, const SamplerT<T_GFXAPI>& sampler);
+    TextureT<T_GFXAPI> LoadKtx(T_GFXAPI& vulkan, const TextureKtxFileWrapper& textureFile, SamplerT<T_GFXAPI> sampler);
 
     /// @brief Load a ktx file and do the necessary upload etc to go from a cpu texture representation to Vulkan format
     /// WE EXPECT THERE TO BE A SPECIALIZED IMPLEMENTATION OF THIS TEMPLATE for each supported T_GFXAPI.
     /// @param filename of ktx (or ktx2) format file we want to load as a vulkan texture
-    /// @param sampler sampler that loaded texture will take OWNERSHIP of, may be VK_NULL_HANDLE (in which case LoadKtx creates an appropriate sampler)
+    /// @param sampler sampler that loaded texture will take OWNERSHIP of
     /// @returns a &TextureVulkan, will be empty on failure
     template<typename T_GFXAPI>
-    TextureT<T_GFXAPI> LoadKtx(T_GFXAPI& vulkan, AssetManager& assetManager, const char* const pFileName, const SamplerT<T_GFXAPI>& sampler);
+    TextureT<T_GFXAPI> LoadKtx(T_GFXAPI& vulkan, AssetManager& assetManager, const char* const pFileName, SamplerT<T_GFXAPI> sampler);
 
 protected:
     /// Helper to get the ktx texture pointer (for derived classes)
@@ -96,24 +95,3 @@ public:
 
     static_assert( sizeof( TextureKtxT<T_GFXAPI> ) != sizeof( TextureKtx ) );   // Ensure this class template is specialized (and not used as-is)
 };
-
-
-//template<typename T_GFXAPI>
-//TextureT<T_GFXAPI> TextureKtx::LoadKtx( T_GFXAPI&, const TextureKtxFileWrapper& textureFile, const SamplerT<T_GFXAPI>& sampler )
-//{
-//    assert( 0 && "TextureKtx::LoadKtx called without using function specialization." );
-//    return {};
-//}
-
-/// @brief Load a ktx file and do the necessary upload etc to go from a cpu texture representation to Vulkan format
-/// @param filename of ktx (or ktx2) format file we want to load as a vulkan texture
-/// @param sampler sampler that loaded texture will take OWNERSHIP of, may be VK_NULL_HANDLE (in which case LoadKtx creates an appropriate sampler)
-/// @returns a &TextureVulkan, will be empty on failure
-//template<typename T_GFXAPI>
-//TextureT<T_GFXAPI> TextureKtx::LoadKtx( T_GFXAPI&, AssetManager& assetManager, const char* const pFileName, const SamplerT<T_GFXAPI>& sampler )
-//{
-//    assert( 0 && "TextureKtx::LoadKtx called without using function specialization." );
-//    return {};
-//}
-
-

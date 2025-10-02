@@ -101,7 +101,10 @@ static VkBufferUsageFlags BufferUsageToVk(BufferUsageFlags usage)
     if ((usage & BufferUsageFlags::Indirect) != 0)
         vkUsage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
     if ((usage & BufferUsageFlags::AccelerationStructure) != 0)
+    {
         vkUsage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+        vkUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    }
     if ((usage & BufferUsageFlags::AccelerationStructureBuild) != 0)
         vkUsage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     if ((usage & BufferUsageFlags::ShaderBindingTable) != 0)

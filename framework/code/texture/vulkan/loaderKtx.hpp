@@ -1,6 +1,5 @@
 //============================================================================================================
 //
-//
 //                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
@@ -46,15 +45,15 @@ public:
 
     /// @brief Do the necessary upload etc to go from a cpu texture representation to Vulkan format
     /// @param textureFile ktx file data we want to load as a vulkan texture
-    /// @param sampler sampler that loaded texture will take OWNERSHIP of, may be VK_NULL_HANDLE (in which case LoadKtx creates an appropriate sampler)
+    /// @param sampler sampler that loaded texture will take OWNERSHIP of
     /// @returns a &TextureVulkan, will be empty on failure
-    TextureVulkan LoadKtx(Vulkan& vulkan, const TextureKtxFileWrapper& textureFile, const SamplerT<Vulkan>& sampler);
+    TextureVulkan LoadKtx(Vulkan& vulkan, const TextureKtxFileWrapper& textureFile, SamplerT<Vulkan> sampler);
 
     /// @brief Load a ktx file and do the necessary upload etc to go from a cpu texture representation to Vulkan format
     /// @param filename of ktx (or ktx2) format file we want to load as a vulkan texture
-    /// @param sampler sampler that loaded texture will take OWNERSHIP of, may be VK_NULL_HANDLE (in which case LoadKtx creates an appropriate sampler)
+    /// @param sampler sampler that loaded texture will take OWNERSHIP of
     /// @returns a &TextureVulkan, will be empty on failure
-    TextureVulkan LoadKtx(Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, const SamplerT<Vulkan>& sampler);
+    TextureVulkan LoadKtx(Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, SamplerT<Vulkan> sampler);
 
     /// @brief Run the Ktx2 transcoding step (if needed) 
     /// Will do nothing for textures that do not need transcoding.

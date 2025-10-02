@@ -83,6 +83,16 @@ static VkBlendFactor BlendFactorToVk( ShaderPassDescription::BlendFactor bf)
     return VK_BLEND_FACTOR_ZERO;
 }
 
+bool Drawable::Init(std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses, int nodeId)
+{
+    mMeshObject = {};
+    mVertexInstanceBuffer = {};
+    mDrawIndirectBuffer = std::move(drawIndirectBuffer);
+    mNodeId = nodeId;
+
+    return ReInit(vkRenderPasses, passNames, passMask, passMultisample, subpasses);
+}
+
 bool Drawable::Init(VkRenderPass vkRenderPass, const char* passName, Mesh<Vulkan> meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses, int nodeId)
 {
     mMeshObject = std::move(meshObject);
@@ -101,6 +111,15 @@ bool Drawable::Init(std::span<VkRenderPass> vkRenderPasses, const char* const* p
     return ReInit(vkRenderPasses, passNames, passMask, passMultisample, subpasses);
 }
 
+bool Drawable::Init(VkRenderPass vkRenderPass, const char* passName, Mesh<Vulkan> meshObject, VkPipelineInputAssemblyStateCreateInfo  ia_custom, VkPipelineRasterizationStateCreateInfo  rs_custom)
+{
+    mMeshObject = std::move(meshObject);
+    mVertexInstanceBuffer = std::nullopt;
+    mDrawIndirectBuffer = std::nullopt;
+    mNodeId = -1;
+    return ReInit(vkRenderPass, passName, nullptr, nullptr, ia_custom, rs_custom);
+}
+
 bool Drawable::ReInit( VkRenderPass vkRenderPass, const char* passName, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses )
 {
     auto multisampleSpan = passMultisample ? std::span<const VkSampleCountFlagBits>(passMultisample, 1) : std::span<const VkSampleCountFlagBits>{};
@@ -109,7 +128,35 @@ bool Drawable::ReInit( VkRenderPass vkRenderPass, const char* passName, const Vk
     return ReInit( { &vkRenderPass,1 }, &passName, 1, multisampleSpan, subpassesSpan );
 }
 
-bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses )
+bool Drawable::ReInit( VkRenderPass vkRenderPass, const char* passName, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses, VkPipelineInputAssemblyStateCreateInfo ia_custom, VkPipelineRasterizationStateCreateInfo rs_custom)
+{
+    auto multisampleSpan = passMultisample ? std::span<const VkSampleCountFlagBits>(passMultisample, 1) : std::span<const VkSampleCountFlagBits>{};
+    auto subpassesSpan = subpasses ? std::span<const uint32_t>( subpasses, 1 ) : std::span<const uint32_t>{};
+
+    return ReInit( { &vkRenderPass,1 }, &passName, 1, multisampleSpan, subpassesSpan, ia_custom, rs_custom);
+}
+
+bool Drawable::ReInit(std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses)
+{
+    // Need default values for InputAssembly and RasterizationState
+
+    VkPipelineInputAssemblyStateCreateInfo ia_custom = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    ia_custom.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    // State for rasterization, such as polygon fill mode is defined.
+    VkPipelineRasterizationStateCreateInfo rs_custom = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    rs_custom.polygonMode = VK_POLYGON_MODE_FILL;
+    rs_custom.cullMode = VK_CULL_MODE_NONE;
+    rs_custom.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rs_custom.depthClampEnable = VK_FALSE;
+    rs_custom.rasterizerDiscardEnable = VK_FALSE;
+    rs_custom.depthBiasEnable = VK_FALSE;
+    rs_custom.lineWidth = 1.0f;
+
+    return ReInit(vkRenderPasses, passNames, passMask, passMultisample, subpasses, ia_custom, rs_custom);
+}
+
+bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses, VkPipelineInputAssemblyStateCreateInfo ia_custom, VkPipelineRasterizationStateCreateInfo rs_custom)
 {
     assert( passMultisample.empty() || passMultisample.size() == vkRenderPasses.size() );
     mPassMask = passMask;
@@ -123,15 +170,17 @@ bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const
 
     const auto& shader = mMaterial.m_shader;
     mPasses.reserve(shader.GetShaderPasses().size());
-    for (uint32_t passIdx = 0; passIdx < sizeof(passMask) * 8; ++passIdx)
+    for (uint32_t passIdx = 0; passIdx < sizeof(passMask) * 8 && passMask != 0; ++passIdx)
     {
-        if (passMask & (1 << passIdx))
+        bool passMaskSet = ((passMask & 1) != 0);
+        passMask >>= 1;
+        if (passMaskSet)
         {
             // LOGI("Creating Mesh Object PipelineState and Pipeline for pass... %s", passNames[passIdx]);
             MaterialPass* pMaterialPass = const_cast<MaterialPass*>(mMaterial.GetMaterialPass(passNames[passIdx]));
             if (!pMaterialPass)
             {
-                LOGE("  Pass does not exist in shader");
+                LOGE("  Pass %s does not exist in shader", passNames[passIdx]);
                 continue;
             }
             assert(pMaterialPass);
@@ -139,13 +188,13 @@ bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const
 
             // Common to all pipelines
             // State for rasterization, such as polygon fill mode is defined.
-            VkPipelineRasterizationStateCreateInfo rs {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+            VkPipelineRasterizationStateCreateInfo rs = rs_custom;
             const auto& fixedFunctionSettings = shaderPass.m_shaderPassDescription.m_fixedFunctionSettings;
-            rs.polygonMode = VK_POLYGON_MODE_FILL;
+            // Don't stomp this value! rs.polygonMode = VK_POLYGON_MODE_FILL;
             rs.cullMode = (fixedFunctionSettings.cullBackFace?VK_CULL_MODE_BACK_BIT:0) | (fixedFunctionSettings.cullFrontFace ? VK_CULL_MODE_FRONT_BIT : 0);
-            rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            // Don't stomp this value! rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rs.depthClampEnable = fixedFunctionSettings.depthClampEnable ? VK_TRUE : VK_FALSE;
-            rs.rasterizerDiscardEnable = VK_FALSE;
+            // Don't stomp this value! rs.rasterizerDiscardEnable = VK_FALSE;
             rs.depthBiasEnable = fixedFunctionSettings.depthBiasEnable ? VK_TRUE : VK_FALSE;
             if (fixedFunctionSettings.depthBiasEnable)
             {
@@ -153,7 +202,7 @@ bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const
                 rs.depthBiasClamp = fixedFunctionSettings.depthBiasClamp;
                 rs.depthBiasSlopeFactor = fixedFunctionSettings.depthBiasSlope;
             }
-            rs.lineWidth = 1.0f;
+            // Don't stomp this value! rs.lineWidth = 1.0f;
 
             const auto& outputSettings = shaderPass.m_shaderPassDescription.m_outputs;
 
@@ -320,6 +369,8 @@ bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const
                                                       );
             VkShaderModule vkVertShader = VK_NULL_HANDLE;
             VkShaderModule vkFragShader = VK_NULL_HANDLE;
+            VkShaderModule vkMeshShader = VK_NULL_HANDLE;
+            VkShaderModule vkTaskShader = VK_NULL_HANDLE;
 
             std::visit( [&](auto& m)
             {
@@ -327,6 +378,17 @@ bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const
                 if constexpr (std::is_same_v<T, GraphicsShaderModules<Vulkan>>)
                 {
                     vkVertShader = m.vert.GetVkShaderModule();
+                    vkFragShader = m.frag.GetVkShaderModule();
+                }
+                else if constexpr (std::is_same_v<T, GraphicsMeshShaderModules<Vulkan>>)
+                {
+                    vkMeshShader = m.mesh.GetVkShaderModule();
+                    vkFragShader = m.frag.GetVkShaderModule();
+                }
+                else if constexpr (std::is_same_v<T, GraphicsTaskMeshShaderModules<Vulkan>>)
+                {
+                    vkTaskShader = m.task.GetVkShaderModule();
+                    vkMeshShader = m.mesh.GetVkShaderModule();
                     vkFragShader = m.frag.GetVkShaderModule();
                 }
                 else if constexpr (std::is_same_v<T, GraphicsShaderModuleVertOnly<Vulkan>>)
@@ -350,7 +412,231 @@ bool Drawable::ReInit( std::span<VkRenderPass> vkRenderPasses, const char* const
                 &ms,
                 {},//dynamic states
                 nullptr, nullptr,
+                vkTaskShader,
+                vkMeshShader,
                 vkVertShader,
+                vkFragShader,
+                pMaterialPass->GetSpecializationConstants().GetVkSpecializationInfo(),
+                false,
+                VK_NULL_HANDLE,
+                &pass.mPipeline,
+                ia_custom))
+            {
+                // Error
+                return false;
+            }
+            mVulkan.SetDebugObjectName(pass.mPipeline, pMaterialPass->mShaderPass.m_shaderPassDescription.m_vertexName.c_str());
+        }
+    }
+    return true;
+}
+
+bool Drawable::InitMeshShader(std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::optional<DrawIndirectBufferObject> drawIndirectBuffer, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses, int nodeId)
+{
+    mMeshObject = {};
+    mVertexInstanceBuffer = {};
+    mDrawIndirectBuffer = std::move(drawIndirectBuffer);
+    mNodeId = nodeId;
+
+    return ReInitMeshShader(vkRenderPasses, passNames, passMask, passMultisample, subpasses);
+}
+bool Drawable::ReInitMeshShader( std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses )
+{
+    assert( passMultisample.empty() || passMultisample.size() == vkRenderPasses.size() );
+    mPassMask = passMask;
+    mPassNameToIndex.clear();
+    for (auto& pass : mPasses)
+    {
+        vkDestroyPipeline(mVulkan.m_VulkanDevice, pass.mPipeline, nullptr);
+        pass.mPipeline = VK_NULL_HANDLE;
+    }
+    mPasses.clear();
+
+    const auto& shader = mMaterial.m_shader;
+    mPasses.reserve(shader.GetShaderPasses().size());
+    for (uint32_t passIdx = 0; passIdx < sizeof(passMask) * 8 && passMask != 0; ++passIdx)
+    {
+        bool passMaskSet = ((passMask & 1) != 0);
+        passMask >>= 1;
+        if (passMaskSet)
+        {
+            // LOGI("Creating Mesh Object PipelineState and Pipeline for pass... %s", passNames[passIdx]);
+            MaterialPass* pMaterialPass = const_cast<MaterialPass*>(mMaterial.GetMaterialPass(passNames[passIdx]));
+            if (!pMaterialPass)
+            {
+                LOGE("  Pass %s does not exist in shader", passNames[passIdx]);
+                continue;
+            }
+            assert(pMaterialPass);
+            const auto& shaderPass = pMaterialPass->mShaderPass;
+
+            // Common to all pipelines
+            // State for rasterization, such as polygon fill mode is defined.
+            VkPipelineRasterizationStateCreateInfo rs {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+            const auto& fixedFunctionSettings = shaderPass.m_shaderPassDescription.m_fixedFunctionSettings;
+            rs.polygonMode = VK_POLYGON_MODE_FILL;
+            rs.cullMode = (fixedFunctionSettings.cullBackFace?VK_CULL_MODE_BACK_BIT:0) | (fixedFunctionSettings.cullFrontFace ? VK_CULL_MODE_FRONT_BIT : 0);
+            rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            rs.depthClampEnable = fixedFunctionSettings.depthClampEnable ? VK_TRUE : VK_FALSE;
+            rs.rasterizerDiscardEnable = VK_FALSE;
+            rs.depthBiasEnable = fixedFunctionSettings.depthBiasEnable ? VK_TRUE : VK_FALSE;
+            if (fixedFunctionSettings.depthBiasEnable)
+            {
+                rs.depthBiasConstantFactor = fixedFunctionSettings.depthBiasConstant;
+                rs.depthBiasClamp = fixedFunctionSettings.depthBiasClamp;
+                rs.depthBiasSlopeFactor = fixedFunctionSettings.depthBiasSlope;
+            }
+            rs.lineWidth = 1.0f;
+
+            const auto& outputSettings = shaderPass.m_shaderPassDescription.m_outputs;
+
+            // Setup blending/transparency
+            std::vector<VkPipelineColorBlendAttachmentState> BlendStates;
+            BlendStates.reserve(outputSettings.size());
+            for (const auto& outputSetting : outputSettings)
+            {
+                VkPipelineColorBlendAttachmentState& cb = BlendStates.emplace_back(VkPipelineColorBlendAttachmentState{});
+                if (outputSetting.blendEnable)
+                {
+                    cb.blendEnable = VK_TRUE;
+                    cb.srcColorBlendFactor = BlendFactorToVk(outputSetting.srcColorBlendFactor);
+                    cb.dstColorBlendFactor = BlendFactorToVk(outputSetting.dstColorBlendFactor);
+                    cb.colorBlendOp = VK_BLEND_OP_ADD;
+                    cb.srcAlphaBlendFactor = BlendFactorToVk(outputSetting.srcAlphaBlendFactor);
+                    cb.dstAlphaBlendFactor = BlendFactorToVk(outputSetting.dstAlphaBlendFactor);
+                    cb.alphaBlendOp = VK_BLEND_OP_ADD;
+                }
+                cb.colorWriteMask = outputSetting.colorWriteMask & (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+            }
+
+            VkPipelineColorBlendStateCreateInfo cb = {};
+            cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+            cb.attachmentCount = (uint32_t)BlendStates.size();
+            cb.pAttachments = BlendStates.data();
+
+            // Setup depth testing
+            VkPipelineDepthStencilStateCreateInfo ds = {};
+            ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+            ds.depthTestEnable = fixedFunctionSettings.depthTestEnable ? VK_TRUE : VK_FALSE;
+            ds.depthWriteEnable = fixedFunctionSettings.depthWriteEnable ? VK_TRUE : VK_FALSE;
+            switch( fixedFunctionSettings.depthCompareOp ) {
+            case ShaderPassDescription::DepthCompareOp::LessEqual:
+                ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+                break;
+            case ShaderPassDescription::DepthCompareOp::Equal:
+                ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+                break;
+            case ShaderPassDescription::DepthCompareOp::Greater:
+                ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+                break;
+            }
+            ds.depthBoundsTestEnable = VK_FALSE;
+            ds.back.failOp = VK_STENCIL_OP_KEEP;
+            ds.back.passOp = VK_STENCIL_OP_KEEP;
+            ds.back.compareOp = VK_COMPARE_OP_ALWAYS;
+            ds.stencilTestEnable = VK_FALSE;
+            ds.front = ds.back;
+
+            // Setup (multi) sampling
+            VkSampleMask sampleMask = 0;
+            VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+
+            ms.rasterizationSamples = passMultisample.empty() ? VK_SAMPLE_COUNT_1_BIT : passMultisample[passIdx];
+            const auto& sampleShadingSettings = shaderPass.m_shaderPassDescription.m_sampleShadingSettings;
+            ms.sampleShadingEnable = sampleShadingSettings.sampleShadingEnable;
+            if (sampleShadingSettings.sampleShadingMask != 0)
+            {
+                assert(ms.rasterizationSamples <= VK_SAMPLE_COUNT_32_BIT ); // sampleMask is only 32bits currently! Easy fix if we want > 32x MSAA
+                sampleMask = sampleShadingSettings.sampleShadingMask & ((1 << ms.rasterizationSamples) -1);
+                ms.pSampleMask = &sampleMask;
+            }
+
+            VkPipelineSampleLocationsStateCreateInfoEXT msLocations = { VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT };
+            if( sampleShadingSettings.forceCenterSample )
+            {
+                msLocations.sampleLocationsEnable = VK_TRUE;
+                msLocations.sampleLocationsInfo.sType = VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT;
+                msLocations.sampleLocationsInfo.sampleLocationsPerPixel = ms.rasterizationSamples;
+                msLocations.sampleLocationsInfo.sampleLocationsCount = (uint32_t) ms.rasterizationSamples;
+                msLocations.sampleLocationsInfo.sampleLocationGridSize = { 1,1 };
+                std::vector<VkSampleLocationEXT> msSampleLocations( msLocations.sampleLocationsInfo.sampleLocationsCount, { 0.5f,0.5f } );
+                msLocations.sampleLocationsInfo.pSampleLocations = msSampleLocations.data();
+                ms.pNext = &msLocations;
+            }
+
+            mPassNameToIndex.try_emplace(passNames[passIdx], (uint32_t)mPasses.size());   // add the lookup (in to mPasses)
+
+            VkBuffer indexBuffer = VK_NULL_HANDLE;
+            VkIndexType indexBufferType = VK_INDEX_TYPE_MAX_ENUM;
+
+            // Indirect Draw buffer is optional
+            VkBuffer drawIndirectBuffer = mDrawIndirectBuffer.has_value() ? mDrawIndirectBuffer->GetVkBuffer() : VK_NULL_HANDLE;
+            uint32_t drawIndirectCount = mDrawIndirectBuffer.has_value() ? (uint32_t)mDrawIndirectBuffer->GetNumDraws() : 0;
+            uint32_t drawIndirectOffset = mDrawIndirectBuffer.has_value() ? mDrawIndirectBuffer->GetBufferOffset() : 0;
+            // Indirect Draw Count (count buffer) set to be the beginning of the drawIndirectBuffer IF there is an offset in the mDrawIndirectBuffer.
+            VkBuffer drawIndirectCountBuffer = drawIndirectOffset>0 ? drawIndirectBuffer : VK_NULL_HANDLE;
+
+            // Pipeline layout may come from the shaderPass or (if that fails) from the materialPass (if it was created late because of 'dynamic' descriptor set layout).
+            VkPipelineLayout pipelineLayout = shaderPass.GetPipelineLayout().GetVkPipelineLayout();
+            if (pipelineLayout == VK_NULL_HANDLE)
+                pipelineLayout = pMaterialPass->GetPipelineLayout().GetVkPipelineLayout();
+
+            // add the DrawablePass
+            DrawablePass& pass = mPasses.emplace_back( *pMaterialPass,
+                                                        (VkPipeline) VK_NULL_HANDLE,
+                                                        pipelineLayout,
+                                                        pMaterialPass->GetVkDescriptorSets(),
+                                                        shaderPass.GetPipelineVertexInputState(),
+                                                        DrawablePassVertexBuffers { }, //DrawablePassVertexBuffers { std::move( passVertexBuffers ), std::move( passVertexBufferOffsets ) },
+                                                        VK_NULL_HANDLE, //indexBuffer,
+                                                        indexBufferType,
+                                                        drawIndirectBuffer,
+                                                        drawIndirectCountBuffer,
+                                                        0, //(uint32_t)mMeshObject.m_NumVertices,
+                                                        0, //(uint32_t)indexCount,
+                                                        (uint32_t)drawIndirectCount,
+                                                        (uint32_t)drawIndirectOffset,
+                                                        passIdx
+                                                      );
+            VkShaderModule vkVertShader = VK_NULL_HANDLE;
+            VkShaderModule vkFragShader = VK_NULL_HANDLE;
+            VkShaderModule vkMeshShader = VK_NULL_HANDLE;
+            VkShaderModule vkTaskShader = VK_NULL_HANDLE;
+
+            std::visit( [&](auto& m)
+            {
+                using T = std::decay_t<decltype(m)>;
+                if constexpr (std::is_same_v<T, GraphicsMeshShaderModules<Vulkan>>)
+                {
+                    vkMeshShader = m.mesh.GetVkShaderModule();
+                    vkFragShader = m.frag.GetVkShaderModule();
+                }
+                else if constexpr (std::is_same_v<T, GraphicsTaskMeshShaderModules<Vulkan>>)
+                {
+                    vkTaskShader = m.task.GetVkShaderModule();
+                    vkMeshShader = m.mesh.GetVkShaderModule();
+                    vkFragShader = m.frag.GetVkShaderModule();
+                }
+                else
+                {
+                    assert( 0 );    // unsupported shader module type (eg ComputeShaderModule,  VertexShaderModule, ...)
+                }
+            }, shaderPass.m_shaders.m_modules );
+
+            if (!mVulkan.CreatePipeline(mVulkan.GetPipelineCache(),
+                &pass.mPipelineVertexInputState.GetVkPipelineVertexInputStateCreateInfo(),
+                pass.mPipelineLayout,
+                vkRenderPasses[passIdx],
+                subpasses.empty() ? 0 :subpasses[passIdx],
+                &rs,
+                &ds,
+                BlendStates.empty() ? nullptr : &cb,
+                &ms,
+                {},//dynamic states
+                nullptr, nullptr,
+                vkTaskShader,
+                vkMeshShader,
+                VK_NULL_HANDLE, //  no vertex shader  vkVertShader,
                 vkFragShader,
                 pMaterialPass->GetSpecializationConstants().GetVkSpecializationInfo(),
                 false,
@@ -385,6 +671,58 @@ void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawableP
             NULL);
     }
 
+    const auto& shaderPassDescription = drawablePass.mMaterialPass.mShaderPass.m_shaderPassDescription;
+    if (!shaderPassDescription.m_meshName.empty() && !shaderPassDescription.m_taskName.empty())    // Has a mesh shader (maybe not the ideal way to test this)
+    {
+        auto* meshExtension = mVulkan.GetExtension<ExtensionHelper::Ext_VK_KHR_mesh_shader>();
+        if (!meshExtension || meshExtension->Status != VulkanExtensionStatus::eLoaded)
+            assert( 0 && "mesh shader extension not loader or supported" );
+        else
+        {
+
+            meshExtension->m_vkCmdDrawMeshTasksEXT(cmdBuffer, mDispatchGroupCount[0], mDispatchGroupCount[1], mDispatchGroupCount[2]);
+            return;
+        }
+    }
+    else if (!shaderPassDescription.m_meshName.empty() && shaderPassDescription.m_taskName.empty())    // Has a mesh shader (maybe not the ideal way to test this)
+    {
+        auto* meshExtension = mVulkan.GetExtension<ExtensionHelper::Ext_VK_KHR_mesh_shader>();
+        if (!meshExtension || meshExtension->Status != VulkanExtensionStatus::eLoaded)
+            assert( 0 && "mesh shader extension not loader or supported" );
+        else
+        {
+            if (drawablePass.mDrawIndirectBuffer != VK_NULL_HANDLE)
+            {
+                if (drawablePass.mDrawIndirectCountBuffer != VK_NULL_HANDLE)
+                {
+                    // Draw the mesh using Mesh indirect count buffer (vkCmdDrawMeshTasksIndirectCountEXT command)
+                    assert(meshExtension->m_vkCmdDrawMeshTasksIndirectCountEXT != nullptr);
+                    meshExtension->m_vkCmdDrawMeshTasksIndirectCountEXT(
+                        cmdBuffer, 
+                        drawablePass.mDrawIndirectBuffer, 
+                        drawablePass.mDrawIndirectOffset, 
+                        drawablePass.mDrawIndirectCountBuffer, 
+                        0, 
+                        drawablePass.mNumDrawIndirect, 
+                        sizeof(VkDrawIndexedIndirectCommand));
+                }
+                else
+                {
+                    // Draw the mesh using Mesh indirect buffer (vkCmdDrawMeshTasksIndirectEXT)
+                    assert(meshExtension->m_vkCmdDrawMeshTasksIndirectEXT!= nullptr);
+                    meshExtension->m_vkCmdDrawMeshTasksIndirectEXT(
+                        cmdBuffer, 
+                        drawablePass.mDrawIndirectBuffer, 
+                        drawablePass.mDrawIndirectOffset, 
+                        drawablePass.mNumDrawIndirect, 
+                        sizeof(VkDrawIndexedIndirectCommand));
+                }
+            }
+        }
+        // RETURN here if mesh shader
+        return;
+    }
+
     const auto& vertexBuffers = vertexBufferOverrides.empty() ? drawablePass.mVertexBuffers : vertexBufferOverrides[bufferIdx % vertexBufferOverrides.size()];
 
     if (!vertexBuffers.mVertexBuffers.empty())
@@ -416,14 +754,16 @@ void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawableP
         {
             if (drawablePass.mDrawIndirectCountBuffer != VK_NULL_HANDLE)
             {
-                // Draw the mesh using draw indirect cont buffer (VkDrawIndexedIndirectCount command)
+                // Draw the mesh using draw indirect count buffer (VkDrawIndexedIndirectCount command)
                 const auto* drawIndirectCountExt = mVulkan.GetExtension<ExtensionHelper::Ext_VK_KHR_draw_indirect_count>();
                 assert( drawIndirectCountExt != nullptr && drawIndirectCountExt->m_vkCmdDrawIndexedIndirectCountKHR != nullptr);
                 drawIndirectCountExt->m_vkCmdDrawIndexedIndirectCountKHR(cmdBuffer, drawablePass.mDrawIndirectBuffer, drawablePass.mDrawIndirectOffset, drawablePass.mDrawIndirectCountBuffer, 0, drawablePass.mNumDrawIndirect, sizeof(VkDrawIndexedIndirectCommand));
             }
             else
+            {
                 // Draw the mesh using draw indirect buffer (VkDrawIndexedIndirectCommand)
                 vkCmdDrawIndexedIndirect(cmdBuffer, drawablePass.mDrawIndirectBuffer, drawablePass.mDrawIndirectOffset, drawablePass.mNumDrawIndirect, sizeof(VkDrawIndexedIndirectCommand));
+        }
         }
         else
         {
@@ -443,8 +783,10 @@ void Drawable::DrawPass(VkCommandBuffer cmdBuffer, const DrawablePass& drawableP
                 drawIndirectCountExt->m_vkCmdDrawIndexedIndirectCountKHR(cmdBuffer, drawablePass.mDrawIndirectBuffer, drawablePass.mDrawIndirectOffset, drawablePass.mDrawIndirectCountBuffer, 0, drawablePass.mNumDrawIndirect, sizeof(VkDrawIndirectCommand));
             }
             else
+            {
                 // Draw the mesh using draw indirect buffer (VkDrawIndirectCommand - no index buffer)
                 vkCmdDrawIndirect(cmdBuffer, drawablePass.mDrawIndirectBuffer, drawablePass.mDrawIndirectOffset, drawablePass.mNumDrawIndirect, sizeof(VkDrawIndirectCommand));
+        }
         }
         else
         {

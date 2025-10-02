@@ -142,7 +142,7 @@ protected:
 
     /// Texture loader helper to replace the (old) texture loading code
     TextureT<tGfxApi> LoadKTXTexture(tGfxApi*, AssetManager&, const char* filename, SamplerAddressMode = SamplerAddressMode::ClampEdge);
-    TextureT<tGfxApi> LoadKTXTexture(tGfxApi*, AssetManager&, const char* filename, const Sampler&);
+    TextureT<tGfxApi> LoadKTXTexture(tGfxApi*, AssetManager&, const char* filename, Sampler&);
 
     /// Mesh loader helper to load the first shape in a .gltf file (no materials).
     /// Returned MeshObject does not have an index buffer (3 verts per triangle) and data is in the MeshHelper::vertex_layout format.

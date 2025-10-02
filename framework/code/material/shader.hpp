@@ -42,6 +42,24 @@ struct GraphicsShaderModuleVertOnly
     ShaderModuleT<T_GFXAPI>& vert;
     operator const auto& () const { return vert; }
 };
+/// Reference to a 'mesh' graphics pipeline pairing of a mesh and fragment shader
+/// @ingroup Material
+template<typename T_GFXAPI>
+struct GraphicsMeshShaderModules
+{
+    ShaderModuleT<T_GFXAPI>& mesh;
+    ShaderModuleT<T_GFXAPI>& frag;
+};
+/// Reference to a 'task mesh' graphics pipeline pairing of a task, mesh and fragment shader
+/// @ingroup Material
+template<typename T_GFXAPI>
+struct GraphicsTaskMeshShaderModules
+{
+    ShaderModuleT<T_GFXAPI>& task;
+    ShaderModuleT<T_GFXAPI>& mesh;
+    ShaderModuleT<T_GFXAPI>& frag;
+};
+
 /// Reference to a compute shader
 /// @ingroup Material
 template<typename T_GFXAPI>
@@ -75,7 +93,7 @@ public:
         : m_modules(T( std::forward<T>( m ) ))
     {}
     template<typename T> const T& Get() const{ return std::get<T>( m_modules ); }
-    const std::variant<GraphicsShaderModules<T_GFXAPI>, GraphicsShaderModuleVertOnly<T_GFXAPI>, ComputeShaderModule<T_GFXAPI>, RayTracingShaderModules<T_GFXAPI>> m_modules;
+    const std::variant<GraphicsShaderModules<T_GFXAPI>, GraphicsShaderModuleVertOnly<T_GFXAPI>, GraphicsMeshShaderModules<T_GFXAPI>, GraphicsTaskMeshShaderModules<T_GFXAPI>, ComputeShaderModule<T_GFXAPI>, RayTracingShaderModules<T_GFXAPI>> m_modules;
 };
 
 

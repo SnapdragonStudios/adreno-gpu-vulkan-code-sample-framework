@@ -1,6 +1,5 @@
 //============================================================================================================
 //
-//
 //                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
@@ -8,6 +7,7 @@
 
 #include "vulkan/vulkan.hpp"
 #include "vulkan/TextureFuncts.h"
+#include "texture/vulkan/texture.hpp"
 #include "loaderKtx.hpp"
 #include <ktxvulkan.h>  // KTX-Software
 
@@ -91,7 +91,7 @@ TextureKtxFileWrapper TextureKtxT<Vulkan>::Transcode(TextureKtxFileWrapper&& fil
     return std::move(fileData);
 }
 
-TextureVulkan TextureKtxT<Vulkan>::LoadKtx(Vulkan& vulkan, const TextureKtxFileWrapper& fileData, const SamplerT<Vulkan>& sampler)
+TextureVulkan TextureKtxT<Vulkan>::LoadKtx(Vulkan& vulkan, const TextureKtxFileWrapper& fileData, SamplerT<Vulkan> sampler)
 {
     auto* const pKtxData = GetKtxTexture(fileData);
     if (!pKtxData)
@@ -117,8 +117,11 @@ TextureVulkan TextureKtxT<Vulkan>::LoadKtx(Vulkan& vulkan, const TextureKtxFileW
     }
     sUploadingTextureKtxVulkan = nullptr;
 
-    VkImageView imageView;
-    if (!CreateImageView(vulkan, uploadedTexture.image, uploadedTexture.imageFormat, 0, uploadedTexture.levelCount, uploadedTexture.layerCount, uploadedTexture.viewType, &imageView))
+    // Take ownership of the image from the container holding images created during ktxTexture_VkUploadEx
+    ImageT<Vulkan> allocatedImage{std::move( m_AllocatedImages.extract( m_AllocatedImages.find( uploadedTexture.image ) ).value() )};
+
+    auto imageView = CreateImageView( vulkan, allocatedImage, VkToTextureFormat(uploadedTexture.imageFormat), uploadedTexture.levelCount, 0, uploadedTexture.layerCount, 0, (ImageViewType) uploadedTexture.viewType );
+    if (imageView.IsEmpty())
     {
         ktxVulkanTexture_Destruct(&uploadedTexture, vulkan.m_VulkanDevice, nullptr);
         return {};
@@ -136,19 +139,17 @@ TextureVulkan TextureKtxT<Vulkan>::LoadKtx(Vulkan& vulkan, const TextureKtxFileW
 
     TextureFormat textureFormat = VkToTextureFormat(uploadedTexture.imageFormat);
 
-    // Take ownership of the image from the container holding images created during ktxTexture_VkUploadEx
-    auto allocatedImage = std::move(m_AllocatedImages.extract(m_AllocatedImages.find(uploadedTexture.image)).value());
     // Return the fully formed texture object
-    TextureVulkan texture{ uploadedTexture.width, uploadedTexture.height, uploadedTexture.depth, uploadedTexture.levelCount, textureFormat, uploadedTexture.imageLayout, std::move(allocatedImage), sampler, imageView };
+    TextureVulkan texture{ uploadedTexture.width, uploadedTexture.height, uploadedTexture.depth, uploadedTexture.levelCount, 0, uploadedTexture.layerCount, 0, textureFormat, uploadedTexture.imageLayout, std::move(allocatedImage), std::move(sampler), std::move(imageView) };
     return texture;
 }
 
-TextureVulkan TextureKtxT<Vulkan>::LoadKtx( Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, const SamplerT<Vulkan>& sampler )
+TextureVulkan TextureKtxT<Vulkan>::LoadKtx( Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, SamplerT<Vulkan> sampler )
 {
     auto ktxData = LoadFile( assetManager, pFileName );
     if (!ktxData)
         return {};
-    return LoadKtx( vulkan, ktxData, sampler );
+    return LoadKtx( vulkan, ktxData, std::move(sampler) );
 }
 
 // Comparison functions so we can look for VkBuffer in a set of MemoryAllocatedBuffer<Vulkan, VkBuffer>
@@ -238,14 +239,14 @@ static bool operator<(const MemoryAllocatedBuffer<Vulkan, VkDeviceMemory>& a, co
 
 /// @brief Function specialization
 template<>
-TextureT<Vulkan> TextureKtx::LoadKtx( Vulkan& vulkan, const TextureKtxFileWrapper& textureFile, const SamplerT<Vulkan>& sampler )
+TextureT<Vulkan> TextureKtx::LoadKtx( Vulkan& vulkan, const TextureKtxFileWrapper& textureFile, SamplerT<Vulkan> sampler )
 {
-    return apiCast<Vulkan>( this )->LoadKtx( vulkan, textureFile, sampler );
+    return apiCast<Vulkan>( this )->LoadKtx( vulkan, textureFile, std::move(sampler) );
 }
 
 /// @brief Function specialization
 template<>
-TextureT<Vulkan> TextureKtx::LoadKtx( Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, const SamplerT<Vulkan>& sampler )
+TextureT<Vulkan> TextureKtx::LoadKtx( Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, SamplerT<Vulkan> sampler )
 {
-    return apiCast<Vulkan>( this )->LoadKtx( vulkan, assetManager, pFileName, sampler );
+    return apiCast<Vulkan>( this )->LoadKtx( vulkan, assetManager, pFileName, std::move(sampler) );
 }

@@ -95,10 +95,14 @@ public:
     };
 
     ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, std::string rayGenerationName, std::string rayClosestHitName, std::string rayAnyHitName, std::string rayMissName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, WorkGroupSettings workGroupSettings, RayTracingSettings rayTracingSettings, std::vector<uint32_t> vertexFormatBindings, std::vector<SpecializationConstantDescription> specializationConstants);
+    ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string taskName, std::string meshName, std::string computeName, std::string vertexName, std::string fragmentName, std::string rayGenerationName, std::string rayClosestHitName, std::string rayAnyHitName, std::string rayMissName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, WorkGroupSettings workGroupSettings, RayTracingSettings rayTracingSettings, std::vector<uint32_t> vertexFormatBindings, std::vector<SpecializationConstantDescription> specializationConstants);
+
     ShaderPassDescription(ShaderPassDescription&&) = default;
 
     std::vector<DescriptorSetDescription> m_sets;
     std::vector<Output> m_outputs;
+    std::string m_taskName;                         ///< Name of the task shader (optional, not valid if m_vertexName or m_fragmentName are set)
+    std::string m_meshName;                         ///< Name of the mesh shader (optional, not valid if m_vertexName or m_fragmentName are set), mandatory if task shader is set
     std::string m_computeName;                      ///< Name of the compute shader (optional, not valid if m_vertexName or m_fragmentName are set)
     std::string m_vertexName;                       ///< Name of the vertex shader used by this shader pass (optional, not valid if m_computeName set)
     std::string m_fragmentName;                     ///< Name of the fragment shader used by this shader pass (optional, only valid if m_vertexName set)

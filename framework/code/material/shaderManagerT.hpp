@@ -104,7 +104,105 @@ bool ShaderManagerT<T_GFXAPI>::AddShader(AssetManager& assetManager, const std::
 
         std::optional<ShaderModules<T_GFXAPI>> shaderModules;
 
-        if (!shaderPassDescription.m_vertexName.empty())
+        if (shaderPassDescription.m_vertexName.empty() && !shaderPassDescription.m_taskName.empty() && !shaderPassDescription.m_meshName.empty() && !shaderPassDescription.m_fragmentName.empty())
+        {
+            // Create the task ShaderModule
+            auto taskShader = m_shaderModulesByName.try_emplace(shaderPassDescription.m_taskName);
+            if (taskShader.second == true)
+            {
+                // Create the unique_ptr object (is not already loaded)
+                auto pShaderModule = std::make_unique<ShaderModuleT<T_GFXAPI>>();
+                // Load the physical shader file
+                if (!pShaderModule->Load(rGfxApi, assetManager, shaderPassDescription, ShaderModule::ShaderType::Task))
+                {
+                    // Failed to load, remove the unloaded Shader class!
+                    m_shaderModulesByName.erase(shaderPassDescription.m_taskName);
+                    success = false;
+                    break;
+                }
+                taskShader.first->second = std::move(pShaderModule);
+            }
+            auto* pTaskShaderModule = apiCast<T_GFXAPI>(taskShader.first->second.get());
+
+            // Create the mesh ShaderModule
+            auto meshShader = m_shaderModulesByName.try_emplace(shaderPassDescription.m_meshName);
+            if (meshShader.second == true)
+            {
+                // Create the unique_ptr object (is not already loaded)
+                auto pShaderModule = std::make_unique<ShaderModuleT<T_GFXAPI>>();
+                // Load the physical shader file
+                if (!pShaderModule->Load(rGfxApi, assetManager, shaderPassDescription, ShaderModule::ShaderType::Mesh))
+                {
+                    // Failed to load, remove the unloaded Shader class!
+                    m_shaderModulesByName.erase(shaderPassDescription.m_meshName);
+                    success = false;
+                    break;
+                }
+                meshShader.first->second = std::move(pShaderModule);
+            }
+            auto* pMeshShaderModule = apiCast<T_GFXAPI>(meshShader.first->second.get());
+
+            // Create the fragment ShaderModule
+            auto fragShader = m_shaderModulesByName.try_emplace(shaderPassDescription.m_fragmentName);
+            if (fragShader.second == true)
+            {
+                // Create the unique_ptr object (is not already loaded)
+                auto pShaderModule = std::make_unique<ShaderModuleT<T_GFXAPI>>();
+                // Load the physical shader file
+                if (!pShaderModule->Load(rGfxApi, assetManager, shaderPassDescription, ShaderModule::ShaderType::Fragment))
+                {
+                    // Failed to load, remove the unloaded Shader class!
+                    m_shaderModulesByName.erase(shaderPassDescription.m_fragmentName);
+                    success = false;
+                    break;
+                }
+                fragShader.first->second = std::move(pShaderModule);
+            }
+            auto* pFragShaderModule = apiCast<T_GFXAPI>(fragShader.first->second.get());
+
+            shaderModules.emplace(ShaderModules<T_GFXAPI>(GraphicsTaskMeshShaderModules<T_GFXAPI>{ *pTaskShaderModule, *pMeshShaderModule, *pFragShaderModule }));
+        }
+        else if (shaderPassDescription.m_vertexName.empty() && shaderPassDescription.m_taskName.empty() && !shaderPassDescription.m_meshName.empty() && !shaderPassDescription.m_fragmentName.empty())
+        {
+            // Create the mesh ShaderModule
+            auto meshShader = m_shaderModulesByName.try_emplace(shaderPassDescription.m_meshName);
+            if (meshShader.second == true)
+            {
+                // Create the unique_ptr object (is not already loaded)
+                auto pShaderModule = std::make_unique<ShaderModuleT<T_GFXAPI>>();
+                // Load the physical shader file
+                if (!pShaderModule->Load(rGfxApi, assetManager, shaderPassDescription, ShaderModule::ShaderType::Mesh))
+                {
+                    // Failed to load, remove the unloaded Shader class!
+                    m_shaderModulesByName.erase(shaderPassDescription.m_meshName);
+                    success = false;
+                    break;
+                }
+                meshShader.first->second = std::move(pShaderModule);
+            }
+            auto* pMeshShaderModule = apiCast<T_GFXAPI>(meshShader.first->second.get());
+
+            // Create the fragment ShaderModule
+            auto fragShader = m_shaderModulesByName.try_emplace(shaderPassDescription.m_fragmentName);
+            if (fragShader.second == true)
+            {
+                // Create the unique_ptr object (is not already loaded)
+                auto pShaderModule = std::make_unique<ShaderModuleT<T_GFXAPI>>();
+                // Load the physical shader file
+                if (!pShaderModule->Load(rGfxApi, assetManager, shaderPassDescription, ShaderModule::ShaderType::Fragment))
+                {
+                    // Failed to load, remove the unloaded Shader class!
+                    m_shaderModulesByName.erase(shaderPassDescription.m_fragmentName);
+                    success = false;
+                    break;
+                }
+                fragShader.first->second = std::move(pShaderModule);
+            }
+            auto* pFragShaderModule = apiCast<T_GFXAPI>(fragShader.first->second.get());
+
+            shaderModules.emplace(ShaderModules<T_GFXAPI>(GraphicsMeshShaderModules<T_GFXAPI>{ *pMeshShaderModule, *pFragShaderModule }));
+        }
+        else if (!shaderPassDescription.m_vertexName.empty())
         {
             // Create the vertex ShaderModule
             auto vertShader = m_shaderModulesByName.try_emplace(shaderPassDescription.m_vertexName);

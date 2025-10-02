@@ -174,7 +174,7 @@ bool Traceable::Init()
         {
             for (const auto& passImageBinding : passImageBindings.first) // image binding can be an array of bindings
             {
-                const auto passUsage = BindingUseData(materialPassIdx, passImageBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passImageBinding.image);
+                const auto passUsage = BindingUseData(materialPassIdx, passImageBindings.second.setBinding.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passImageBinding.image);
 
                 passNeedsExecutionBarrier |= emitBarrier(passUsage, prevImageUsages, [&imageMemoryBarriers](VkImage image) {
                     imageMemoryBarriers.push_back(VkImageMemoryBarrier{
@@ -234,7 +234,7 @@ bool Traceable::Init()
         {
             for (const auto& passBufferBinding : passBufferBindings.first) // buffer binding can be an array of bindings
             {
-                const auto passUsage = BindingUseData(materialPassIdx, passBufferBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passBufferBinding);
+                const auto passUsage = BindingUseData(materialPassIdx, passBufferBindings.second.setBinding.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passBufferBinding);
 
                 passNeedsExecutionBarrier |= emitBarrier(passUsage, prevBufferUsages,
                     [&](const VkBufferAndOffset& buffer) {

@@ -218,7 +218,7 @@ bool Computable::Init()
         {
             for (const auto& passImageBinding : passImageBindings.first) // image binding can be an array of bindings
             {
-                const auto passUsage = BindingUseData( materialPassIdx, passImageBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, ImageUsage(passImageBinding) );
+                const auto passUsage = BindingUseData( materialPassIdx, passImageBindings.second.setBinding.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, ImageUsage(passImageBinding) );
 
                 passNeedsExecutionBarrier |= emitBarrier(passUsage, prevImageUsages, [&imageMemoryBarriers](auto& prevUsage, auto& currentUsage) {
                     const auto& image = currentUsage.buffer;
@@ -279,7 +279,7 @@ bool Computable::Init()
         {
             for (const auto& passBufferBinding : passBufferBindings.first) // buffer binding can be an array of bindings
             {
-                const auto passUsage = BindingUseData(materialPassIdx, passBufferBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passBufferBinding.buffer);
+                const auto passUsage = BindingUseData(materialPassIdx, passBufferBindings.second.setBinding.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passBufferBinding.buffer);
 
                 passNeedsExecutionBarrier |= emitBarrier(passUsage, prevBufferUsages,
                     [&](auto& prevUsage, auto& currentUsage) {
@@ -308,7 +308,7 @@ bool Computable::Init()
 
         for (const auto& imageBindings : materialPass.GetImageBindings())
         {
-            BindingAccess access = imageBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite;
+            BindingAccess access = imageBindings.second.setBinding.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite;
             for (const auto& imageBinding : imageBindings.first)
             {
                 prevImageUsages.push_back( { materialPassIdx, access, ImageUsage{imageBinding.image, imageBinding.imageViewNumMips, imageBinding.imageViewFirstMip, imageBinding.imageLayout} } );
@@ -319,16 +319,19 @@ bool Computable::Init()
             for (const auto& texture : textureBinding.first)
             {
                 const auto& textureVulkan = apiCast<Vulkan>(texture);
-                prevImageUsages.push_back( { materialPassIdx, BindingAccess::ReadOnly, {textureVulkan->GetVkImage(), textureVulkan->MipLevels, textureVulkan->FirstMip, textureVulkan->GetVkImageLayout()} } );
+                if (!textureVulkan->Image.IsEmpty())    // Only consider for barriers if the texture has a buffer/image, texture objects containing only a sampler can be ignored.
+                {
+                    prevImageUsages.push_back( {materialPassIdx, BindingAccess::ReadOnly, {textureVulkan->GetVkImage(), textureVulkan->MipLevels, textureVulkan->FirstMip, textureVulkan->GetVkImageLayout()}} );
+                }
             }
         }
         for (const auto& bufferBinding : materialPass.GetBufferBindings())
         {
-            LOGI("Buffer Binding: %s", materialPass.mShaderPass.m_shaderPassDescription.m_sets[0].m_descriptorTypes[bufferBinding.second.index].names[0].c_str());
+            LOGI("Buffer Binding: %s", materialPass.mShaderPass.m_shaderPassDescription.m_sets[bufferBinding.second.setIndex].m_descriptorTypes[bufferBinding.second.setBinding.index].names[0].c_str());
 
             for (const auto& buffer : bufferBinding.first)
             {
-                prevBufferUsages.push_back({ materialPassIdx, bufferBinding.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, buffer.buffer });
+                prevBufferUsages.push_back({ materialPassIdx, bufferBinding.second.setBinding.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, buffer.buffer });
             }
         }
     }
@@ -457,9 +460,8 @@ void Computable::DispatchPass(VkCommandBuffer cmdBuffer, const ComputablePass& c
     vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computablePass.mPipeline);
 
     // Bind everything the shader needs
-    const auto& descriptorSets = computablePass.GetVkDescriptorSets();
-    VkDescriptorSet descriptorSet = descriptorSets.size() >= 1 ? descriptorSets[bufferIdx] : descriptorSets[0];
-    vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computablePass.mPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+    const std::span<const VkDescriptorSet> descriptorSets = computablePass.mMaterialPass.GetVkDescriptorSets(bufferIdx);
+    vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computablePass.mPipelineLayout, 0, descriptorSets.size(), descriptorSets.data(), 0, nullptr);
 
     // Dispatch the compute task
     vkCmdDispatch(cmdBuffer, computablePass.GetDispatchGroupCount()[0], computablePass.GetDispatchGroupCount()[1], computablePass.GetDispatchGroupCount()[2]);

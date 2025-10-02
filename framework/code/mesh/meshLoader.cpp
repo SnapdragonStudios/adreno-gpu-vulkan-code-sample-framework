@@ -36,7 +36,12 @@ static bool Gltf_WriteWholeFile(std::string*, const std::string&, const std::vec
 {
     return false;
 }
-
+static bool Gltf_GetFileSize(size_t* output, std::string* error, const std::string& filename, void* vAssetManager) 
+{
+    AssetManager* pAssetManager = (AssetManager*)vAssetManager;
+    *output = pAssetManager->GetFileSize(filename);
+    return output != 0;
+}
 bool StubGltfLoadImageDataFunction(tinygltf::Image*, const int, std::string*,
     std::string*, int, int,
     const unsigned char*, int, void*)

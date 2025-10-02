@@ -21,7 +21,7 @@
 // rather than dynamically loading entrypoints to the API manually.
 #define VK_PROTOTYPES
 
-#ifdef OS_WINDOWS
+#if defined(OS_WINDOWS) && !defined(VK_ENABLE_BETA_EXTENSIONS)
 #define VK_ENABLE_BETA_EXTENSIONS
 #endif
 #include <vulkan/vulkan.h>
@@ -38,6 +38,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <stdexcept>
 #include "extension.hpp"
 #include "memory/vulkan/memoryManager.hpp"
 
@@ -50,7 +51,7 @@
 // Enable the Vulkan validation layer to output debugPrintf (if the debug/validation layers are in use)
 //#define VULKAN_VALIDATION_ENABLE_PRINTF
 
-#define NUM_VULKAN_BUFFERS      6   // Kept track of with mSwapchainCurrentIdx
+#define NUM_VULKAN_BUFFERS      8   // Kept track of with mSwapchainCurrentIdx
 
 // Comment this in if you need AHB support in your app (should be part of application configuration in the future).  May interfere with profiling!
 //#define ANDROID_HARDWARE_BUFFER_SUPPORT
@@ -59,7 +60,6 @@
 #if OS_ANDROID
 struct ANativeWindow;
 #endif // OS_ANDROID
-class VulkanExtension;
 template<typename T_GFXAPI> class IndexBuffer;
 template<typename T_GFXAPI> class VertexBuffer;
 struct VulkanDeviceFeaturePrint;
@@ -67,15 +67,22 @@ struct VulkanDevicePropertiesPrint;
 struct VulkanInstanceFunctionPointerLookup;
 struct VulkanDeviceFunctionPointerLookup;
 namespace ExtensionHelper {
+    struct Ext_VK_KHR_surface;
+    struct Ext_VK_KHR_get_physical_device_properties2;
+    struct Ext_VK_KHR_get_surface_capabilities2;
     struct Ext_VK_KHR_draw_indirect_count;
     struct Ext_VK_EXT_debug_utils;
     struct Ext_VK_EXT_debug_marker;
     struct Ext_VK_EXT_hdr_metadata;
     struct Ext_VK_KHR_fragment_shading_rate;
     struct Ext_VK_KHR_create_renderpass2;
+    struct Ext_VK_ARM_tensors;
+    struct Ext_VK_ARM_data_graph;
     struct Ext_VK_KHR_synchronization2;
+    struct Ext_VK_QCOM_tile_properties;
     struct Vulkan_SubgroupPropertiesHook;
     struct Vulkan_StorageFeaturesHook;
+    struct Ext_VK_KHR_mesh_shader;
 };
 class VulkanDebugCallback;
 enum class TextureFormat;
@@ -128,6 +135,8 @@ public:
 
     struct AppConfiguration
     {
+        /// (optional) Vulkan api version this app would like.  If not set the framework will default to whatever version it choses.
+        std::optional<uint32_t> ApiVerson;
         /// (optional) override of the priority used to initialize the async queue (assuming VK_EXT_global_priority is available and loaded)
         std::optional<VkQueueGlobalPriorityEXT> AsyncQueuePriority;
         /// (optional) override of the framebuffer depth format.  Setting to VK_FORMAT_UNDEFINED will disable the creation of a depth buffer during InitSwapChain
@@ -139,41 +148,51 @@ public:
         /// @tparam T template class for the extension
         /// @return pointer to the registered extension (guaranteed to not go out of scope or move until Vulkan deleted)
         template<typename T>
-        const T* RequiredExtension() { return AddExtension( std::make_unique<T>( VulkanExtension::eRequired ) ); }
-        void RequiredExtension( const std::string& extensionName ) { AddExtension( std::make_unique<VulkanExtension>( extensionName, VulkanExtension::eRequired ) ); }
+        const T* RequiredExtension() { return AddExtension( std::make_unique<T>( VulkanExtensionStatus::eRequired ) ); }
+        const VulkanExtension<VulkanExtensionType::eDevice>* RequiredExtension( const std::string& extensionName ) { return AddExtension( std::make_unique<VulkanExtension<VulkanExtensionType::eDevice>>( extensionName, VulkanExtensionStatus::eRequired ) ); }
 
         /// @brief Register the vulkan extension (templated) as desired by this app (but optional)
         /// @tparam T template class for the extension
         /// @return pointer to the registered extension (guaranteed to not go out of scope or move until Vulkan deleted)
         template<typename T>
-        const T* OptionalExtension() { return AddExtension( std::make_unique<T>( VulkanExtension::eOptional ) ); }
-        const VulkanExtension* OptionalExtension( const std::string& extensionName ) { return AddExtension( std::make_unique<VulkanExtension>( extensionName, VulkanExtension::eOptional ) ); }
+        const T* OptionalExtension() { return AddExtension( std::make_unique<T>( VulkanExtensionStatus::eOptional ) ); }
+        const VulkanExtension<VulkanExtensionType::eDevice>* OptionalExtension( const std::string& extensionName ) { return AddExtension( std::make_unique<VulkanExtension<VulkanExtensionType::eDevice>>( extensionName, VulkanExtensionStatus::eOptional ) ); }
  
         template<typename T>
-        const T* AddExtension( std::unique_ptr<T> extension ) {
-            auto it = AdditionalVulkanDeviceExtensions.try_emplace( extension->Name, std::move( extension ) );
-            if (!it.second)
+        const T* AddExtension(std::unique_ptr<T> extension) {
+            if constexpr (T::Type == VulkanExtensionType::eInstance)
             {
-                assert( 0 );    // cannot add another extension with the same name but (potentially) a different implementation class
-                return nullptr;
+                auto it = AdditionalVulkanInstanceExtensions.try_emplace(extension->Name, std::move(extension));
+                if (!it.second)
+                {
+                    assert(0);    // cannot add another extension with the same name but (potentially) a different implementation class
+                    return nullptr;
+                }
+                return static_cast<const T*>(&(*it.first->second.get()));
             }
-            return static_cast<const T*>(&(*it.first->second.get()));
+            else if constexpr (T::Type == VulkanExtensionType::eDevice)
+            {
+                auto it = AdditionalVulkanDeviceExtensions.try_emplace(extension->Name, std::move(extension));
+                if (!it.second)
+                {
+                    assert(0);    // cannot add another extension with the same name but (potentially) a different implementation class
+                    return nullptr;
+                }
+                return static_cast<const T*>(&(*it.first->second.get()));
+            }
+            else
+            {
+                // constexpr static_assert in a template is 'problematic' in C++17 (and seemingly clang C++20).  At some point this can turn back into static_assert(0, "...");
+                [] <bool flag = false>() { static_assert(flag, "Unsupported VulkanExtensionType"); }();
+            }
         }
 
-        // specialized for VulkanExtension base class.
-        template<>
-        const VulkanExtension* AddExtension( std::unique_ptr<VulkanExtension> extension ) {
-            auto it = AdditionalVulkanDeviceExtensions.try_emplace( extension->Name, std::move( extension ) );
-            if (!it.second)
-            {
-                // extension already registered!  But ok because we are only adding the base type.
-            }
-            return &(*it.first->second.get());
-        }
     protected:
         friend class Vulkan;
+        /// (optional) list of 'additional' instance extensions that this app requires or would like (optional).
+        std::map<std::string, std::unique_ptr<VulkanExtension<VulkanExtensionType::eInstance>>> AdditionalVulkanInstanceExtensions;
         /// (optional) list of 'additional' device extensions that this app requires or would like (optional).
-        std::map<std::string, std::unique_ptr<VulkanExtension>> AdditionalVulkanDeviceExtensions;
+        std::map<std::string, std::unique_ptr<VulkanExtension<VulkanExtensionType::eDevice>>>   AdditionalVulkanDeviceExtensions;
     };
 
     typedef std::function<int(std::span<const SurfaceFormat>)> tSelectSurfaceFormatFn;
@@ -200,7 +219,8 @@ public:
     uint32_t GetSurfaceWidth() const    { return m_SurfaceWidth; }      ///< Swapchain width
     uint32_t GetSurfaceHeight() const   { return m_SurfaceHeight; }     ///< Swapchain height
 
-    VkImage GetSwapchainImage(uint32_t index) const {return m_SwapchainBuffers[index].image;}
+    VkFramebuffer GetSwapchainFramebuffer(uint32_t index) const { return m_SwapchainBuffers[index].framebuffer; }
+    VkImage GetSwapchainImage(uint32_t index) const { return m_SwapchainBuffers[index].image; }
     TextureFormat GetSurfaceFormat() const { return m_SurfaceFormat; }
 
     /// Current buffer index (that can be filled) and the fence that should be signalled when the GPU completes this buffer and the semaphore to wait on before starting rendering.
@@ -393,12 +413,77 @@ public:
         std::span<const VkDynamicState>         dynamicStates,
         const VkViewport*                       viewport,
         const VkRect2D*                         scissor,
+        VkShaderModule                          taskShaderModule,
+        VkShaderModule                          meshShaderModule,
+        VkShaderModule                          vertShaderModule,
+        VkShaderModule                          fragShaderModule,
+        const VkSpecializationInfo*             specializationInfo,
+        bool                                    bAllowDerivation,
+        VkPipeline                              deriveFromPipeline,
+        VkPipeline*                             pipeline,
+        VkPipelineInputAssemblyStateCreateInfo  ia_custom);
+
+    /// @brief Create a render pass pipeline.
+    /// @param pipelineCache (optional) vulkan pipeline cache
+    /// @param visci (required) vertex input state
+    /// @param pipelineLayout (required) Vulkan pipeline layout
+    /// @param renderPass (required) render pass to make this pipeline for
+    /// @param subpass (required) subpass number (0 if first subpass or not using subpasses)
+    /// @param providedRS (optional) rasterization state
+    /// @param providedDSS (optional) depth stencil state
+    /// @param specializationInfo (optional) specialization constants (shared between vert and frag shader)
+    /// @return true on success
+    bool CreatePipeline(
+        VkPipelineCache                         pipelineCache,
+        const VkPipelineVertexInputStateCreateInfo* visci,
+        VkPipelineLayout                        pipelineLayout,
+        VkRenderPass                            renderPass,
+        uint32_t                                subpass,
+        const VkPipelineRasterizationStateCreateInfo* providedRS,
+        const VkPipelineDepthStencilStateCreateInfo*  providedDSS,
+        const VkPipelineColorBlendStateCreateInfo*    providedCBS,
+        const VkPipelineMultisampleStateCreateInfo*   providedMS,
+        std::span<const VkDynamicState>         dynamicStates,
+        const VkViewport*                       viewport,
+        const VkRect2D*                         scissor,
         VkShaderModule                          vertShaderModule,
         VkShaderModule                          fragShaderModule,
         const VkSpecializationInfo*             specializationInfo,
         bool                                    bAllowDerivation,
         VkPipeline                              deriveFromPipeline,
         VkPipeline*                             pipeline);
+
+    /// @brief Create a render pass pipeline.
+    /// @param pipelineCache (optional) vulkan pipeline cache
+    /// @param visci (required) vertex input state
+    /// @param pipelineLayout (required) Vulkan pipeline layout
+    /// @param renderPass (required) render pass to make this pipeline for
+    /// @param subpass (required) subpass number (0 if first subpass or not using subpasses)
+    /// @param providedRS (optional) rasterization state
+    /// @param providedDSS (optional) depth stencil state
+    /// @param specializationInfo (optional) specialization constants (shared between vert and frag shader)
+    /// @return true on success
+    bool CreatePipeline(
+        VkPipelineCache                         pipelineCache,
+        const VkPipelineVertexInputStateCreateInfo* visci,
+        VkPipelineLayout                        pipelineLayout,
+        VkRenderPass                            renderPass,
+        uint32_t                                subpass,
+        const VkPipelineRasterizationStateCreateInfo* providedRS,
+        const VkPipelineDepthStencilStateCreateInfo* providedDSS,
+        const VkPipelineColorBlendStateCreateInfo* providedCBS,
+        const VkPipelineMultisampleStateCreateInfo* providedMS,
+        std::span<const VkDynamicState>         dynamicStates,
+        const VkViewport* viewport,
+        const VkRect2D* scissor,
+        VkShaderModule                          taskShaderModule,
+        VkShaderModule                          meshShaderModule,
+        VkShaderModule                          vertShaderModule,
+        VkShaderModule                          fragShaderModule,
+        const VkSpecializationInfo* specializationInfo,
+        bool                                    bAllowDerivation,
+        VkPipeline                              deriveFromPipeline,
+        VkPipeline* pipeline);
 
     /// @brief Create a compute shader pipeline
     /// @param pipelineCache (optional) vulkan pipeline cache
@@ -477,19 +562,31 @@ public:
         return m_VulkanGpuProperties.Base.properties.limits.timestampPeriod;
     }
 
+    inline bool IsComputeQueueSupported() const
+    {
+        return m_VulkanGraphicsQueueSupportsCompute;
+    }
+
+    inline bool IsDataGraphQueueSupported() const
+    {
+        return m_VulkanGraphicsQueueSupportsDataGraph;
+    }
+
 private:
     // Vulkan takes a huge amount of code to initialize :)
     // Break up into multiple smaller functions.
     bool RegisterKnownExtensions();
     bool CreateInstance();
-    void InitInstanceExtensions();
+    bool InitInstanceExtensions();
     bool GetPhysicalDevices();
+    bool GetDataGraphProcessingEngine();
     bool InitDeviceExtensions();
     bool InitQueue();
     bool InitInstanceFunctions();
     bool InitDebugCallback();
     bool InitSurface();
     bool InitCompute();
+    bool InitDataGraph();
     bool InitDevice();
     bool InitSyncElements();
     bool InitCommandPools();
@@ -525,7 +622,8 @@ public:
         eGraphicsQueue = 0,
         eComputeQueue = 1,
         eTransferQueue = 2,
-        eMaxNumQueues = 3
+        eDataGraphQueue = 3,
+        eMaxNumQueues = 4
     };
     struct VulkanQueue {
         VkQueue Queue = VK_NULL_HANDLE;
@@ -538,6 +636,8 @@ public:
 
     VkPhysicalDevice        m_VulkanGpu;        ///< Current Vulkan GPU device being used (only one GPU is currently supported)
 
+    VkPhysicalDeviceDataGraphProcessingEngineARM m_VulkanDataGraphProcessingEngine; ///< Current Vulkan NPU device type (only one NPU is currently supported)
+
     VkSemaphore             m_RenderCompleteSemaphore;
 
     uint32_t                m_SwapchainImageCount;
@@ -545,6 +645,7 @@ public:
 
     std::vector<SwapchainBuffers> m_SwapchainBuffers;
     DepthInfo               m_SwapchainDepth;       // ... but they all use the same depth
+    std::array<VkSubpassDependency, 2> m_SwapchainRenderPassDependencies{};   // dependencies used when creating m_SwapchainRenderPass
     VkRenderPass            m_SwapchainRenderPass;
 
     TextureFormat           m_SurfaceFormat;        // Current surface format
@@ -552,14 +653,16 @@ public:
     bool                    m_UseRenderPassTransform;     // If set attempt to disable the surfaceflinger doing backbuffer rotation and to use the Qualcomm render pass transform extension, assumes the application will render in the device's default orientation
     bool                    m_UsePreTransform;      // If set attempt to disable the surfaceflinger doing backbuffer rotation without enabling the Qualcomm render pass transform extension.  Assumes the application will render to the rotated backbuffer.
 
+    template<VulkanExtensionType T_TYPE>
     struct RegisteredExtensions
     {
         /// Template to add a VulkanExtension definition, parameters are the extension name and (optionally) status/version
         template<typename ... T>
-        void AddExtension(std::string name, T ...args) {
-            auto pExtension = std::make_unique<VulkanExtension>(name, std::forward<T>(args)...);
+        VulkanExtension<T_TYPE>* AddExtension(std::string name, T ...args) {
+            auto pExtension = std::make_unique<VulkanExtension<T_TYPE>>(name, std::forward<T>(args)...);
             auto insertIt = m_Extensions.try_emplace( std::move(name), std::move(pExtension) );
-            assert( insertIt.second == true );//check we didnt already register this extension which may be problematic if registered once as a 'basic' VulkanExtension and once as a derived class.
+            // since we are adding as a 'basic' extension (just a name, no extension class) it is ok if someone beat us to it and already registered.  We will return a pointer to their instance and the unique<VulkanExtension> we just created will be deleted upon return from this function!
+            return static_cast<VulkanExtension<T_TYPE>*>(insertIt.first->second.get());
         }
         /// Template to add a more complex VulkanExtension definition (expects a class derived from VulkanExtension)
         template<typename T, typename ... TT>
@@ -570,21 +673,28 @@ public:
             return static_cast<T*>(insertIt.first->second.get());
         }
 
-        const VulkanExtension* GetExtension( const std::string& extensionName ) const {
+        const VulkanExtension<T_TYPE>* GetExtension( const char*const extensionName ) const {
             auto it = m_Extensions.find( extensionName );
-            if ( it == m_Extensions.end() )
+            if (it == m_Extensions.end())
                 return nullptr;
             return it->second.get();
         }
-        VulkanExtension* GetExtension( const std::string& extensionName ) {
+        VulkanExtension<T_TYPE>* GetExtension( const char* const extensionName ) {
             auto it = m_Extensions.find( extensionName );
-            if ( it == m_Extensions.end() )
+            if (it == m_Extensions.end())
                 return nullptr;
             return it->second.get();
+        }
+        const VulkanExtension<T_TYPE>* GetExtension( const std::string& extensionName ) const {
+            return GetExtension( extensionName.c_str() );
+        }
+        VulkanExtension<T_TYPE>* GetExtension( const std::string& extensionName ) {
+            return GetExtension( extensionName.c_str() );
         }
 
         template<typename T>
         const T* GetExtension() const {
+            static_assert(T_TYPE == T::Type, "");
             auto foundIt = m_Extensions.find( T::Name );
             if (foundIt == m_Extensions.end())
                 return nullptr;
@@ -592,22 +702,45 @@ public:
         }
 
         // Call once, once all the known/wanted extensions have been added.
-        void RegisterAll(Vulkan& vulkan);
+        void RegisterAll(Vulkan& vulkan)
+        {
+            for (auto& extension : m_Extensions)
+            {
+                LOGI("Registering extension: %s (%s)", extension.first.c_str(), VulkanExtensionBase::cStatusNames[static_cast<int>(extension.second->Status)]);
+                extension.second->Register(vulkan);
+            }
+        }
 
         // Container of all the extensions we know about (app may add to this from its config).  Our GPU device driver may not support all these known extensions.
-        std::map< std::string, std::unique_ptr<VulkanExtension>, std::less<> > m_Extensions;
+        std::map< std::string, std::unique_ptr<VulkanExtension<T_TYPE>>, std::less<> > m_Extensions;
     };
 
     // Containers for the registered (and potentially loaded) extensions.
-    RegisteredExtensions m_DeviceExtensions;                    ///< Device extensions
-    RegisteredExtensions m_Vulkan11ProvidedExtensions;          ///< 'extensions' included in Vulkan 1.1 (implicitly loaded).
+    RegisteredExtensions<VulkanExtensionType::eInstance> m_InstanceExtensions;                ///< Instance extensions
+    RegisteredExtensions<VulkanExtensionType::eDevice>   m_DeviceExtensions;                  ///< Device extensions
+    RegisteredExtensions<VulkanExtensionType::eDevice>   m_Vulkan11ProvidedExtensions;        ///< 'extensions' included in Vulkan 1.1 (implicitly loaded).
 
     // Generic extension query (will fail to compile if type T does not define static Name).
     template<typename T>
     const T* GetExtension() const {
-        return (const T*)m_DeviceExtensions.GetExtension(T::Name);
+        if constexpr (T::Type == VulkanExtensionType::eInstance)
+            return (const T*)m_InstanceExtensions.GetExtension(T::Name);
+        else if constexpr (T::Type == VulkanExtensionType::eDevice)
+            return (const T*)m_DeviceExtensions.GetExtension(T::Name);
+        else
+        {
+            // constexpr static_assert in a template is 'problematic' in C++17 (and seemingly clang C++20).  At some point this can turn back into static_assert(0, "...");
+            [] <bool flag = false>() { static_assert(flag, "Unsupported VulkanExtensionType"); }();
+        }
+        return nullptr;
     }
     // Template specializations for stored extension pointers (compile time lookup).
+    template<>
+    const ExtensionHelper::Ext_VK_KHR_surface* GetExtension() const { return m_ExtKhrSurface; };
+    template<>
+    const ExtensionHelper::Ext_VK_KHR_get_physical_device_properties2* GetExtension() const { return m_ExtKhrGetPhysicalDeviceProperties2; };
+    template<>
+    const ExtensionHelper::Ext_VK_KHR_get_surface_capabilities2* GetExtension() const { return m_ExtSurfaceCapabilities2; };
     template<>
     const ExtensionHelper::Ext_VK_KHR_draw_indirect_count* GetExtension() const { return m_ExtKhrDrawIndirectCount; };
     template<>
@@ -617,9 +750,17 @@ public:
     template<>
     const ExtensionHelper::Ext_VK_EXT_hdr_metadata* GetExtension() const { return m_ExtHdrMetadata; };
     template<>
+    const ExtensionHelper::Ext_VK_ARM_tensors* GetExtension() const { return m_ExtArmTensors; };
+    template<>
+    const ExtensionHelper::Ext_VK_ARM_data_graph* GetExtension() const { return m_ExtArmDataGraph; };
+    template<>
     const ExtensionHelper::Ext_VK_KHR_synchronization2* GetExtension() const { return m_ExtKhrSynchronization2; };
     template<>
+    const ExtensionHelper::Ext_VK_QCOM_tile_properties* GetExtension() const { return m_ExtQcomTileProperties; };
+    template<>
     const ExtensionHelper::Vulkan_SubgroupPropertiesHook* GetExtension() const { return m_SubgroupProperties; };
+    template<>
+    const ExtensionHelper::Ext_VK_KHR_mesh_shader* GetExtension() const { return m_ExtMeshShader; };
 
     template<typename T, typename ...TT>
     void AddExtensionHooks( ExtensionHook<T>* t, TT... tt ) {
@@ -636,6 +777,7 @@ public:
     // Therefore, these have been moved from "private" to "public"
     std::array<int, eMaxNumQueues>          m_VulkanQueueFamilyIndx;
     bool                                    m_VulkanGraphicsQueueSupportsCompute;
+    bool                                    m_VulkanGraphicsQueueSupportsDataGraph;
     std::vector<VkQueueFamilyProperties>    m_pVulkanQueueProps;
 
 private:
@@ -654,15 +796,16 @@ private:
 
     // Debug/Validation Layers
     std::vector<VkLayerProperties>      m_InstanceLayerProps;
-    std::vector<VkExtensionProperties>  m_InstanceExtensionProps;
+    //std::vector<VkExtensionProperties>  m_InstanceExtensionProps;
 
     /// Layers we want to use (sorted alphabetically)
     std::vector<const char*>            m_InstanceLayerNames;
     /// Extensions we want to use (sorted alphabetically)
-    std::vector<const char*>            m_InstanceExtensionNames;
+    //std::vector<const char*>            m_InstanceExtensionNames;
 
     // Vulkan Objects
     VkInstance                          m_VulkanInstance;
+    uint32_t                            m_VulkanApiVersion;
     uint32_t                            m_VulkanGpuCount;
     uint32_t                            m_VulkanGpuIdx;
 
@@ -680,7 +823,6 @@ private:
 
     VkPhysicalDeviceMemoryProperties2   m_PhysicalDeviceMemoryProperties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 };
 
-    std::vector<VkLayerProperties>      m_pDeviceLayerProps;
     std::vector<const char*>            m_pDeviceLayerNames;            ///< Requested/Loaded device layers
 
     // Containers for handles in to VulkanExtensions that extend Vulkan structures (via pNext chain).
@@ -716,15 +858,23 @@ private:
     uint32_t                            m_ExtValidationFeaturesVersion;     ///< Version of the VK_EXT_validation_features extension (0 validation is disabled and/or extension not loaded)
 
     // Extensions loaded by this class
-    const ExtensionHelper::Ext_VK_KHR_draw_indirect_count* m_ExtKhrDrawIndirectCount = nullptr;
-    const ExtensionHelper::Ext_VK_EXT_debug_utils*         m_ExtDebugUtils = nullptr;
-    const ExtensionHelper::Ext_VK_EXT_debug_marker*        m_ExtDebugMarker = nullptr;
-    const ExtensionHelper::Ext_VK_EXT_hdr_metadata*        m_ExtHdrMetadata = nullptr;
-    const ExtensionHelper::Ext_VK_KHR_fragment_shading_rate* m_ExtFragmentShadingRate = nullptr;
-    const ExtensionHelper::Ext_VK_KHR_create_renderpass2*  m_ExtRenderPass2 = nullptr;
-    const ExtensionHelper::Ext_VK_KHR_synchronization2*    m_ExtKhrSynchronization2 = nullptr;
-    const ExtensionHelper::Vulkan_SubgroupPropertiesHook*  m_SubgroupProperties = nullptr;
-    const ExtensionHelper::Vulkan_StorageFeaturesHook*     m_StorageFeatures = nullptr;
+    const VulkanExtension<VulkanExtensionType::eInstance>*   m_ExtValidationFeatures = nullptr;
+    const ExtensionHelper::Ext_VK_KHR_surface*                  m_ExtKhrSurface = nullptr;
+    const ExtensionHelper::Ext_VK_KHR_get_physical_device_properties2*m_ExtKhrGetPhysicalDeviceProperties2 = nullptr;
+    const ExtensionHelper::Ext_VK_KHR_get_surface_capabilities2*m_ExtSurfaceCapabilities2 = nullptr;
+    const ExtensionHelper::Ext_VK_KHR_draw_indirect_count*      m_ExtKhrDrawIndirectCount = nullptr;
+    const ExtensionHelper::Ext_VK_EXT_debug_utils*              m_ExtDebugUtils = nullptr;
+    const ExtensionHelper::Ext_VK_EXT_debug_marker*             m_ExtDebugMarker = nullptr;
+    const ExtensionHelper::Ext_VK_EXT_hdr_metadata*             m_ExtHdrMetadata = nullptr;
+    const ExtensionHelper::Ext_VK_KHR_fragment_shading_rate*    m_ExtFragmentShadingRate = nullptr;
+    const ExtensionHelper::Ext_VK_KHR_create_renderpass2*       m_ExtRenderPass2 = nullptr;
+    const ExtensionHelper::Ext_VK_ARM_tensors*                  m_ExtArmTensors = nullptr;
+    const ExtensionHelper::Ext_VK_ARM_data_graph*               m_ExtArmDataGraph = nullptr;
+    const ExtensionHelper::Ext_VK_KHR_synchronization2*         m_ExtKhrSynchronization2 = nullptr;
+    const ExtensionHelper::Ext_VK_QCOM_tile_properties*         m_ExtQcomTileProperties = nullptr;
+    const ExtensionHelper::Ext_VK_KHR_mesh_shader*              m_ExtMeshShader = nullptr;
+    const ExtensionHelper::Vulkan_SubgroupPropertiesHook*       m_SubgroupProperties = nullptr;
+    const ExtensionHelper::Vulkan_StorageFeaturesHook*          m_StorageFeatures = nullptr;
 
 #if defined (OS_ANDROID)
     bool                                m_ExtExternMemoryCapsAvailable;

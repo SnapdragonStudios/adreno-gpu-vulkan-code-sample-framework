@@ -18,6 +18,7 @@ class DescriptorSetDescription
 {
 public:
     enum class DescriptorType {
+        Unused,                 ///< Use to pad unused 'slot' in descriptor set
         UniformBuffer,
         StorageBuffer,
         ImageSampler,           ///< Texture and Sampler combined
@@ -40,7 +41,9 @@ public:
             RayGeneration = 16,
             RayClosestHit = 32,
             RayAnyHit = 64,
-            RayMiss = 128
+            RayMiss = 128,
+            Task = 256,
+            Mesh = 512
         };
         StageFlag(const t _type) : type(_type) {}
         StageFlag& operator=(const StageFlag& other) { type = other.type; return *this; }
