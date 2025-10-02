@@ -169,17 +169,23 @@ public:
     typedef std::vector<const Texture*> tPerFrameTexInfo;
     typedef std::vector<ImageInfo> tPerFrameImageInfo;
 
+    struct MaterialDescriptorBinding {
+        uint32_t                                    setIndex;       ///< descriptor set index
+        DescriptorSetLayout::BindingTypeAndIndex    setBinding;     ///< binding within the descriptor set
+    };
+
     typedef std::vector<AccelerationStructureHandle> tPerFrameVkAccelerationStructure;
-    typedef std::vector <std::pair<tPerFrameTexInfo, DescriptorSetLayout::BindingTypeAndIndex>> tTextureBindings;
-    typedef std::vector <std::pair<tPerFrameImageInfo, DescriptorSetLayout::BindingTypeAndIndex>> tImageBindings;
-    typedef std::vector <std::pair<tPerFrameVkBuffer, DescriptorSetLayout::BindingTypeAndIndex>> tBufferBindings;
-    typedef std::vector <std::pair<tPerFrameVkAccelerationStructure, DescriptorSetLayout::BindingTypeAndIndex>> tAccelerationStructureBindings;
+    typedef std::vector <std::pair<tPerFrameTexInfo, MaterialDescriptorBinding>> tTextureBindings;
+    typedef std::vector <std::pair<tPerFrameImageInfo, MaterialDescriptorBinding>> tImageBindings;
+    typedef std::vector <std::pair<tPerFrameVkBuffer, MaterialDescriptorBinding>> tBufferBindings;
+    typedef std::vector <std::pair<tPerFrameVkAccelerationStructure, MaterialDescriptorBinding>> tAccelerationStructureBindings;
 
     MaterialPass(Vulkan& vulkan, const ShaderPass<Vulkan>&, VkDescriptorPool&&, std::vector<VkDescriptorSet>&&, std::vector<VkDescriptorSetLayout>&&, tTextureBindings&&, tImageBindings&&, tBufferBindings&&, tAccelerationStructureBindings&&, SpecializationConstants&&);
     ~MaterialPass();
 
     /// Get the descriptor set for the (numbered) frame buffer index, allows for a single descriptor set identical for all frames if required.
-    const auto& GetVkDescriptorSet(uint32_t bufferIndex) const { return mDescriptorSets[mDescriptorSets.size() > 1 ? bufferIndex : 0]; }
+    const auto& GetVkDescriptorSet(uint32_t bufferIndex, int32_t setIndex) const { return mDescriptorSets[(bufferIndex % mNumBuffers)* mNumDescriptorSetsPerBuffer + setIndex]; }
+    const std::span<const VkDescriptorSet> GetVkDescriptorSets( uint32_t bufferIndex ) const { return {&mDescriptorSets[(bufferIndex % mNumBuffers) * mNumDescriptorSetsPerBuffer], mNumDescriptorSetsPerBuffer}; }
     const auto& GetVkDescriptorSets() const { return mDescriptorSets; }
     const auto& GetPipelineLayout() const { return mDynamicPipelineLayout; }
     const auto& GetSpecializationConstants() const { return mSpecializationConstants; };
@@ -195,9 +201,13 @@ public:
 protected:
     Vulkan& mVulkan;
 
+    // Helpers for size of mDescriptorSets
+    const uint32_t mNumDescriptorSetsPerBuffer;     ///< number of descriptor sets needed by the shader(pass).  Usually 1 but some shaders will use more then one secriptor set.
+    const uint32_t mNumBuffers;                     ///< Number of buffers worth of descriptors (may be 1, or number of framebuffers, or something else)
+
     // Vulkan objects
     VkDescriptorPool mDescriptorPool;
-    std::vector<VkDescriptorSet> mDescriptorSets;    ///< array of descriptor sets (usually one or one per NUM_VULKAN_BUFFERS)
+    std::vector<VkDescriptorSet> mDescriptorSets;    ///< array of descriptor sets (mNumDescriptorSetsPerBuffer * mNumBuffers))
     std::vector<VkDescriptorSetLayout> mDynamicDescriptorSetLayouts;///< array of descriptor set layouts specific for to this materialPass (usually they are shared across all materials with a specific shader, except in the case of descriptor sets that are 'dynamically' sized to fit the material specific contents)
     PipelineLayout<Vulkan> mDynamicPipelineLayout; ///< pipeline layout specific to this materiaPass (usually shaderPass contains the pipeline layout but for materials with 'dynamic' descriptor set layouts we have to have a unique pipeline per materialPass
     SpecializationConstants mSpecializationConstants; ///< block of specialization constants for this material pass

@@ -26,7 +26,7 @@ namespace ExtensionHelperRT
         VkPhysicalDeviceAccelerationStructurePropertiesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR>
     {
         static constexpr auto Name = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
-        Ext_VK_KHR_acceleration_structure( VulkanExtension::eStatus status = VulkanExtension::eRequired ) : VulkanDeviceFeaturePropertiesExtensionHelper(Name, status)
+        Ext_VK_KHR_acceleration_structure( VulkanExtensionStatus status = VulkanExtensionStatus::eRequired ) : VulkanDeviceFeaturePropertiesExtensionHelper(Name, status)
         {}
         void PrintFeatures() const override
         {
@@ -65,7 +65,7 @@ namespace ExtensionHelperRT
     struct Ext_VK_KHR_buffer_device_address : public VulkanDeviceFeaturesExtensionHelper<VkPhysicalDeviceBufferDeviceAddressFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR>
     {
         static constexpr auto Name = VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME;
-        Ext_VK_KHR_buffer_device_address( VulkanExtension::eStatus status = VulkanExtension::eRequired )
+        Ext_VK_KHR_buffer_device_address( VulkanExtensionStatus status = VulkanExtensionStatus::eRequired )
             : VulkanDeviceFeaturesExtensionHelper(Name, status)
         {}
         void PrintFeatures() const override
@@ -91,7 +91,7 @@ namespace ExtensionHelperRT
     struct Ext_VK_KHR_ray_tracing_pipeline : public VulkanDeviceFeaturePropertiesExtensionHelper<VkPhysicalDeviceRayTracingPipelineFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, VkPhysicalDeviceRayTracingPipelinePropertiesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR>
     {
         static constexpr auto Name = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
-        Ext_VK_KHR_ray_tracing_pipeline( VulkanExtension::eStatus status = VulkanExtension::eOptional )
+        Ext_VK_KHR_ray_tracing_pipeline( VulkanExtensionStatus status = VulkanExtensionStatus::eOptional )
             : VulkanDeviceFeaturePropertiesExtensionHelper(Name, status)
         {}
         void PrintFeatures() const override
@@ -132,7 +132,7 @@ namespace ExtensionHelperRT
     struct Ext_VK_KHR_ray_query : public VulkanDeviceFeaturesExtensionHelper<VkPhysicalDeviceRayQueryFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR>
     {
         static constexpr auto Name = VK_KHR_RAY_QUERY_EXTENSION_NAME;
-        Ext_VK_KHR_ray_query( VulkanExtension::eStatus status = VulkanExtension::eOptional )
+        Ext_VK_KHR_ray_query( VulkanExtensionStatus status = VulkanExtensionStatus::eOptional )
             : VulkanDeviceFeaturesExtensionHelper(Name, status)
         {}
         void PrintFeatures() const override

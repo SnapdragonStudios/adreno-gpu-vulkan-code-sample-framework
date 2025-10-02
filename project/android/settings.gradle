@@ -1,13 +1,3 @@
-include ':empty', ':hello-gltf', ':hdrSwapchain', ':SubPass', ':shaderResolveTonemap', ':rotatedCopy', ':BloomImageProcessing', ':rayQueryShadows',':rayReflections',':sgsr',':sgsr2'
+include ':empty', ':hello-gltf', ':hdrSwapchain', ':meshShaderKHR', ':SubPass', ':shaderResolveTonemap', ':rotatedCopy', ':BloomImageProcessing', ':rayPipelineGI', ':rayPipelineShadows', ':rayQueryShadows',':rayReflections',':sgsr', ':sgsr2', ':graph_pipelines'
 
-project(':empty').projectDir = new File('../../samples/empty')
-project(':hello-gltf').projectDir = new File('../../samples/hello-gltf')
-project(':hdrSwapchain').projectDir = new File('../../samples/hdrSwapchain')
-project(':SubPass').projectDir = new File('../../samples/SubPass')
-project(':shaderResolveTonemap').projectDir = new File('../../samples/shaderResolveTonemap')
-project(':rotatedCopy').projectDir = new File('../../samples/rotatedCopy')
-project(':BloomImageProcessing').projectDir = new File('../../samples/BloomImageProcessing')
-project(':rayQueryShadows').projectDir = new File('../../samples/rayQueryShadows')
-project(':rayReflections').projectDir = new File('../../samples/rayReflections')
-project(':sgsr').projectDir = new File('../../samples/sgsr')
-project(':sgsr2').projectDir = new File('../../samples/sgsr2')
+project(':graph_pipelines').projectDir = new File('../../samples/graph_pipelines')

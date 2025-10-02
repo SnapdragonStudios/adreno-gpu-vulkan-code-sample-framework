@@ -40,7 +40,7 @@ bool TimerPoolBase::Initialize( uint32_t maxTimers )
     QueryInfo.pipelineStatistics = 0;
 
     const auto* hostQueryResetExt = m_Vulkan.GetExtension<ExtensionHelper::Ext_VK_EXT_host_query_reset>();
-    if (!hostQueryResetExt || hostQueryResetExt->Status != VulkanExtension::eLoaded)
+    if (!hostQueryResetExt || hostQueryResetExt->Status != VulkanExtensionStatus::eLoaded)
     {
         LOGE("TimerPoolBase functionality requires VK_EXT_host_query_reset extension"); // Likely missing appConfig.RequiredExtension<ExtensionHelper::Ext_VK_EXT_host_query_reset>()  (or hardware does not support VK_EXT_host_query_reset)
         // If we move to requiring Vulkan 1.2 then we can remove this check and use vkResetQueryPool (no extension needed in 1.2)

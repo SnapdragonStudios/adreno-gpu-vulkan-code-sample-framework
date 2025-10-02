@@ -42,7 +42,7 @@ MaterialPass MaterialManagerT<Vulkan>::CreateMaterialPassInternal(
     const std::vector<DescriptorSetLayout>& descriptorSetLayouts = shaderPass.GetDescriptorSetLayouts();
 
     // Copy the Vulkan descriptor set layout handles from our descriptor set layout class.
-    // There may be 'null' handles in here - denoting descriptor set layouts with 'dynamic' descriptorCount that needs to be calculated from the textureLoader functions.
+    // There may be 'null' layouts in here - denoting descriptor set layouts with 'dynamic' descriptorCount that needs to be calculated from the textureLoader functions.
     // We will fill in any blank entries.
     std::vector<VkDescriptorSetLayout> vkDescSetLayouts;
     vkDescSetLayouts.reserve(descriptorSetLayouts.size());
@@ -73,13 +73,12 @@ MaterialPass MaterialManagerT<Vulkan>::CreateMaterialPassInternal(
             vkBindings = descSetLayout.GetVkDescriptorSetLayoutBinding();
         }
 
-        const auto& layoutBindingsArray = descSetLayout.GetVkDescriptorSetLayoutBinding();
         for (const auto& bindingNames : descSetLayout.GetNameToBinding())
         {
             uint32_t descriptorCount = 0;
             const std::string& bindingName = bindingNames.first;
-            const DescriptorSetLayout::BindingTypeAndIndex& binding = bindingNames.second;
-            switch (binding.type)
+            const MaterialPass::MaterialDescriptorBinding binding{uint32_t(layoutIdx)/*set index*/, bindingNames.second};
+            switch (binding.setBinding.type)
             {
             case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
             case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
@@ -142,9 +141,9 @@ MaterialPass MaterialManagerT<Vulkan>::CreateMaterialPassInternal(
             }
 
             // Fill in descriptor count if 'dynamically sized'
-            if (!vkBindings.empty() && vkBindings[binding.index].descriptorCount == 0)
+            if (!vkBindings.empty() && vkBindings[binding.setBinding.index].descriptorCount == 0)
             {
-                vkBindings[binding.index].descriptorCount = descriptorCount;
+                vkBindings[binding.setBinding.index].descriptorCount = descriptorCount;
             }
         }
 
@@ -194,11 +193,11 @@ MaterialPass MaterialManagerT<Vulkan>::CreateMaterialPassInternal(
     }
 
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-    if (poolSizeTotal > 0)
+    //if (poolSizeTotal > 0)  ok to make a pool with size zero (expected if a shader has a descriptor set with no entries)
     {
         VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         //PoolInfo.flags = 0;     // VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT to allow them to be returned
-        poolInfo.maxSets = numFrameBuffers;  // Since descriptor sets come out of this pool we need more than one
+        poolInfo.maxSets = numFrameBuffers * descriptorSetLayouts.size();  // Descriptor sets also come out of this pool
         poolInfo.poolSizeCount = (uint32_t)poolSizes.size();
         poolInfo.pPoolSizes = poolSizes.data();
         if (VK_SUCCESS != vkCreateDescriptorPool(vulkan.m_VulkanDevice, &poolInfo, NULL, &descriptorPool))
@@ -212,7 +211,7 @@ MaterialPass MaterialManagerT<Vulkan>::CreateMaterialPassInternal(
     //
 
     std::vector<VkDescriptorSet> descriptorSets;
-    descriptorSets.reserve(numFrameBuffers);	// pre-size so memory does not move in emplace_back
+    descriptorSets.reserve(numFrameBuffers * descriptorSetLayouts.size());	// pre-size so memory does not move in emplace_back
 
     if (!descriptorSetLayouts.empty())
     {
@@ -223,11 +222,12 @@ MaterialPass MaterialManagerT<Vulkan>::CreateMaterialPassInternal(
             //
             VkDescriptorSetAllocateInfo descSetInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
             descSetInfo.descriptorPool = descriptorPool;
-            descSetInfo.descriptorSetCount = (uint32_t) descriptorSetLayouts.size();
+            descSetInfo.descriptorSetCount = (uint32_t) vkDescSetLayouts.size();
             descSetInfo.pSetLayouts = vkDescSetLayouts.data();
             descriptorSets.resize( descriptorSets.size() + descSetInfo.descriptorSetCount, VK_NULL_HANDLE );
             VkDescriptorSet* pNewDescriptorSets = &descriptorSets[descriptorSets.size() - descSetInfo.descriptorSetCount];
-            if (VK_SUCCESS != vkAllocateDescriptorSets( vulkan.m_VulkanDevice, &descSetInfo, pNewDescriptorSets ))
+            VkResult result = vkAllocateDescriptorSets( vulkan.m_VulkanDevice, &descSetInfo, pNewDescriptorSets );
+            if (result != VK_SUCCESS)
             {
                 assert(0);
             }

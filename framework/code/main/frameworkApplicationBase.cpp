@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -29,20 +29,20 @@ const char* const FrameworkApplicationBase::sm_BuildTimestamp = BUILD_TIMESTAMP;
 // ************************************
 // General Settings
 // ************************************
-VAR(uint32_t, gSurfaceWidth, 1280, kVariableNonpersistent);
-VAR(uint32_t, gSurfaceHeight, 720, kVariableNonpersistent);
+VAR(uint32_t, gSurfaceWidth, 1920, kVariableNonpersistent);
+VAR(uint32_t, gSurfaceHeight, 1080, kVariableNonpersistent);
 
-VAR(uint32_t, gRenderWidth, 1280, kVariableNonpersistent);
-VAR(uint32_t, gRenderHeight, 720, kVariableNonpersistent);
+VAR(uint32_t, gRenderWidth, 1920, kVariableNonpersistent);
+VAR(uint32_t, gRenderHeight, 1080, kVariableNonpersistent);
 
-VAR(uint32_t, gReflectMapWidth, 1280/2, kVariableNonpersistent);
-VAR(uint32_t, gReflectMapHeight, 720/2, kVariableNonpersistent);
+VAR(uint32_t, gReflectMapWidth, 1920, kVariableNonpersistent);
+VAR(uint32_t, gReflectMapHeight, 1080, kVariableNonpersistent);
 
 VAR(uint32_t, gShadowMapWidth, 1024, kVariableNonpersistent);
 VAR(uint32_t, gShadowMapHeight, 1024, kVariableNonpersistent);
 
-VAR(uint32_t, gHudRenderWidth, 1280, kVariableNonpersistent);
-VAR(uint32_t, gHudRenderHeight, 720, kVariableNonpersistent);
+VAR(uint32_t, gHudRenderWidth, 1920, kVariableNonpersistent);
+VAR(uint32_t, gHudRenderHeight, 1080, kVariableNonpersistent);
 
 VAR(float,    gFixedFrameRate, 0.0f, kVariableNonpersistent);
 

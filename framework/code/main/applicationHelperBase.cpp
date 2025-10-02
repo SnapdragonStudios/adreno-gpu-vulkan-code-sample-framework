@@ -496,31 +496,31 @@ void ApplicationHelperBase::TouchUpEvent(int iPointerID, float xPos, float yPos)
 TextureT<Vulkan> ApplicationHelperBase::LoadKTXTexture(Vulkan* vulkan, AssetManager& assetManager, const char* filename, SamplerAddressMode samplerMode)
 //-----------------------------------------------------------------------------
 {
-    const Sampler* pSampler = nullptr;
+    SamplerT<Vulkan> sampler;
     switch (samplerMode) {
     case SamplerAddressMode::Repeat:
-        pSampler = &m_SamplerRepeat;
+        sampler = m_SamplerRepeat.Copy();
         break;
     case SamplerAddressMode::ClampEdge:
-        pSampler = &m_SamplerEdgeClamp;
+        sampler = m_SamplerEdgeClamp.Copy();
         break;
     case SamplerAddressMode::MirroredRepeat:
-        pSampler = &m_SamplerMirroredRepeat;
+        sampler = m_SamplerMirroredRepeat.Copy();
         break;
     default:
         assert(0 && "Invalid sampler");
         break;
     }
-    return LoadKTXTexture(vulkan, assetManager, filename, *pSampler);
+    return LoadKTXTexture(vulkan, assetManager, filename, sampler);
 }
 
 //-----------------------------------------------------------------------------
-TextureT<Vulkan> ApplicationHelperBase::LoadKTXTexture(Vulkan* vulkan, AssetManager& assetManager, const char* filename, const Sampler& sampler)
+TextureT<Vulkan> ApplicationHelperBase::LoadKTXTexture(Vulkan* vulkan, AssetManager& assetManager, const char* filename, Sampler& sampler)
 //-----------------------------------------------------------------------------
 {
     auto* pTextureManagerVulkan = apiCast<Vulkan>(m_TextureManager.get());
-    const auto & samplerVulkan = static_cast<const SamplerT<Vulkan>&>(sampler);
-    return pTextureManagerVulkan->GetLoader()->LoadKtx(*vulkan, assetManager, filename, samplerVulkan);
+    auto & samplerVulkan = static_cast<SamplerT<Vulkan>&>(sampler);
+    return pTextureManagerVulkan->GetLoader()->LoadKtx(*vulkan, assetManager, filename, std::move(samplerVulkan));
 }
 
 //-----------------------------------------------------------------------------

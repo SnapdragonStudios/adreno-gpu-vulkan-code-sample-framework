@@ -52,8 +52,15 @@ VkDebugReportCallbackEXT                        gDebugCallbackHandle = VK_NULL_H
 // Global access to GetDeviceProcAddr
 PFN_vkGetDeviceProcAddr                         fpGetDeviceProcAddr = nullptr;
 
-// If running on HLM, we don't want to use validation layers.
+// Validation enables (from config)
 VAR(bool, gEnableValidation, true, kVariableNonpersistent);
+VAR(bool, gEnableValidationBestPractices, false, kVariableNonpersistent);
+VAR(bool, gEnableValidationGpu, false, kVariableNonpersistent);
+VAR(bool, gEnableValidationDebugPrintf, false, kVariableNonpersistent);
+VAR(bool, gEnableValidationSynchronization, false, kVariableNonpersistent);
+
+// Override the physical device number
+VAR(int, gPhysicalDevice, -1, kVariableNonpersistent);
 
 // Forward declaration of helper functions
 bool CheckVkError(const char* pPrefix, VkResult CheckVal);
@@ -109,8 +116,8 @@ Vulkan::Vulkan()
 
     // Vulkan Objects
     m_VulkanInstance = VK_NULL_HANDLE;
+    m_VulkanApiVersion = 0;
     m_VulkanGpuCount = 0;
-
     m_VulkanGpuIdx = 0;
 
     m_pDeviceLayerNames.clear();
@@ -131,6 +138,7 @@ Vulkan::Vulkan()
 #endif // defined (OS_ANDROID)
 
     m_VulkanGraphicsQueueSupportsCompute = false;
+    m_VulkanGraphicsQueueSupportsDataGraph = false;
 
     m_VulkanDevice = VK_NULL_HANDLE;
 
@@ -184,9 +192,7 @@ Vulkan::~Vulkan()
 
     // Debug/Validation Layers
     m_InstanceLayerProps.clear();
-    m_InstanceExtensionProps.clear();
     m_InstanceLayerNames.clear();
-    m_InstanceExtensionNames.clear();
 }
 
 
@@ -227,10 +233,16 @@ bool Vulkan::Init(uintptr_t windowHandle, uintptr_t hInst, const Vulkan::tSelect
     if (!InitSurface())
         return false;
 
+    if (!InitDataGraph())
+        return false;
+
     if (!InitCompute())
         return false;
 
     if (!InitDevice())
+        return false;
+
+    if (!GetDataGraphProcessingEngine())
         return false;
 
     if (!InitCommandPools())
@@ -660,8 +672,14 @@ bool Vulkan::RegisterKnownExtensions()
 //-----------------------------------------------------------------------------
 {
     //
-    // Add any Vulkan Device Extensions we must have (expected to be a short list)
+    // Add any Vulkan Instance and Device Extensions we must have (expected to be a short list)
     //
+
+    for (auto& appExtension : m_ConfigOverride.AdditionalVulkanInstanceExtensions)
+    {
+        auto insertIt = m_InstanceExtensions.m_Extensions.insert(std::move(appExtension));
+        assert(insertIt.second);  // check we didnt add a duplicate!
+    }
 
     for ( auto& appExtension : m_ConfigOverride.AdditionalVulkanDeviceExtensions )
     {
@@ -669,42 +687,92 @@ bool Vulkan::RegisterKnownExtensions()
         assert( insertIt.second );  // check we didnt add a duplicate!
     }
 
+    //
+    // Add the Instance extensions we need
+    //
+    m_ExtKhrSurface = m_InstanceExtensions.AddExtension<ExtensionHelper::Ext_VK_KHR_surface>();
+
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
+    m_InstanceExtensions.AddExtension( VK_KHR_WIN32_SURFACE_EXTENSION_NAME, VulkanExtensionStatus::eRequired );
+#endif // VK_USE_PLATFORM_WIN32_KHR
+
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    m_InstanceExtensions.AddExtension( VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, VulkanExtensionStatus::eRequired );
+#endif // VK_USE_PLATFORM_ANDROID_KHR
+
+#if defined(USES_VULKAN_DEBUG_LAYERS)
+    // If this is NOT set, we cannot use the debug extensions! (Find vkCreateDebugReportCallback)
+    if (gEnableValidation)
+    {
+        m_InstanceExtensions.AddExtension( VK_EXT_DEBUG_REPORT_EXTENSION_NAME, VulkanExtensionStatus::eOptional );
+        m_InstanceExtensions.AddExtension( VK_EXT_DEBUG_UTILS_EXTENSION_NAME, VulkanExtensionStatus::eOptional );
+    }
+#endif // USES_VULKAN_DEBUG_LAYERS
+
+    // This extension may enable more than the default VK_COLOR_SPACE_SRGB_NONLINEAR_KHR color space (enable if available)
+    m_InstanceExtensions.AddExtension( VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME, VulkanExtensionStatus::eOptional );
+
+    // Extension to allow vkGetPhysicalDeviceProperties2KHR (which is provided by Vulkan 1.1 as vkGetPhysicalDeviceProperties2).  May already have been requested/required by the application.
+    m_ExtKhrGetPhysicalDeviceProperties2 = m_InstanceExtensions.GetExtension<ExtensionHelper::Ext_VK_KHR_get_physical_device_properties2>();
+    if (!m_ExtKhrGetPhysicalDeviceProperties2)
+        m_ExtKhrGetPhysicalDeviceProperties2 = m_InstanceExtensions.AddExtension<ExtensionHelper::Ext_VK_KHR_get_physical_device_properties2>( VulkanExtensionStatus::eOptional );
+
+    // This extension allows us to call VkPhysicalDeviceSurfaceInfo2KHR (enable if available)
+    m_ExtSurfaceCapabilities2 = m_InstanceExtensions.AddExtension<ExtensionHelper::Ext_VK_KHR_get_surface_capabilities2>( VulkanExtensionStatus::eOptional );
+
+    // This extension allows us to use VkValidationFeaturesEXT (>0 if available)
+#if defined(USES_VULKAN_DEBUG_LAYERS)
+    if (gEnableValidation)
+    {
+        m_ExtValidationFeatures = m_InstanceExtensions.AddExtension( VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, VulkanExtensionStatus::eOptional );
+    }
+#endif // defined(USES_VULKAN_DEBUG_LAYERS)
+
+#if defined (OS_ANDROID)
+    // This extension allow us to use Android Hardware Buffers
+    m_InstanceExtensions.AddExtension( "VK_KHR_external_memory_capabilities", VulkanExtensionStatus::eOptional );
+#endif // defined (OS_ANDROID)
+
     // This extension says the device must be able to present images directly to the screen.
-    m_DeviceExtensions.AddExtension( VK_KHR_SWAPCHAIN_EXTENSION_NAME, VulkanExtension::eRequired );
+    m_DeviceExtensions.AddExtension( VK_KHR_SWAPCHAIN_EXTENSION_NAME, VulkanExtensionStatus::eRequired );
 
     //
     // Add extensions we would always LIKE to initialize (if they exist).
     //
-    m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_KHR_shader_float16_int8>( VulkanExtension::eOptional );
+    m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_KHR_shader_float16_int8>( VulkanExtensionStatus::eOptional );
 #if defined(USES_VULKAN_DEBUG_LAYERS)
-    m_ExtDebugUtils  = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_debug_utils>( VulkanExtension::eOptional );
-    m_ExtDebugMarker = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_debug_marker>( VulkanExtension::eOptional );
+    m_ExtDebugUtils  = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_debug_utils>( VulkanExtensionStatus::eOptional );
+    m_ExtDebugMarker = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_debug_marker>( VulkanExtensionStatus::eOptional );
 #else
-    m_ExtDebugUtils  = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_debug_utils>( VulkanExtension::eUninitialized );
-    m_ExtDebugMarker = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_debug_marker>( VulkanExtension::eUninitialized );
+    m_ExtDebugUtils  = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_debug_utils>( VulkanExtensionStatus::eUninitialized );
+    m_ExtDebugMarker = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_debug_marker>( VulkanExtensionStatus::eUninitialized );
 #endif
-    m_DeviceExtensions.AddExtension( VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME, VulkanExtension::eOptional );
-    m_ExtHdrMetadata = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_hdr_metadata>( VulkanExtension::eOptional );
-    m_DeviceExtensions.AddExtension( VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME, VulkanExtension::eOptional );
-    m_DeviceExtensions.AddExtension( "VK_QCOM_render_pass_transform", VulkanExtension::eOptional);
+    m_DeviceExtensions.AddExtension( VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME, VulkanExtensionStatus::eOptional );
+    m_ExtHdrMetadata = m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_hdr_metadata>( VulkanExtensionStatus::eOptional );
+    m_DeviceExtensions.AddExtension( VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME, VulkanExtensionStatus::eOptional );
+    m_DeviceExtensions.AddExtension( "VK_QCOM_render_pass_transform", VulkanExtensionStatus::eOptional);
     // This extension allows us to set  VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM (enable if available)
-    m_DeviceExtensions.AddExtension( "VK_QCOM_render_pass_shader_resolve", VulkanExtension::eOptional);
-    m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_KHR_portability_subset>( VulkanExtension::eOptional );
-    m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_subgroup_size_control>( VulkanExtension::eOptional );
+    m_DeviceExtensions.AddExtension( "VK_QCOM_render_pass_shader_resolve", VulkanExtensionStatus::eOptional);
+    m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_KHR_portability_subset>( VulkanExtensionStatus::eOptional );
+    m_DeviceExtensions.AddExtension<ExtensionHelper::Ext_VK_EXT_subgroup_size_control>( VulkanExtensionStatus::eOptional );
 
-    m_SubgroupProperties = m_Vulkan11ProvidedExtensions.AddExtension<ExtensionHelper::Vulkan_SubgroupPropertiesHook>( VulkanExtension::eRequired );
-    m_StorageFeatures = m_Vulkan11ProvidedExtensions.AddExtension<ExtensionHelper::Vulkan_StorageFeaturesHook>( VulkanExtension::eRequired );
+    m_SubgroupProperties = m_Vulkan11ProvidedExtensions.AddExtension<ExtensionHelper::Vulkan_SubgroupPropertiesHook>( VulkanExtensionStatus::eRequired );
+    m_StorageFeatures = m_Vulkan11ProvidedExtensions.AddExtension<ExtensionHelper::Vulkan_StorageFeaturesHook>( VulkanExtensionStatus::eRequired );
 
 #if defined (OS_ANDROID)
-    m_DeviceExtensions.AddExtension( VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME, VulkanExtension::eOptional );
+    m_DeviceExtensions.AddExtension( VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME, VulkanExtensionStatus::eOptional );
 #endif
 
     m_ExtKhrSynchronization2 = m_DeviceExtensions.GetExtension<ExtensionHelper::Ext_VK_KHR_synchronization2>();
     m_ExtKhrDrawIndirectCount = m_DeviceExtensions.GetExtension<ExtensionHelper::Ext_VK_KHR_draw_indirect_count>();
     m_ExtRenderPass2 = m_DeviceExtensions.GetExtension<ExtensionHelper::Ext_VK_KHR_create_renderpass2>();
+    m_ExtArmTensors = m_DeviceExtensions.GetExtension<ExtensionHelper::Ext_VK_ARM_tensors>();
+    m_ExtArmDataGraph = m_DeviceExtensions.GetExtension<ExtensionHelper::Ext_VK_ARM_data_graph>();
     m_ExtFragmentShadingRate = m_DeviceExtensions.GetExtension<ExtensionHelper::Ext_VK_KHR_fragment_shading_rate>();
+    m_ExtMeshShader = m_DeviceExtensions.GetExtension<ExtensionHelper::Ext_VK_KHR_mesh_shader>();
 
     // Now we have a list of all the extensions we know about we can ask them to Register themselves with whatever 'hooks' they require.
+    m_InstanceExtensions.RegisterAll(*this);
     m_DeviceExtensions.RegisterAll( *this );
     m_Vulkan11ProvidedExtensions.RegisterAll( *this );
 
@@ -720,7 +788,10 @@ bool Vulkan::CreateInstance()
     // ********************************
     // Debug/Validation/Whatever Layers
     // ********************************
-    InitInstanceExtensions();
+    if (!InitInstanceExtensions())
+    {
+        return false;
+    }
 
     // ********************************
     // Create the Vulkan Instance
@@ -735,53 +806,68 @@ bool Vulkan::CreateInstance()
     AppInfoStruct.applicationVersion = 0;
     AppInfoStruct.pEngineName = "VkFrameworkEngine";
     AppInfoStruct.engineVersion = 0;
-    AppInfoStruct.apiVersion = VK_MAKE_VERSION(1, 1, 0);    // VK_API_VERSION = VK_MAKE_VERSION(1, 1, 0). 
+    AppInfoStruct.apiVersion = m_ConfigOverride.ApiVerson.value_or( VK_MAKE_VERSION( 1, 1, 0 ) );
 
     // Creation information for the instance points to details about
     // the application, and also the list of extensions to enable.
+    std::vector<const char*> InstanceExtensionNames;
+    InstanceExtensionNames.reserve(m_InstanceExtensions.m_Extensions.size());
+    for (const auto& e : m_InstanceExtensions.m_Extensions)
+        if (e.second->Status == VulkanExtensionStatus::eLoaded)
+            InstanceExtensionNames.push_back(e.first.c_str());
+
     VkInstanceCreateInfo InstanceInfoStruct {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     InstanceInfoStruct.flags = 0;
     InstanceInfoStruct.pApplicationInfo = &AppInfoStruct;
     InstanceInfoStruct.enabledLayerCount = (uint32_t) m_InstanceLayerNames.size();
     InstanceInfoStruct.ppEnabledLayerNames = m_InstanceLayerNames.data();
-    InstanceInfoStruct.enabledExtensionCount = (uint32_t) m_InstanceExtensionNames.size();
-    InstanceInfoStruct.ppEnabledExtensionNames = m_InstanceExtensionNames.data();
+    InstanceInfoStruct.enabledExtensionCount = (uint32_t) InstanceExtensionNames.size();
+    InstanceInfoStruct.ppEnabledExtensionNames = InstanceExtensionNames.data();
 
     //
     // Potentially add Validation layer feature settings.
     //
     VkValidationFeaturesEXT ValidationFeaturesStruct { VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT };
-    if (m_ExtValidationFeaturesVersion >= 2)    // spec version 1 does not support 'best practices'
+    std::vector<VkValidationFeatureEnableEXT> ValidationFeaturesEnables;
+    if (m_ExtValidationFeatures && m_ExtValidationFeatures->Version >= 2)    // spec version 1 does not support 'best practices'
     {
 #if (VK_EXT_VALIDATION_FEATURES_SPEC_VERSION < 4)   // if our header does not define the spec version 4 then add the 'missing' enable
 #define VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT (4)
 #endif
-        std::vector<VkValidationFeatureEnableEXT> enables;
-#if defined(VULKAN_VALIDATION_ENABLE_BEST_PRACTICES)
-        enables.push_back(VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT);
-#endif // VALIDATION_ENABLE_BEST_PRACTICES
-#if defined(VULKAN_VALIDATION_ENABLE_SYNCHRONIZATION)
-        if (m_ExtValidationFeaturesVersion >= 4) // spec versions before 4 do not support synchronization validation
+        if (gEnableValidationBestPractices)
         {
-            enables.push_back((VkValidationFeatureEnableEXT)VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT);
+            LOGI( "Enabling VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT in Validation Layer" );
+            ValidationFeaturesEnables.push_back(VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT);
         }
-#endif // VULKAN_VALIDATION_ENABLE_SYNCHRONIZATION
-#if defined(VULKAN_VALIDATION_ENABLE_SYNCHRONIZATION)
-        if (m_ExtValidationFeaturesVersion >= 4) // spec versions before 4 do not support synchronization validation
+        if (gEnableValidationGpu)
         {
-            enables.push_back((VkValidationFeatureEnableEXT)VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT);
+            LOGI("Enabling VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT in Validation Layer");
+            LOGI("Enabling VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT in Validation Layer");
+            ValidationFeaturesEnables.push_back((VkValidationFeatureEnableEXT)VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT);
+            ValidationFeaturesEnables.push_back((VkValidationFeatureEnableEXT)VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT );
         }
-#endif // VULKAN_VALIDATION_ENABLE_SYNCHRONIZATION
-#if defined(VULKAN_VALIDATION_ENABLE_PRINTF)
-        if (m_ExtValidationFeaturesVersion >= 3) // spec versions before 3 do not support printf
+        if (gEnableValidationDebugPrintf && m_ExtValidationFeatures->Version >= 3) // spec versions before 3 do not support printf
         {
-            enables.push_back((VkValidationFeatureEnableEXT)VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT);
+            if (gEnableValidationGpu)
+            {
+                LOGW("Cannot use gEnableValidationDebugPrintf at the same time as gEnableValidationGpu");
+            }
+            else
+            {
+                LOGI("Enabling VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT in Validation Layer");
+                ValidationFeaturesEnables.push_back((VkValidationFeatureEnableEXT)VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT);
+            }
         }
-#endif // VULKAN_VALIDATION_ENABLE_PRINTF
-        if (!enables.empty())
+        if (gEnableValidationSynchronization && m_ExtValidationFeatures->Version >= 4) // spec versions before 4 do not support synchronization validation
         {
-            ValidationFeaturesStruct.enabledValidationFeatureCount = (uint32_t) enables.size();
-            ValidationFeaturesStruct.pEnabledValidationFeatures = enables.data();
+            LOGI("Enabling VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT in Validation Layer");
+            ValidationFeaturesEnables.push_back((VkValidationFeatureEnableEXT)VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT);
+        }
+
+        if (!ValidationFeaturesEnables.empty())
+        {
+            ValidationFeaturesStruct.enabledValidationFeatureCount = (uint32_t) ValidationFeaturesEnables.size();
+            ValidationFeaturesStruct.pEnabledValidationFeatures = ValidationFeaturesEnables.data();
         }
         InstanceInfoStruct.pNext = &ValidationFeaturesStruct;
     }
@@ -798,7 +884,7 @@ bool Vulkan::CreateInstance()
     }
 
     LOGI("Requesting Extensions:");
-    for (const auto& ExtensionName: m_InstanceExtensionNames)
+    for (const auto& ExtensionName: InstanceExtensionNames)
     {
         LOGI("    %s", ExtensionName);
     }
@@ -839,11 +925,71 @@ bool Vulkan::CreateInstance()
     {
         return false;
     }
+    m_VulkanApiVersion = AppInfoStruct.apiVersion;
+
     return true;
 }
 
 //-----------------------------------------------------------------------------
-void Vulkan::InitInstanceExtensions()
+// Parse ExtensionProps for extensions in RegisteredExtensions.
+// If found set the registered extension's version and change Status to eLoaded if requested to load (status eOptional or eRequired).
+// If not found add to the list of RegisteredExtensions (with a eUninitialized status)
+template<VulkanExtensionType T_TYPE>
+static bool ParseExtensionProperties( const std::vector<VkExtensionProperties>& ExtensionProps, Vulkan::RegisteredExtensions<T_TYPE>& RegisteredExtensions )
+//-----------------------------------------------------------------------------
+{
+    bool success = true;
+    for (uint32_t uiIndx = 0; uiIndx < (uint32_t)ExtensionProps.size(); uiIndx++)
+    {
+        const VkExtensionProperties* const pOneItem = &ExtensionProps[uiIndx];
+        LOGI( "    %d: %s", uiIndx, pOneItem->extensionName );
+
+        // Need to check if we found specific device extensions
+        {
+            std::string extensionName = pOneItem->extensionName;
+            auto* pExtension = RegisteredExtensions.GetExtension( extensionName );
+            if (pExtension)
+            {
+                // Found an already known extension, see if we want to do anything with it.
+                switch (pExtension->Status)
+                {
+                case VulkanExtensionStatus::eOptional:
+                case VulkanExtensionStatus::eRequired:
+                    pExtension->Status = VulkanExtensionStatus::eLoaded;  // strictly not 'yet' loaded but will be shortly
+                    break;
+                case VulkanExtensionStatus::eLoaded:
+                case VulkanExtensionStatus::eUninitialized:
+                    break;
+                }
+                pExtension->Version = pOneItem->specVersion;
+            }
+            else
+            {
+                // Add to the list of known extensions (assume we dont want to load it)
+                RegisteredExtensions.AddExtension( extensionName, VulkanExtensionStatus::eUninitialized, pOneItem->specVersion );
+            }
+        }
+    }
+
+    // Do a final check of extensions we requested (as required or optional) that are not present in the list of available extensions.
+    for (auto& extension : RegisteredExtensions.m_Extensions)
+    {
+        if (extension.second->Status == VulkanExtensionStatus::eRequired)
+        {
+            LOGE( "Required Vulkan extension \"%s\" was not found", extension.first.c_str() );
+            success = false;
+        }
+        else if (extension.second->Status == VulkanExtensionStatus::eOptional)
+        {
+            // If requested as optional but not available then set to be uninitialized.
+            extension.second->Status = VulkanExtensionStatus::eUninitialized;
+        }
+    }
+    return success;
+}
+
+//-----------------------------------------------------------------------------
+bool Vulkan::InitInstanceExtensions()
 //-----------------------------------------------------------------------------
 {
     VkResult RetVal;
@@ -856,7 +1002,7 @@ void Vulkan::InitInstanceExtensions()
         RetVal = vkEnumerateInstanceLayerProperties(&NumInstanceLayerProps, nullptr);
         if (!CheckVkError("vkEnumerateInstanceLayerProperties(nullptr)", RetVal))
         {
-            return;
+            return false;
         }
 
         LOGI("Found %d Vulkan Instance Layer Properties", NumInstanceLayerProps);
@@ -869,7 +1015,7 @@ void Vulkan::InitInstanceExtensions()
             RetVal = vkEnumerateInstanceLayerProperties(&NumInstanceLayerProps, m_InstanceLayerProps.data());
             if (!CheckVkError("vkEnumerateInstanceLayerProperties()", RetVal))
             {
-                return;
+                return false;
             }
 
             for (uint32_t uiIndx = 0; uiIndx < NumInstanceLayerProps; uiIndx++)
@@ -894,20 +1040,22 @@ void Vulkan::InitInstanceExtensions()
         RetVal = vkEnumerateInstanceExtensionProperties(nullptr, &NumInstanceExtensionProps, nullptr);
         if (!CheckVkError("vkEnumerateInstanceExtensionProperties(nullptr)", RetVal))
         {
-            return;
+            return false;
         }
+
+        std::vector<VkExtensionProperties> InstanceExtensionProps;
 
         LOGI("Found %d Vulkan Instance Extension Properties", NumInstanceExtensionProps);
         if (NumInstanceExtensionProps > 0)
         {
             // Allocate memory for the structures...
-            m_InstanceExtensionProps.resize(NumInstanceExtensionProps);
+            InstanceExtensionProps.resize(NumInstanceExtensionProps);
 
             // ... then read the structures from the driver
-            RetVal = vkEnumerateInstanceExtensionProperties(nullptr, &NumInstanceExtensionProps, m_InstanceExtensionProps.data());
+            RetVal = vkEnumerateInstanceExtensionProperties(nullptr, &NumInstanceExtensionProps, InstanceExtensionProps.data());
             if (!CheckVkError("vkEnumerateInstanceExtensionProperties()", RetVal))
             {
-                return;
+                return false;
             }
         }
 
@@ -919,61 +1067,29 @@ void Vulkan::InitInstanceExtensions()
             RetVal = vkEnumerateInstanceExtensionProperties("VK_LAYER_KHRONOS_validation", &NumValidationLayerInstanceExtensionProps, nullptr);
             if (!CheckVkError("vkEnumerateInstanceExtensionProperties(VK_LAYER_KHRONOS_validation)", RetVal))
             {
-                return;
+                return false;
             }
 
             LOGI("Found %d Vulkan VK_LAYER_KHRONOS_validation Instance Extension Properties", NumValidationLayerInstanceExtensionProps);
             if (NumValidationLayerInstanceExtensionProps > 0)
             {
                 // Allocate memory for the structures...
-                m_InstanceExtensionProps.resize(NumInstanceExtensionProps + NumValidationLayerInstanceExtensionProps);
+                InstanceExtensionProps.resize(NumInstanceExtensionProps + NumValidationLayerInstanceExtensionProps);
 
                 // ... then read the structures from the driver
-                RetVal = vkEnumerateInstanceExtensionProperties("VK_LAYER_KHRONOS_validation", &NumValidationLayerInstanceExtensionProps, &m_InstanceExtensionProps[NumInstanceExtensionProps]);
+                RetVal = vkEnumerateInstanceExtensionProperties("VK_LAYER_KHRONOS_validation", &NumValidationLayerInstanceExtensionProps, &InstanceExtensionProps[NumInstanceExtensionProps]);
                 if (!CheckVkError("vkEnumerateInstanceExtensionProperties(VK_LAYER_KHRONOS_validation)", RetVal))
                 {
-                    return;
+                    return false;
                 }
             }
             NumInstanceExtensionProps += NumValidationLayerInstanceExtensionProps;
         }
 
-        if (NumInstanceExtensionProps > 0)
+        if (!ParseExtensionProperties( InstanceExtensionProps, m_InstanceExtensions ))
         {
-            for (uint32_t uiIndx = 0; uiIndx < NumInstanceExtensionProps; uiIndx++)
-            {
-                const VkExtensionProperties& rOneItem = m_InstanceExtensionProps[uiIndx];
-                LOGI("    %d: %s (%u)", uiIndx, rOneItem.extensionName, rOneItem.specVersion);
-
-                if (!strcmp(VK_KHR_SURFACE_EXTENSION_NAME, rOneItem.extensionName))
-                {
-                    // Found one of the extensions we are looking for
-                }
-                else if (!strcmp(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME, rOneItem.extensionName))
-                {
-                    m_ExtSwapchainColorspaceAvailable = true;
-                }
-                else if (!strcmp(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME, rOneItem.extensionName))
-                {
-                    m_ExtSurfaceCapabilities2Available = true;
-                }
-                else if (!strcmp(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, rOneItem.extensionName))
-                {
-                    m_ExtValidationFeaturesVersion = rOneItem.specVersion;
-                }
-#if defined (OS_ANDROID)
-                else if (!strcmp("VK_KHR_external_memory_capabilities", rOneItem.extensionName))
-                {
-                    m_ExtExternMemoryCapsAvailable = true;
-                }
-#endif // defined (OS_ANDROID)
-#if defined(USES_VULKAN_DEBUG_LAYERS)
-                else if (!strcmp( VK_EXT_DEBUG_UTILS_EXTENSION_NAME, rOneItem.extensionName ))
-                {
-                    m_ExtDebugUtilsAvailable = true;
-                }
-#endif // USES_VULKAN_DEBUG_LAYERS
-            }
+            LOGE("Required Vulkan Instance extensions missing.");
+            return false;
         }
     }
 
@@ -985,77 +1101,6 @@ void Vulkan::InitInstanceExtensions()
     }
 #endif // USES_VULKAN_DEBUG_LAYERS
 
-    // Add the extensions we need
-    m_InstanceExtensionNames.push_back( VK_KHR_SURFACE_EXTENSION_NAME );
-
-#if defined(VK_USE_PLATFORM_WIN32_KHR)
-    m_InstanceExtensionNames.push_back( VK_KHR_WIN32_SURFACE_EXTENSION_NAME );
-#endif // VK_USE_PLATFORM_WIN32_KHR
-
-#if defined(VK_USE_PLATFORM_ANDROID_KHR)
-    m_InstanceExtensionNames.push_back( VK_KHR_ANDROID_SURFACE_EXTENSION_NAME );
-#endif // VK_USE_PLATFORM_ANDROID_KHR
-
-#if defined(USES_VULKAN_DEBUG_LAYERS)
-    // If this is NOT set, we cannot use the debug extensions! (Find vkCreateDebugReportCallback)
-    if (gEnableValidation && m_LayerKhronosValidationAvailable)
-    {
-        m_InstanceExtensionNames.push_back( VK_EXT_DEBUG_REPORT_EXTENSION_NAME );
-    }
-    if (gEnableValidation && m_ExtDebugUtilsAvailable)
-    {
-        m_InstanceExtensionNames.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
-    }
-#endif // USES_VULKAN_DEBUG_LAYERS
-
-    // This extension may enable more than the default VK_COLOR_SPACE_SRGB_NONLINEAR_KHR color space (enable if available)
-    if (m_ExtSwapchainColorspaceAvailable)
-    {
-        m_InstanceExtensionNames.push_back( VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME );
-    }
-
-    // This extension allows us to call VkPhysicalDeviceSurfaceInfo2KHR (enable if available)
-    if (m_ExtSurfaceCapabilities2Available)
-    {
-        m_InstanceExtensionNames.push_back( VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME );
-    }
-    
-    // This extension allows us to use VkValidationFeaturesEXT (>0 if available)
-#if defined(USES_VULKAN_DEBUG_LAYERS)
-    if (gEnableValidation && m_ExtValidationFeaturesVersion > 0)
-    {
-        m_InstanceExtensionNames.push_back( VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME );
-    }
-#endif // defined(USES_VULKAN_DEBUG_LAYERS)
-
-    m_InstanceExtensionNames.push_back( VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME );   // Needed by Nvidia VK_KHR_deferred_host_operations
-
-#if defined (OS_ANDROID)
-    // This extension allow us to use Android Hardware Buffers
-    // The basic problem is that there is a device extension requirement chain:
-    //  VK_ANDROID_external_memory_android_hardware_buffer (Requires)
-    //      VK_KHR_external_memory (Requires)
-    //          VK_KHR_external_memory_capabilities <= Instance Extension!!!
-    // So we do the instance extensions before we get to handling the device extensions!
-    // Rather than rework the whole thing and check the device extensions here, just request it here.
-    if (m_ExtExternMemoryCapsAvailable)
-    {
-        // LOGE("VK_KHR_external_memory_capabilities is added as instance extension %d", m_NumInstanceExtensions);
-        m_InstanceExtensionNames.push_back( "VK_KHR_external_memory_capabilities" );
-    }
-#endif // defined (OS_ANDROID)
-
-    {
-        // Sort alphabetically (can search using std::lower_bound)
-        std::sort(std::begin(m_InstanceExtensionNames), std::end(m_InstanceExtensionNames), [](auto a, auto b) { return strcmp(a, b) < 0; });
-        size_t outIdx = 0;
-        for (size_t inIdx = 0; inIdx < m_InstanceExtensionNames.size(); ++inIdx)
-            if (inIdx == 0 || strcmp(m_InstanceExtensionNames[outIdx-1], m_InstanceExtensionNames[inIdx]) != 0)
-                ++outIdx;
-
-        // Remove duplicates
-        m_InstanceExtensionNames.resize(outIdx);
-    }
     {
         // Sort alphabetically (can search using std::lower_bound)
         std::sort(std::begin(m_InstanceLayerNames), std::end(m_InstanceLayerNames), [](auto a, auto b) { return strcmp(a, b) < 0; });
@@ -1067,6 +1112,7 @@ void Vulkan::InitInstanceExtensions()
         // Remove duplicates
         m_InstanceLayerNames.resize(outIdx);
     }
+    return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -1115,6 +1161,21 @@ bool Vulkan::GetPhysicalDevices()
 
         DumpDeviceInfo( DeviceFeatures, DeviceProperties );
 
+        if (gPhysicalDevice >= 0)
+        {
+            LOGI( "Forcing physical device: (config gPhysicalDevice=%d).\n", gPhysicalDevice );
+
+            if (gPhysicalDevice >= DeviceProperties.size())
+            {
+                LOGE( "Forced physical device out of range.  Reverting to automatic selection.\n" );
+                m_VulkanGpuIdx = (uint32_t)GetBestVulkanPhysicalDeviceId( DeviceProperties );
+            }
+            else
+            {
+                m_VulkanGpuIdx = gPhysicalDevice;
+            }
+        }
+
         m_VulkanGpuIdx = (uint32_t) GetBestVulkanPhysicalDeviceId( DeviceProperties );
 
         LOGI("Using Vulkan Device (GPU): %d \"%s\"", m_VulkanGpuIdx, DeviceProperties[m_VulkanGpuIdx].Base.properties.deviceName);
@@ -1137,8 +1198,8 @@ bool Vulkan::GetPhysicalDevices()
 
     // Get Memory information and properties - this is required later, when we begin
     // allocating buffers to store data.
-    if (fpGetPhysicalDeviceMemoryProperties2)
-        fpGetPhysicalDeviceMemoryProperties2(m_VulkanGpu, &m_PhysicalDeviceMemoryProperties);
+    if (m_ExtKhrGetPhysicalDeviceProperties2->Status == VulkanExtensionStatus::eLoaded)
+        m_ExtKhrGetPhysicalDeviceProperties2->m_vkGetPhysicalDeviceMemoryProperties2KHR(m_VulkanGpu, &m_PhysicalDeviceMemoryProperties);
     else
         vkGetPhysicalDeviceMemoryProperties(m_VulkanGpu, &m_PhysicalDeviceMemoryProperties.memoryProperties);
 
@@ -1151,6 +1212,144 @@ bool Vulkan::GetPhysicalDevices()
     {
         LOGI( "VK_QCOM_render_pass_transform legacy values" );
     }
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+bool Vulkan::GetDataGraphProcessingEngine()
+//-----------------------------------------------------------------------------
+{
+    if (!m_VulkanGraphicsQueueSupportsDataGraph)
+    {
+        return true;
+    }
+
+    // Force-enable the extension until it's turned into public (we check "Ext_VK_ARM_data_graph->AvailableFeatures.dataGraph" for HW support).
+#if defined(OS_ANDROID)
+    {
+        auto* Ext_VK_ARM_tensors = static_cast<ExtensionHelper::Ext_VK_ARM_tensors*>(m_DeviceExtensions.GetExtension(VK_ARM_TENSORS_EXTENSION_NAME));
+        auto* Ext_VK_ARM_data_graph = static_cast<ExtensionHelper::Ext_VK_ARM_data_graph*>(m_DeviceExtensions.GetExtension(VK_ARM_DATA_GRAPH_EXTENSION_NAME));
+        auto fpGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(GetVulkanInstance(), "vkGetDeviceProcAddr");
+        if (Ext_VK_ARM_tensors 
+            && Ext_VK_ARM_data_graph 
+            && Ext_VK_ARM_data_graph->AvailableFeatures.dataGraph
+            && fpGetDeviceProcAddr)
+        {
+            LOGI("Forcing registering and enabling Graph Pipelines extensions for Android");
+
+            Ext_VK_ARM_tensors->Status = VulkanExtensionStatus::eLoaded;
+            Ext_VK_ARM_tensors->LookupFunctionPointers(m_VulkanDevice, fpGetDeviceProcAddr);
+            Ext_VK_ARM_tensors->LookupFunctionPointers(m_VulkanInstance);
+
+            Ext_VK_ARM_data_graph->Status = VulkanExtensionStatus::eLoaded;
+            Ext_VK_ARM_data_graph->LookupFunctionPointers(m_VulkanDevice, fpGetDeviceProcAddr);
+            Ext_VK_ARM_data_graph->LookupFunctionPointers(m_VulkanInstance);
+        }
+    }
+#endif
+
+    LOGI("************************************");
+    LOGI("*** DATA GRAPH PROCESSING ENGINE ***");
+    LOGI("************************************");
+
+    const auto& data_graph_extension = GetExtension<ExtensionHelper::Ext_VK_ARM_data_graph>();
+    if (!data_graph_extension)
+    {
+        return false;
+    }
+
+    uint32_t propCount = 0;
+    data_graph_extension->m_vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM(
+        m_VulkanGpu,
+        m_VulkanQueues[Vulkan::eDataGraphQueue].QueueFamilyIndex,
+        &propCount,
+        nullptr);
+    std::vector<VkQueueFamilyDataGraphPropertiesARM> dataGraphProps = std::vector<VkQueueFamilyDataGraphPropertiesARM>(propCount);
+    data_graph_extension->m_vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM(
+        m_VulkanGpu,
+        m_VulkanQueues[Vulkan::eDataGraphQueue].QueueFamilyIndex,
+        &propCount,
+        dataGraphProps.data());
+
+    LOGI("*** Checking queue data graph props:");
+    LOGI("*** \tpropCount: %d", propCount);
+    bool validEngineAvailable = false;
+    for (uint32_t j = 0; j < propCount; j++)
+    {
+        LOGI("*** \t\tEngine:");
+        LOGI("*** \t\t\tType:          0x%x", dataGraphProps[j].engine.type);
+        LOGI("*** \t\t\tisForeign:       %d", static_cast<int>(dataGraphProps[j].engine.isForeign));
+        LOGI("*** \t\tOperation:");
+        LOGI("*** \t\t\toperationType: 0x%x", dataGraphProps[j].operation.operationType);
+        LOGI("*** \t\t\toperationType:   %s", dataGraphProps[j].operation.name);
+        LOGI("*** \t\t\toperationType:   %d", dataGraphProps[j].operation.version);
+        //if ((dataGraphProps[j].engine.type             == VK_PHYSICAL_DEVICE_DATA_GRAPH_PROCESSING_ENGINE_TYPE_NEURAL_ARM) &&
+        //    (dataGraphProps[j].operation.operationType == VK_PHYSICAL_DEVICE_DATA_GRAPH_OPERATION_TYPE_NEURAL_MODEL_ARM ))
+        {
+            // Should also verify operation name and version to ensure compatibility with offline compiler
+            m_VulkanDataGraphProcessingEngine = dataGraphProps[j].engine;
+            break;
+        }
+    }
+
+    LOGI("Ensuring Model <-> Device Capabilities support");
+    {
+        // NOTE: Here you would normally compre the device limits with the graph you want to execute, you should
+        // make sure the tensor dimensions (VkPhysicalDeviceTensorPropertiesARM) are big enough to handle your model.
+    }
+
+    LOGI("Checking for Tensor Storage Format Support");
+    {
+        if(const auto& physical_device_properties2 = GetExtension<ExtensionHelper::Ext_VK_KHR_get_physical_device_properties2>();
+            physical_device_properties2 && physical_device_properties2->m_vkGetPhysicalDeviceFormatProperties2KHR)
+        {
+            VkTensorFormatPropertiesARM tensorFmtProps = {};
+            VkFormatProperties2         f32Props = {};
+
+            tensorFmtProps.sType = VK_STRUCTURE_TYPE_TENSOR_FORMAT_PROPERTIES_ARM;
+            f32Props.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
+            f32Props.pNext = &tensorFmtProps;
+
+            physical_device_properties2->m_vkGetPhysicalDeviceFormatProperties2KHR(m_VulkanGpu, VK_FORMAT_R32_SFLOAT, &f32Props);
+            LOGI("*** \t\t\ttensorFmtProps.linearTilingTensorFeatures:   %d", static_cast<int64_t>(tensorFmtProps.linearTilingTensorFeatures));
+            LOGI("*** \t\t\ttensorFmtProps.optimalTilingTensorFeatures:   %d", static_cast<int64_t>(tensorFmtProps.optimalTilingTensorFeatures));
+
+            if ((tensorFmtProps.linearTilingTensorFeatures & VK_FORMAT_FEATURE_2_TENSOR_DATA_GRAPH_BIT_ARM) == 0)
+            {
+                LOGI("*** \t\t\t - NOTE: Device doesn't support tensor storage format");
+            }
+        }
+    }
+    
+    LOGI("Ensuring Engine Synchronization Support");
+    {
+        VkPhysicalDeviceQueueFamilyDataGraphProcessingEngineInfoARM info = {};
+        info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_QUEUE_FAMILY_DATA_GRAPH_PROCESSING_ENGINE_INFO_ARM;
+        info.queueFamilyIndex = m_VulkanQueues[Vulkan::eDataGraphQueue].QueueFamilyIndex;
+        info.engineType = m_VulkanDataGraphProcessingEngine.type;
+        VkQueueFamilyDataGraphProcessingEnginePropertiesARM engineProps = {};
+        engineProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_QUEUE_FAMILY_DATA_GRAPH_PROCESSING_ENGINE_INFO_ARM;
+
+        data_graph_extension->m_vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM(m_VulkanGpu, &info, &engineProps);
+
+        // NOTE: These are only needed if you are using external objects (memory, synchronization, etc.). For this sample we only
+        // care about Vulkan primitives, but if you are using e.g. Android buffers, you should ensure they are supported first.
+#if 0
+        if ((engineProps.foreignSemaphoreHandleTypes & VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT) == 0)
+        {
+            return false;
+        }
+        if ((engineProps.foreignMemoryeHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID) == 0)
+        {
+            return false;
+        }
+#endif
+    }
+
+    LOGI("************************************");
+    LOGI("************************************");
+    LOGI("************************************");
 
     return true;
 }
@@ -1176,18 +1375,19 @@ bool Vulkan::InitDeviceExtensions()
         if (NumDeviceLayerProps > 0)
         {
             // Allocate memory for the structures...
-            m_pDeviceLayerProps.resize(NumDeviceLayerProps, {});
+            std::vector<VkLayerProperties> DeviceLayerProps;
+            DeviceLayerProps.resize(NumDeviceLayerProps, {});
 
             // ... then read the structures from the driver
-            RetVal = vkEnumerateDeviceLayerProperties(m_VulkanGpu, &NumDeviceLayerProps, m_pDeviceLayerProps.data());
-            if (!CheckVkError("vkEnumerateInstanceLayerProperties()", RetVal))
+            RetVal = vkEnumerateDeviceLayerProperties(m_VulkanGpu, &NumDeviceLayerProps, DeviceLayerProps.data());
+            if (!CheckVkError("vkEnumerateDeviceLayerProperties()", RetVal))
             {
                 return false;
             }
 
-            for (uint32_t uiIndx = 0; uiIndx < (uint32_t) m_pDeviceLayerProps.size(); uiIndx++)
+            for (uint32_t uiIndx = 0; uiIndx < (uint32_t)DeviceLayerProps.size(); uiIndx++)
             {
-                VkLayerProperties* pOneItem = &m_pDeviceLayerProps[uiIndx];
+                VkLayerProperties* pOneItem = &DeviceLayerProps[uiIndx];
                 LOGI("    %d: %s => %s", uiIndx, pOneItem->layerName, pOneItem->description);
             }
         }
@@ -1204,11 +1404,12 @@ bool Vulkan::InitDeviceExtensions()
             return false;
         }
 
+        std::vector<VkExtensionProperties> DeviceExtensionProps;
+
         LOGI("Found %u Vulkan Device Extension Properties", NumDeviceExtensionProps );
         if (NumDeviceExtensionProps > 0)
         {
             // Allocate memory for the structures...
-            std::vector<VkExtensionProperties> DeviceExtensionProps;
             DeviceExtensionProps.resize( NumDeviceExtensionProps );
 
             // ... then read the structures from the driver
@@ -1217,53 +1418,12 @@ bool Vulkan::InitDeviceExtensions()
             {
                 return false;
             }
-
-            for (uint32_t uiIndx = 0; uiIndx < (uint32_t) DeviceExtensionProps.size(); uiIndx++)
-            {
-                VkExtensionProperties* pOneItem = &DeviceExtensionProps[uiIndx];
-                LOGI("    %d: %s", uiIndx, pOneItem->extensionName);
-
-                // Need to check if we found specific device extensions
-                {
-                    std::string extensionName = pOneItem->extensionName;
-                    auto* pExtension = m_DeviceExtensions.GetExtension( extensionName );
-                    if ( pExtension )
-                    {
-                        // Found an already known extension, see if we want to do anything with it.
-                        switch ( pExtension->Status )
-                        {
-                        case VulkanExtension::eOptional:
-                        case VulkanExtension::eRequired:
-                            pExtension->Status = VulkanExtension::eLoaded;  // strictly not 'yet' loaded but will be shortly
-                            break;
-                        case VulkanExtension::eLoaded:
-                        case VulkanExtension::eUninitialized:
-                            break;
-                        }
-                        pExtension->Version = pOneItem->specVersion;
-                    }
-                    else
-                    {
-                        // Add to the list of known extensions (assume we dont want to load it)
-                        m_DeviceExtensions.AddExtension( extensionName, VulkanExtension::eUninitialized, pOneItem->specVersion );
-                    }
-                }
-            }
         }
-    }
 
-    // Do a final check of extensions we requested (as required or optional) that are not present in the list of available extensions.
-    for(auto& extension: m_DeviceExtensions.m_Extensions )
-    {
-        if ( extension.second->Status == VulkanExtension::eRequired )
+        if (!ParseExtensionProperties( DeviceExtensionProps, m_DeviceExtensions ))
         {
-            LOGE( "Required Vulkan extension \"%s\" was not found", extension.first.c_str() );
+            LOGE( "Required Vulkan Device extensions missing." );
             return false;
-        }
-        else if ( extension.second->Status == VulkanExtension::eOptional )
-        {
-            // If requested as optional but not available then set to be uninitialized.
-            extension.second->Status = VulkanExtension::eUninitialized;
         }
     }
 
@@ -1276,37 +1436,46 @@ bool Vulkan::InitDeviceExtensions()
     m_ExtAndroidExternalMemoryAvailable = HasLoadedVulkanDeviceExtension(VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME);
 #endif
 
+    // Add any extensions that we only need if other extensions are available (ie dependancies).
+#if defined (OS_ANDROID)
+    auto loadExtension = [this]( const std::string& name ) {
+        auto it = m_DeviceExtensions.m_Extensions.find( name );
+        if (it == m_DeviceExtensions.m_Extensions.end())
+        {
+        }
+        else
+        {
+            if (it->second->Status == VulkanExtensionStatus::eUninitialized)
+                it->second->Status = VulkanExtensionStatus::eLoaded;
+        }
+    };
+    if (m_ExtAndroidExternalMemoryAvailable)
+    {
+        // Extensions required by the device extension VK_ANDROID_external_memory_android_hardware_buffer : 
+        loadExtension( "VK_KHR_sampler_ycbcr_conversion" );
+        loadExtension( "VK_KHR_external_memory" );
+        loadExtension( "VK_EXT_queue_family_foreign" );
+        // Extensions required by the device extension VK_KHR_sampler_ycbcr_conversion : 
+        loadExtension( "VK_KHR_maintenance1" );
+        loadExtension( "VK_KHR_bind_memory2" );
+        loadExtension( "VK_KHR_get_memory_requirements2" );
+    }
+#if defined(ANDROID_HARDWARE_BUFFER_SUPPORT)
+    // Need support for External Memory
+    loadExtension( "VK_KHR_external_memory_fd" );
+    loadExtension( "VK_KHR_external_memory" );
+    loadExtension( "VK_KHR_descriptor_update_template" );
+#endif // defined (ANDROID_HARDWARE_BUFFER_SUPPORT)
+#endif // defined (OS_ANDROID)
+
+
     // Create a vector of all the extensions (names) we are going to load as part of InitDevice()
     std::vector<const char*> DeviceExtensionNames;
     for (const auto& e : m_DeviceExtensions.m_Extensions)
     {
-        if (e.second->Status == VulkanExtension::eLoaded)
+        if (e.second->Status == VulkanExtensionStatus::eLoaded)
             DeviceExtensionNames.push_back(e.first.c_str());
     }
-
-    // Add layers we want for debugging
-
-    // Add any extensions that we only need if other extensions are available (ie dependancies).
-#if defined (OS_ANDROID)
-    if (m_ExtAndroidExternalMemoryAvailable)
-    {
-        // Extensions required by the device extension VK_ANDROID_external_memory_android_hardware_buffer : 
-        DeviceExtensionNames.push_back("VK_KHR_sampler_ycbcr_conversion");
-        DeviceExtensionNames.push_back("VK_KHR_external_memory");
-        DeviceExtensionNames.push_back("VK_EXT_queue_family_foreign");
-        // Extensions required by the device extension VK_KHR_sampler_ycbcr_conversion : 
-        DeviceExtensionNames.push_back("VK_KHR_maintenance1");
-        DeviceExtensionNames.push_back("VK_KHR_bind_memory2");
-        DeviceExtensionNames.push_back("VK_KHR_get_memory_requirements2");
-    }
-#endif // defined (OS_ANDROID)
-
-#if (OS_ANDROID) && defined(ANDROID_HARDWARE_BUFFER_SUPPORT)
-    // Need support for External Memory
-    DeviceExtensionNames.push_back("VK_KHR_external_memory_fd");
-    DeviceExtensionNames.push_back("VK_KHR_external_memory");
-    DeviceExtensionNames.push_back("VK_KHR_descriptor_update_template");
-#endif // defined (OS_ANDROID)
 
     // Sort alphabetically (so we can search using std::lower_bound).  Also remove duplicates.
     {
@@ -1317,7 +1486,7 @@ bool Vulkan::InitDeviceExtensions()
     }
 
     for(const auto& n: DeviceExtensionNames)
-        m_DeviceExtensions.m_Extensions[n]->Status = VulkanExtension::eLoaded;
+        m_DeviceExtensions.m_Extensions[n]->Status = VulkanExtensionStatus::eLoaded;
 
     return true;
 }
@@ -1377,6 +1546,15 @@ bool Vulkan::InitQueue()
         {
             LOGI("    %d: Does NOT Support TRANSFER", uiIndx);
         }
+        
+        if (pOneItem->queueFlags & VK_QUEUE_DATA_GRAPH_BIT_ARM)
+        {
+            LOGI("    %d: Supports DATA GRAPH", uiIndx);
+        }
+        else
+        {
+            LOGI("    %d: Does NOT Support DATA GRAPH", uiIndx);
+        }
 
         if (pOneItem->timestampValidBits > 0)
         {
@@ -1387,7 +1565,6 @@ bool Vulkan::InitQueue()
             LOGI("    %d: Does NOT Support TimeStamps", uiIndx);
         }
     }
-
 
     return true;
 }
@@ -1550,15 +1727,12 @@ bool Vulkan::InitSurface()
     // Look for queue that supports presenting
     // ********************************
     // Iterate over each queue to learn whether it supports presenting:
-    VkBool32* pSupportFlags = new VkBool32[m_pVulkanQueueProps.size()];
+    std::vector<VkBool32> SupportFlags;
+    SupportFlags.resize( m_pVulkanQueueProps.size(), {} );
 
     for (uint32_t uiIndx = 0; uiIndx < m_pVulkanQueueProps.size(); uiIndx++)
     {
-#if defined (OS_WINDOWS)
-        fpGetPhysicalDeviceSurfaceSupportKHR(m_VulkanGpu, uiIndx, m_VulkanSurface, &pSupportFlags[uiIndx]);
-#elif defined (OS_ANDROID)
-        vkGetPhysicalDeviceSurfaceSupportKHR(m_VulkanGpu, uiIndx, m_VulkanSurface, &pSupportFlags[uiIndx]);
-#endif // defined (OS_WINDOWS|OS_ANDROID)
+        m_ExtKhrSurface->m_vkGetPhysicalDeviceSurfaceSupportKHR(m_VulkanGpu, uiIndx, m_VulkanSurface, &SupportFlags[uiIndx]);
     }
 
     // Look for graphics and present queues and hope there is one that supports both
@@ -1566,7 +1740,7 @@ bool Vulkan::InitSurface()
     uint32_t PresentIndx = -1;
     for (uint32_t uiIndx = 0; uiIndx < m_pVulkanQueueProps.size(); uiIndx++)
     {
-        if (pSupportFlags[uiIndx] == VK_TRUE && PresentIndx == -1)
+        if (SupportFlags[uiIndx] == VK_TRUE && PresentIndx == -1)
         {
             // This gives us a back up of at least the index.
             PresentIndx = uiIndx;
@@ -1578,7 +1752,7 @@ bool Vulkan::InitSurface()
             if (GraphicsIndx == -1)
                 GraphicsIndx = uiIndx;
 
-            if (pSupportFlags[uiIndx] == VK_TRUE)
+            if (SupportFlags[uiIndx] == VK_TRUE)
             {
                 // Found a queue that supports both graphics and present.  Grab it
                 GraphicsIndx = uiIndx;
@@ -1601,10 +1775,6 @@ bool Vulkan::InitSurface()
             break;
         }
     }
-
-    // No longer need the allocated memory
-    delete[] pSupportFlags;
-    pSupportFlags = nullptr;
 
     // If we didn't find either queue or they are not the same then we have a problem!
     if (GraphicsIndx == -1 || PresentIndx == -1 || GraphicsIndx != PresentIndx)
@@ -1651,6 +1821,26 @@ bool Vulkan::InitCompute()
 }
 
 //-----------------------------------------------------------------------------
+bool Vulkan::InitDataGraph()
+//-----------------------------------------------------------------------------
+{
+    VkResult RetVal = VK_SUCCESS;
+
+    // Look for a queue that supports data graph (note that this queue, if present, can ONLY support data graph operations)
+    for (int i = 0; i < m_pVulkanQueueProps.size(); ++i)
+    {
+        if ((m_pVulkanQueueProps[i].queueFlags & VK_QUEUE_DATA_GRAPH_BIT_ARM) == VK_QUEUE_DATA_GRAPH_BIT_ARM)
+        {
+            m_VulkanQueues[eDataGraphQueue].QueueFamilyIndex = i;
+            m_VulkanGraphicsQueueSupportsDataGraph = true;
+            break;
+        }
+    }
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
 bool Vulkan::InitDevice()
 //-----------------------------------------------------------------------------
 {
@@ -1680,6 +1870,7 @@ bool Vulkan::InitDevice()
     m_VulkanGpuFeatures.Base.features.sampleRateShading = AvailableFeatures.Base.features.sampleRateShading;
     m_VulkanGpuFeatures.Base.features.samplerAnisotropy = AvailableFeatures.Base.features.samplerAnisotropy;
     m_VulkanGpuFeatures.Base.features.shaderImageGatherExtended = AvailableFeatures.Base.features.shaderImageGatherExtended;
+    m_VulkanGpuFeatures.Base.features.shaderStorageImageWriteWithoutFormat = AvailableFeatures.Base.features.shaderStorageImageWriteWithoutFormat;
 
     m_VulkanGpuFeatures.Base.features.multiDrawIndirect = AvailableFeatures.Base.features.multiDrawIndirect;
     m_VulkanGpuFeatures.Base.features.drawIndirectFirstInstance = AvailableFeatures.Base.features.drawIndirectFirstInstance;
@@ -1698,10 +1889,11 @@ bool Vulkan::InitDevice()
     // ********************************
     float GraphicsPriority = 1.0f;
     float AsycComputePriority = 0.0f;   // values of 1 and 0 are guaranteed by the spec (and required), more than that needs discreteQueuePriorities check.
+    float DataGraphPriority = 1.0f;
     uint32_t QueueCount = 1;
 
     VkDeviceQueueGlobalPriorityCreateInfoEXT DeviceQueueGlobalPriorityInfo {VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT};
-    VkDeviceQueueCreateInfo DeviceQueueInfoStructs[2] = {};
+    VkDeviceQueueCreateInfo DeviceQueueInfoStructs[3] = {};
     DeviceQueueInfoStructs[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     DeviceQueueInfoStructs[0].flags = 0;
     DeviceQueueInfoStructs[0].queueFamilyIndex = m_VulkanQueues[eGraphicsQueue].QueueFamilyIndex;
@@ -1723,12 +1915,32 @@ bool Vulkan::InitDevice()
         }
         ++QueueCount;
     }
+    if (m_VulkanQueues[eDataGraphQueue].QueueFamilyIndex >= 0)
+    {
+        DeviceQueueInfoStructs[2].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        DeviceQueueInfoStructs[2].flags = 0;
+        DeviceQueueInfoStructs[2].queueFamilyIndex = m_VulkanQueues[eDataGraphQueue].QueueFamilyIndex;
+        DeviceQueueInfoStructs[2].queueCount = 1;
+        DeviceQueueInfoStructs[2].pQueuePriorities = &DataGraphPriority;
+
+        ++QueueCount;
+    }
 
     std::vector<const char*> DeviceExtensionNames;
     DeviceExtensionNames.reserve(m_DeviceExtensions.m_Extensions.size());
     for (const auto& e : m_DeviceExtensions.m_Extensions)
-        if (e.second->Status == VulkanExtension::eLoaded)
+        if (e.second->Status == VulkanExtensionStatus::eLoaded)
             DeviceExtensionNames.push_back(e.first.c_str());
+
+    if (m_VulkanApiVersion >= VK_MAKE_VERSION( 1, 1, 0 ))
+    {
+        // Mark all Vulkan 1.1 provided (built-in) extensions as 'loaded' so they get populated for vkCreateDevice
+        for (auto& extPair : m_Vulkan11ProvidedExtensions.m_Extensions)
+        {
+            assert( extPair.second->Status == VulkanExtensionStatus::eRequired );
+            extPair.second->Status = VulkanExtensionStatus::eLoaded;
+        }
+    }
 
     VkDeviceCreateInfo DeviceInfoStruct = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     DeviceInfoStruct.pNext = &m_VulkanGpuFeatures.Base;             // Hardcoded features enabled through the 'pNext chain'
@@ -1770,6 +1982,8 @@ bool Vulkan::InitDevice()
     {
         return false;
     }
+
+    LOGI("Vulkan Device Created!");
 
     // Pop the extensions back off the VkPhysicalDeviceFeatures2 chain (most registered extensions will do nothing here)
     m_DeviceCreateInfoExtensions.PopExtensions(&DeviceInfoStruct);
@@ -1829,16 +2043,20 @@ bool Vulkan::InitDevice()
     {
         vkGetDeviceQueue(m_VulkanDevice, m_VulkanQueues[eComputeQueue].QueueFamilyIndex, 0, &m_VulkanQueues[eComputeQueue].Queue);
     }
+    
+    // ********************************
+    // Create the Data Graph Device Queue
+    // ********************************
+    if (m_VulkanQueues[eDataGraphQueue].QueueFamilyIndex >= 0)
+    {
+        vkGetDeviceQueue(m_VulkanDevice, m_VulkanQueues[eDataGraphQueue].QueueFamilyIndex, 0, &m_VulkanQueues[eDataGraphQueue].Queue);
+    }
 
     // ********************************
     // Get Supported Formats
     // ********************************
     uint32_t NumFormats;
-#if defined (OS_WINDOWS)
-    RetVal = fpGetPhysicalDeviceSurfaceFormatsKHR(m_VulkanGpu, m_VulkanSurface, &NumFormats, nullptr);
-#elif defined (OS_ANDROID)
-    RetVal = vkGetPhysicalDeviceSurfaceFormatsKHR(m_VulkanGpu, m_VulkanSurface, &NumFormats, nullptr);
-#endif // defined (OS_WINDOWS|OS_ANDROID)
+    RetVal = m_ExtKhrSurface->m_vkGetPhysicalDeviceSurfaceFormatsKHR(m_VulkanGpu, m_VulkanSurface, &NumFormats, nullptr);
     if (!CheckVkError("vkGetPhysicalDeviceSurfaceFormatsKHR()", RetVal))
     {
         return false;
@@ -1855,11 +2073,7 @@ bool Vulkan::InitDevice()
         vkSurfaceFormats.resize( NumFormats );
 
         // ... then read the structures from the driver
-#if defined (OS_WINDOWS)
-        RetVal = fpGetPhysicalDeviceSurfaceFormatsKHR(m_VulkanGpu, m_VulkanSurface, &NumFormats, vkSurfaceFormats.data());
-#elif defined (OS_ANDROID)
-        RetVal = vkGetPhysicalDeviceSurfaceFormatsKHR(m_VulkanGpu, m_VulkanSurface, &NumFormats, vkSurfaceFormats.data());
-#endif // defined (OS_WINDOWS|OS_ANDROID)
+        RetVal = m_ExtKhrSurface->m_vkGetPhysicalDeviceSurfaceFormatsKHR(m_VulkanGpu, m_VulkanSurface, &NumFormats, vkSurfaceFormats.data());
         if (!CheckVkError("vkGetPhysicalDeviceSurfaceFormatsKHR()", RetVal))
         {
             return false;
@@ -1954,6 +2168,27 @@ bool Vulkan::InitCommandPools()
         }
     }
 
+    // Allocate a command pool for Data Graph.
+    if (m_VulkanGraphicsQueueSupportsDataGraph && m_VulkanQueues[eDataGraphQueue].Queue)
+    {
+        VkDataGraphProcessingEngineCreateInfoARM engineInfo = {};
+        engineInfo.sType = VK_STRUCTURE_TYPE_DATA_GRAPH_PROCESSING_ENGINE_CREATE_INFO_ARM;
+        engineInfo.pNext = NULL;
+        engineInfo.processingEngineCount = 1;
+        engineInfo.pProcessingEngines = &m_VulkanDataGraphProcessingEngine;
+
+        VkCommandPoolCreateInfo CmdPoolInfoStruct {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        CmdPoolInfoStruct.pNext = &engineInfo;
+        CmdPoolInfoStruct.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        CmdPoolInfoStruct.queueFamilyIndex = m_VulkanQueues[eDataGraphQueue].QueueFamilyIndex;
+
+        RetVal = vkCreateCommandPool(m_VulkanDevice, &CmdPoolInfoStruct, nullptr, &m_VulkanQueues[eDataGraphQueue].CommandPool);
+        if (!CheckVkError("vkCreateCommandPool()", RetVal))
+        {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -1985,7 +2220,7 @@ bool Vulkan::QuerySurfaceCapabilities(VkSurfaceCapabilitiesKHR& outVulkanSurface
 {
     VkResult RetVal = VK_SUCCESS;
 
-    if (m_ExtSurfaceCapabilities2Available)
+    if (m_ExtSurfaceCapabilities2 && m_ExtSurfaceCapabilities2->Status == VulkanExtensionStatus::eLoaded)
     {
         // Have the extension for vkGetPhysicalDeviceSurfaceCapabilities2KHR.
         // Ideally we could query the VkHdrMetadataEXT for this surface and use that as part of colormapping/output.
@@ -1994,7 +2229,7 @@ bool Vulkan::QuerySurfaceCapabilities(VkSurfaceCapabilitiesKHR& outVulkanSurface
         SurfaceInfo.surface = m_VulkanSurface;
         VkSurfaceCapabilities2KHR SurfaceCapabilities = { VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR };
 
-        RetVal = fpGetPhysicalDeviceSurfaceCapabilities2KHR(m_VulkanGpu, &SurfaceInfo, &SurfaceCapabilities);
+        RetVal = m_ExtSurfaceCapabilities2->m_vkGetPhysicalDeviceSurfaceCapabilities2KHR(m_VulkanGpu, &SurfaceInfo, &SurfaceCapabilities);
         if (!CheckVkError("vkGetPhysicalDeviceSurfaceCapabilities2KHR()", RetVal))
         {
             return false;
@@ -2004,12 +2239,7 @@ bool Vulkan::QuerySurfaceCapabilities(VkSurfaceCapabilitiesKHR& outVulkanSurface
     }
     else
     {
-#if defined (OS_WINDOWS)
-        RetVal = fpGetPhysicalDeviceSurfaceCapabilitiesKHR(m_VulkanGpu, m_VulkanSurface, &outVulkanSurfaceCaps);
-#elif defined (OS_ANDROID)
-        RetVal = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_VulkanGpu, m_VulkanSurface, &outVulkanSurfaceCaps);
-#endif // defined (OS_WINDOWS|OS_ANDROID)
-
+        RetVal = m_ExtKhrSurface->m_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_VulkanGpu, m_VulkanSurface, &outVulkanSurfaceCaps);
         if (!CheckVkError("vkGetPhysicalDeviceSurfaceCapabilitiesKHR()", RetVal))
         {
             return false;
@@ -2070,12 +2300,7 @@ bool Vulkan::InitSwapChain()
     // ********************************
     uint32_t NumPresentModes;
 
-#if defined (OS_WINDOWS)
-    RetVal = fpGetPhysicalDeviceSurfacePresentModesKHR(m_VulkanGpu, m_VulkanSurface, &NumPresentModes, nullptr);
-#elif defined (OS_ANDROID)
-    RetVal = vkGetPhysicalDeviceSurfacePresentModesKHR(m_VulkanGpu, m_VulkanSurface, &NumPresentModes, nullptr);
-#endif // defined (OS_WINDOWS|OS_ANDROID)
-
+    RetVal = m_ExtKhrSurface->m_vkGetPhysicalDeviceSurfacePresentModesKHR(m_VulkanGpu, m_VulkanSurface, &NumPresentModes, nullptr);
     if (!CheckVkError("vkGetPhysicalDeviceSurfacePresentModesKHR()", RetVal))
     {
         return false;
@@ -2084,11 +2309,7 @@ bool Vulkan::InitSwapChain()
     std::vector<VkPresentModeKHR> PresentModes;
     PresentModes.resize(NumPresentModes);
 
-#if defined (OS_WINDOWS)
-    RetVal = fpGetPhysicalDeviceSurfacePresentModesKHR(m_VulkanGpu, m_VulkanSurface, &NumPresentModes, PresentModes.data());
-#elif defined (OS_ANDROID)
-    RetVal = vkGetPhysicalDeviceSurfacePresentModesKHR(m_VulkanGpu, m_VulkanSurface, &NumPresentModes, PresentModes.data());
-#endif // defined (OS_WINDOWS|OS_ANDROID)
+    RetVal = m_ExtKhrSurface->m_vkGetPhysicalDeviceSurfacePresentModesKHR(m_VulkanGpu, m_VulkanSurface, &NumPresentModes, PresentModes.data());
     if (!CheckVkError("vkGetPhysicalDeviceSurfacePresentModesKHR()", RetVal))
     {
         return false;
@@ -2201,7 +2422,7 @@ bool Vulkan::InitSwapChain()
     if (SwapchainPresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
     {
         // In mailbox mode we request the number of buffers the application needs and Vulkan will want one or two more!  https://github.com/KhronosGroup/Vulkan-Docs/issues/909
-        DesiredSwapchainImages = std::max((uint32_t)3, m_VulkanSurfaceCaps.minImageCount);
+        DesiredSwapchainImages = std::max((uint32_t)3, m_VulkanSurfaceCaps.minImageCount + 1/*when running multithreaded and mailbox present we need even more swapchains on Android!  However many Android needs (which includes one we can be preparing on the CPU) plus one if we have a thread simultaneously submitting the last frames commands*/);
     }
 
     if (m_VulkanSurfaceCaps.minImageCount > DesiredSwapchainImages)
@@ -2539,33 +2760,32 @@ bool Vulkan::InitSwapchainRenderPass()
     subpassDescription.pPreserveAttachments         = nullptr;
 
     // Dependencies
-    std::array<VkSubpassDependency, 2> dependencies;
-    dependencies.fill( {} );
-    // dependencies[0] is an acquire dependency
-    // dependencies[1] is a present dependency
+    m_SwapchainRenderPassDependencies.fill( {} );
+    // m_SwapchainRenderPassDependencies[0] is an acquire dependency
+    // m_SwapchainRenderPassDependencies[1] is a present dependency
     // We use subpass dependencies to define the color image layout transitions rather than
     // explicitly do them in the command buffer, as it is more efficient to do it this way.
 
     // Before we can use the back buffer from the swapchain, we must change the
     // image layout from the PRESENT mode to the COLOR_ATTACHMENT mode.
-    dependencies[0].srcSubpass      = VK_SUBPASS_EXTERNAL;
-    dependencies[0].dstSubpass      = 0;
-    dependencies[0].srcStageMask    = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    dependencies[0].dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependencies[0].srcAccessMask   = 0;
-    dependencies[0].dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+    m_SwapchainRenderPassDependencies[0].srcSubpass      = VK_SUBPASS_EXTERNAL;
+    m_SwapchainRenderPassDependencies[0].dstSubpass      = 0;
+    m_SwapchainRenderPassDependencies[0].srcStageMask    = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    m_SwapchainRenderPassDependencies[0].dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    m_SwapchainRenderPassDependencies[0].srcAccessMask   = 0;
+    m_SwapchainRenderPassDependencies[0].dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    m_SwapchainRenderPassDependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
     // After writing to the back buffer of the swapchain, we need to change the
     // image layout from the COLOR_ATTACHMENT mode to the PRESENT mode which
     // is optimal for sending to the screen for users to see the completed rendering.
-    dependencies[1].srcSubpass      = 0;
-    dependencies[1].dstSubpass      = VK_SUBPASS_EXTERNAL;
-    dependencies[1].srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependencies[1].dstStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    dependencies[1].srcAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    dependencies[1].dstAccessMask   = 0;
-    dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+    m_SwapchainRenderPassDependencies[1].srcSubpass      = 0;
+    m_SwapchainRenderPassDependencies[1].dstSubpass      = VK_SUBPASS_EXTERNAL;
+    m_SwapchainRenderPassDependencies[1].srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    m_SwapchainRenderPassDependencies[1].dstStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    m_SwapchainRenderPassDependencies[1].srcAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    m_SwapchainRenderPassDependencies[1].dstAccessMask   = 0;
+    m_SwapchainRenderPassDependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
     // The renderpass itself is created with the number of subpasses, and the
     // list of attachments which those subpasses can reference.
@@ -2574,8 +2794,8 @@ bool Vulkan::InitSwapchainRenderPass()
     renderPassCreateInfo.pAttachments               = attachmentDescriptions.data();
     renderPassCreateInfo.subpassCount               = 1;
     renderPassCreateInfo.pSubpasses                 = &subpassDescription;
-    renderPassCreateInfo.dependencyCount            = (uint32_t) dependencies.size();
-    renderPassCreateInfo.pDependencies              = dependencies.data();
+    renderPassCreateInfo.dependencyCount            = (uint32_t) m_SwapchainRenderPassDependencies.size();
+    renderPassCreateInfo.pDependencies              = m_SwapchainRenderPassDependencies.data();
     renderPassCreateInfo.flags                      = (m_ExtRenderPassTransformEnabled) ? VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM : 0;
 
     RetVal = vkCreateRenderPass(m_VulkanDevice, &renderPassCreateInfo, nullptr, &m_SwapchainRenderPass);
@@ -2593,7 +2813,7 @@ bool Vulkan::Create2SubpassRenderPass(const std::span<const TextureFormat> Inter
 //-----------------------------------------------------------------------------
 {
     assert(pRenderPass && *pRenderPass == VK_NULL_HANDLE);  // check not already allocated and that we have a location to place the renderpass handle
-    assert(!InternalColorFormats.empty());                // not supporting a depth only pass
+    assert(!InternalColorFormats.empty());                  // not supporting a depth only pass
     assert(!OutputColorFormats.empty());
     assert( InternalMsaa.size() == 2 );
 
@@ -2662,7 +2882,7 @@ bool Vulkan::Create2SubpassRenderPass(const std::span<const TextureFormat> Inter
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL/*finalLayout*/ };
 
             PassAttachDescs.push_back( AttachmentDescResolvePass0 );
-            ResolveReferencesPass0.push_back( { (uint32_t) PassAttachDescs.size() - 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } );
+            ResolveReferencesPass0.push_back( { (uint32_t) PassAttachDescs.size() - 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL} );
         }
         //
         // Setup the resolve (first subpass)
@@ -2704,7 +2924,7 @@ bool Vulkan::Create2SubpassRenderPass(const std::span<const TextureFormat> Inter
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL/*finalLayout*/ };
 
             PassAttachDescs.push_back( AttachmentDescResolvePass1 );
-            ResolveReferencesPass1.push_back( { (uint32_t) PassAttachDescs.size() - 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } );
+            ResolveReferencesPass1.push_back( { (uint32_t) PassAttachDescs.size() - 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL} );
         }
         //
         // Setup the resolve (second subpass)
@@ -3229,7 +3449,7 @@ bool Vulkan::CreateRenderPass(std::span<const TextureFormat> ColorFormats, Textu
             VkFormat vkResolveFormat = TextureFormatToVk(ResolveFormat);
             if( vkResolveFormat != VK_FORMAT_UNDEFINED)
             {
-                ResolveReferences[ColorIdx] = { (uint32_t) PassAttachDescs.size(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+                ResolveReferences[ColorIdx] = { (uint32_t) PassAttachDescs.size(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
 
                 // Pass1 color buffers to resolve to at end of pass.
                 VkAttachmentDescription AttachmentDescResolvePass1 = { 0, vkResolveFormat/*format*/,
@@ -3256,7 +3476,12 @@ bool Vulkan::CreateRenderPass(std::span<const TextureFormat> ColorFormats, Textu
     // Subpass dependencies
     std::array<VkSubpassDependency, 2> PassDependencies = {};
 
-    if (ColorFormats.empty())
+    if (bPresentPass)
+    {
+        // Use the same dependencies as the swapchain was created with
+        PassDependencies = m_SwapchainRenderPassDependencies;
+    }
+    else if (ColorFormats.empty())
     {
         // Depth only pass
         PassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -3549,7 +3774,7 @@ bool Vulkan::CreateRenderPassVRS(std::span<const TextureFormat> ColorFormats, Te
     }
 
     assert( m_ExtFragmentShadingRate );
-    assert( m_ExtFragmentShadingRate->Status == VulkanExtension::eLoaded );
+    assert( m_ExtFragmentShadingRate->Status == VulkanExtensionStatus::eLoaded );
 
     VkFragmentShadingRateAttachmentInfoKHR shading_rate_attachment = {};
     shading_rate_attachment.sType = VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR;
@@ -3658,7 +3883,6 @@ bool Vulkan::CreateRenderPassVRS(std::span<const TextureFormat> ColorFormats, Te
     return true;
 }
 
-
 //-----------------------------------------------------------------------------
 bool Vulkan::CreatePipeline(
     VkPipelineCache                         pipelineCache,
@@ -3681,14 +3905,81 @@ bool Vulkan::CreatePipeline(
     VkPipeline*                             pipeline)
 //-----------------------------------------------------------------------------
 {
+    // Original version that only supports triangle lists
+
     // Create a basic pipeline structure with one or two shader stages, using the supplied cache.
 
     // Our vertex buffer describes a triangle list.
-    VkPipelineInputAssemblyStateCreateInfo ia = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineInputAssemblyStateCreateInfo ia_custom = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    ia_custom.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
     // State for rasterization, such as polygon fill mode is defined.
-    VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+    // VkPipelineRasterizationStateCreateInfo rs_custom = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    // rs_custom.polygonMode = VK_POLYGON_MODE_FILL;
+    // rs_custom.cullMode = VK_CULL_MODE_NONE;
+    // rs_custom.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    // rs_custom.depthClampEnable = VK_FALSE;
+    // rs_custom.rasterizerDiscardEnable = VK_FALSE;
+    // rs_custom.depthBiasEnable = VK_FALSE;
+    // rs_custom.lineWidth = 1.0f;
+
+    // Call the custom topology version
+    return Vulkan::CreatePipeline(
+        pipelineCache,
+        visci,
+        pipelineLayout,
+        renderPass,
+        subpass,
+        providedRS,
+        providedDSS,
+        providedCBS,
+        providedMS,
+        dynamicStates,
+        viewport,
+        scissor,
+        VK_NULL_HANDLE,
+        VK_NULL_HANDLE,
+        vertShaderModule,
+        fragShaderModule,
+        specializationInfo,
+        bAllowDerivation,
+        deriveFromPipeline,
+        pipeline,
+        ia_custom);
+}
+
+//-----------------------------------------------------------------------------
+bool Vulkan::CreatePipeline(
+    VkPipelineCache                         pipelineCache,
+    const VkPipelineVertexInputStateCreateInfo* visci,
+    VkPipelineLayout                        pipelineLayout,
+    VkRenderPass                            renderPass,
+    uint32_t                                subpass,
+    const VkPipelineRasterizationStateCreateInfo* providedRS,
+    const VkPipelineDepthStencilStateCreateInfo* providedDSS,
+    const VkPipelineColorBlendStateCreateInfo* providedCBS,
+    const VkPipelineMultisampleStateCreateInfo* providedMS,
+    std::span<const VkDynamicState>         dynamicStates,
+    const VkViewport* viewport,
+    const VkRect2D* scissor,
+    VkShaderModule                          taskShaderModule,
+    VkShaderModule                          meshShaderModule,
+    VkShaderModule                          vertShaderModule,
+    VkShaderModule                          fragShaderModule,
+    const VkSpecializationInfo* specializationInfo,
+    bool                                    bAllowDerivation,
+    VkPipeline                              deriveFromPipeline,
+    VkPipeline* pipeline,
+    VkPipelineInputAssemblyStateCreateInfo  ia_custom)
+    //-----------------------------------------------------------------------------
+{
+    // Create a basic pipeline structure with one or two shader stages, using the supplied cache.
+
+    // Our vertex buffer describes a triangle list.
+    VkPipelineInputAssemblyStateCreateInfo ia = ia_custom;
+
+    // State for rasterization, such as polygon fill mode is defined.
+    VkPipelineRasterizationStateCreateInfo rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
     rs.polygonMode = VK_POLYGON_MODE_FILL;
     rs.cullMode = VK_CULL_MODE_NONE;
     rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -3721,26 +4012,92 @@ bool Vulkan::CreatePipeline(
     ds.maxDepthBounds = 1.0f;
 
     // Default to no msaa
-    VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+    VkPipelineMultisampleStateCreateInfo ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
     ms.pSampleMask = nullptr;
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     // We define two shader stages: our vertex and fragment shader.
     uint32_t stageCount = 1;
-    VkPipelineShaderStageCreateInfo shaderStages[2] = {};
-    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = vertShaderModule;
-    shaderStages[0].pName = "main";
-    shaderStages[0].pSpecializationInfo = specializationInfo;
-    if (fragShaderModule != VK_NULL_HANDLE)
-    {
+    VkPipelineShaderStageCreateInfo shaderStages[3] = {};
+
+    uint32_t EVertBit = 0;
+    uint32_t EFragBit = 1;
+    uint32_t EMeshBit = 2;
+    uint32_t ETaskBit = 3;
+
+    uint32_t EVertMask = 1 << EVertBit;
+    uint32_t EFragMask = 1 << EFragBit;
+    uint32_t EMeshMask = 1 << EMeshBit;
+    uint32_t ETaskMask = 1 << ETaskBit;
+    uint32_t EVertFragMask = EFragMask | EVertMask;
+    uint32_t EMeshFragMask = EFragMask | EMeshMask;
+    uint32_t ETaskMeshFragMask = ETaskMask | EMeshFragMask;
+
+    uint32_t drawbleType = 0;
+    drawbleType |= (fragShaderModule != VK_NULL_HANDLE) << EFragBit;
+    drawbleType |= (vertShaderModule != VK_NULL_HANDLE) << EVertBit;
+    drawbleType |= (meshShaderModule != VK_NULL_HANDLE) << EMeshBit;
+    drawbleType |= (taskShaderModule != VK_NULL_HANDLE) << ETaskBit;
+
+    if (drawbleType == EVertFragMask) {
+        stageCount = 2;
+
+        shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        shaderStages[0].module = vertShaderModule;
+        shaderStages[0].pName = "main";
+        shaderStages[0].pSpecializationInfo = specializationInfo;
+
         shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         shaderStages[1].module = fragShaderModule;
         shaderStages[1].pName = "main";
         shaderStages[1].pSpecializationInfo = specializationInfo;
-        ++stageCount;
+    }
+    else if (drawbleType == EMeshFragMask) {
+        stageCount = 2;
+
+        shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[0].stage = VK_SHADER_STAGE_MESH_BIT_EXT;
+        shaderStages[0].module = meshShaderModule;
+        shaderStages[0].pName = "main";
+        shaderStages[0].pSpecializationInfo = specializationInfo;
+
+        shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        shaderStages[1].module = fragShaderModule;
+        shaderStages[1].pName = "main";
+        shaderStages[1].pSpecializationInfo = specializationInfo;
+    }
+    else if (drawbleType == ETaskMeshFragMask) {
+        stageCount = 3;
+
+        shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[0].stage = VK_SHADER_STAGE_TASK_BIT_EXT;
+        shaderStages[0].module = taskShaderModule;
+        shaderStages[0].pName = "main";
+        shaderStages[0].pSpecializationInfo = specializationInfo;
+
+        shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[1].stage = VK_SHADER_STAGE_MESH_BIT_EXT;
+        shaderStages[1].module = meshShaderModule;
+        shaderStages[1].pName = "main";
+        shaderStages[1].pSpecializationInfo = specializationInfo;
+
+        shaderStages[2].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[2].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        shaderStages[2].module = fragShaderModule;
+        shaderStages[2].pName = "main";
+        shaderStages[2].pSpecializationInfo = specializationInfo;
+    }
+    else if (drawbleType == EVertMask) {
+        stageCount = 1;
+
+        shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        shaderStages[0].module = vertShaderModule;
+        shaderStages[0].pName = "main";
+        shaderStages[0].pSpecializationInfo = specializationInfo;
     }
 
     // Set up the flags
@@ -3756,14 +4113,14 @@ bool Vulkan::CreatePipeline(
 
     // Create some dynamic states.
 #ifndef VK_DYNAMIC_STATE_RANGE_SIZE
-    #define VK_DYNAMIC_STATE_RANGE_SIZE     (VK_DYNAMIC_STATE_STENCIL_REFERENCE - VK_DYNAMIC_STATE_VIEWPORT + 1)
+#define VK_DYNAMIC_STATE_RANGE_SIZE     (VK_DYNAMIC_STATE_STENCIL_REFERENCE - VK_DYNAMIC_STATE_VIEWPORT + 1)
 #endif // VK_DYNAMIC_STATE_RANGE_SIZE
 
     //
     // Populate dynamic states and viewport/scissor at the same time (if no viewport or scissor is defined we can assume it wants a dynamic state)
     //
-    VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    
+    VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+
     // Do we needs to add dynamic states for the viewport/scissor?
     bool setDefaultViewport = viewport == nullptr;
     bool setDefaultScissor = scissor == nullptr;
@@ -3774,39 +4131,39 @@ bool Vulkan::CreatePipeline(
     if (setDefaultScissor)
         dynamicStateEnables[dynamicStateCreateInfo.dynamicStateCount++] = VK_DYNAMIC_STATE_SCISSOR;
     if (m_ExtFragmentShadingRate &&
-        m_ExtFragmentShadingRate->Status == VulkanExtension::eLoaded &&
+        m_ExtFragmentShadingRate->Status == VulkanExtensionStatus::eLoaded &&
         m_ExtFragmentShadingRate->RequestedFeatures.attachmentFragmentShadingRate == VK_TRUE)
         dynamicStateEnables[dynamicStateCreateInfo.dynamicStateCount++] = VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR;
     dynamicStateCreateInfo.pDynamicStates = dynamicStateEnables.data();
 
 #if 0
-    if( !dynamicStates.empty() )
+    if (!dynamicStates.empty())
     {
         dynamicStateCreateInfo.pDynamicStates = dynamicStates.data();
-        dynamicStateCreateInfo.dynamicStateCount = (uint32_t) dynamicStates.size();
+        dynamicStateCreateInfo.dynamicStateCount = (uint32_t)dynamicStates.size();
         // see if we already have viewport and/or scissor in the dynamic states passed to this function
-        for( const auto& dynamicState : dynamicStates )
+        for (const auto& dynamicState : dynamicStates)
         {
-            if( dynamicState == VK_DYNAMIC_STATE_VIEWPORT )
+            if (dynamicState == VK_DYNAMIC_STATE_VIEWPORT)
                 setDefaultViewport = false;
-            else if( dynamicState == VK_DYNAMIC_STATE_SCISSOR )
+            else if (dynamicState == VK_DYNAMIC_STATE_SCISSOR)
                 setDefaultScissor = false;
         }
     }
 #endif
 
     VkViewport defaultViewport;
-    if( setDefaultViewport )
+    if (setDefaultViewport)
     {
         defaultViewport = {};
-        defaultViewport.height = (float) m_SurfaceHeight;
-        defaultViewport.width = (float) m_SurfaceWidth;
-        defaultViewport.minDepth = (float) 0.0f;
-        defaultViewport.maxDepth = (float) 1.0f;
+        defaultViewport.height = (float)m_SurfaceHeight;
+        defaultViewport.width = (float)m_SurfaceWidth;
+        defaultViewport.minDepth = (float)0.0f;
+        defaultViewport.maxDepth = (float)1.0f;
     }
 
     VkRect2D defaultScissor;
-    if( setDefaultScissor )
+    if (setDefaultScissor)
     {
         defaultScissor = {};
         defaultScissor.extent.width = m_SurfaceWidth;
@@ -3815,17 +4172,23 @@ bool Vulkan::CreatePipeline(
         defaultScissor.offset.y = 0;
     }
 
-    VkPipelineViewportStateCreateInfo ViewportInfo {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-    ViewportInfo.viewportCount = (setDefaultViewport||viewport) ? 1 : 0;
+    VkPipelineViewportStateCreateInfo ViewportInfo{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    ViewportInfo.viewportCount = (setDefaultViewport || viewport) ? 1 : 0;
     ViewportInfo.pViewports = setDefaultViewport ? &defaultViewport : viewport;
-    ViewportInfo.scissorCount = (setDefaultScissor||scissor) ? 1 : 0;
+    ViewportInfo.scissorCount = (setDefaultScissor || scissor) ? 1 : 0;
     ViewportInfo.pScissors = setDefaultScissor ? &defaultScissor : scissor;
 
-    VkGraphicsPipelineCreateInfo pipelineCreateInfo {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    VkGraphicsPipelineCreateInfo pipelineCreateInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     pipelineCreateInfo.flags = flags;
     pipelineCreateInfo.layout = pipelineLayout;
-    pipelineCreateInfo.pVertexInputState = visci;
-    pipelineCreateInfo.pInputAssemblyState = &ia;
+    if (drawbleType == EMeshFragMask || drawbleType == ETaskMeshFragMask) {
+        pipelineCreateInfo.pVertexInputState = nullptr;
+        pipelineCreateInfo.pInputAssemblyState = nullptr;
+    }
+    else {
+        pipelineCreateInfo.pVertexInputState = visci;
+        pipelineCreateInfo.pInputAssemblyState = &ia;
+    }
     pipelineCreateInfo.pRasterizationState = (providedRS != nullptr) ? providedRS : &rs;
     pipelineCreateInfo.pColorBlendState = (providedCBS != nullptr) ? providedCBS : &cb;
     pipelineCreateInfo.pMultisampleState = (providedMS != nullptr) ? providedMS : &ms;
@@ -3840,13 +4203,80 @@ bool Vulkan::CreatePipeline(
     pipelineCreateInfo.subpass = subpass;
 
     VkResult RetVal = VK_SUCCESS;
-    RetVal = vkCreateGraphicsPipelines(m_VulkanDevice, pipelineCache,  1, &pipelineCreateInfo, nullptr, pipeline);
+    RetVal = vkCreateGraphicsPipelines(m_VulkanDevice, pipelineCache, 1, &pipelineCreateInfo, nullptr, pipeline);
     if (!CheckVkError("vkCreateGraphicsPipelines()", RetVal))
     {
         return false;
     }
 
     return true;
+}
+
+//-----------------------------------------------------------------------------
+bool Vulkan::CreatePipeline(
+    VkPipelineCache                         pipelineCache,
+    const VkPipelineVertexInputStateCreateInfo* visci,
+    VkPipelineLayout                        pipelineLayout,
+    VkRenderPass                            renderPass,
+    uint32_t                                subpass,
+    const VkPipelineRasterizationStateCreateInfo* providedRS,
+    const VkPipelineDepthStencilStateCreateInfo* providedDSS,
+    const VkPipelineColorBlendStateCreateInfo* providedCBS,
+    const VkPipelineMultisampleStateCreateInfo* providedMS,
+    std::span<const VkDynamicState>         dynamicStates,
+    const VkViewport* viewport,
+    const VkRect2D* scissor,
+    VkShaderModule                          taskShaderModule,
+    VkShaderModule                          meshShaderModule,
+    VkShaderModule                          vertShaderModule,
+    VkShaderModule                          fragShaderModule,
+    const VkSpecializationInfo* specializationInfo,
+    bool                                    bAllowDerivation,
+    VkPipeline                              deriveFromPipeline,
+    VkPipeline* pipeline)
+    //-----------------------------------------------------------------------------
+{
+    // Original version that only supports triangle lists
+
+    // Create a basic pipeline structure with one or two shader stages, using the supplied cache.
+
+    // Our vertex buffer describes a triangle list.
+    VkPipelineInputAssemblyStateCreateInfo ia_custom = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    ia_custom.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    // State for rasterization, such as polygon fill mode is defined.
+    // VkPipelineRasterizationStateCreateInfo rs_custom = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    // rs_custom.polygonMode = VK_POLYGON_MODE_FILL;
+    // rs_custom.cullMode = VK_CULL_MODE_NONE;
+    // rs_custom.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    // rs_custom.depthClampEnable = VK_FALSE;
+    // rs_custom.rasterizerDiscardEnable = VK_FALSE;
+    // rs_custom.depthBiasEnable = VK_FALSE;
+    // rs_custom.lineWidth = 1.0f;
+
+    // Call the custom topology version
+    return Vulkan::CreatePipeline(
+        pipelineCache,
+        visci,
+        pipelineLayout,
+        renderPass,
+        subpass,
+        providedRS,
+        providedDSS,
+        providedCBS,
+        providedMS,
+        dynamicStates,
+        viewport,
+        scissor,
+        taskShaderModule,
+        meshShaderModule,
+        vertShaderModule,
+        fragShaderModule,
+        specializationInfo,
+        bAllowDerivation,
+        deriveFromPipeline,
+        pipeline,
+        ia_custom);
 }
 
 //-----------------------------------------------------------------------------
@@ -3884,7 +4314,7 @@ bool Vulkan::SetSwapchainHrdMetadata(const VkHdrMetadataEXT& RenderingHdrMetaDat
     // Set the HDR transfer function of the mastering device.
     assert(RenderingHdrMetaData.sType == VK_STRUCTURE_TYPE_HDR_METADATA_EXT);
 
-    if (m_ExtHdrMetadata == nullptr || m_ExtHdrMetadata->Status != VulkanExtension::eLoaded || m_ExtHdrMetadata->m_vkSetHdrMetadataEXT == nullptr)
+    if (m_ExtHdrMetadata == nullptr || m_ExtHdrMetadata->Status != VulkanExtensionStatus::eLoaded || m_ExtHdrMetadata->m_vkSetHdrMetadataEXT == nullptr)
         return false;
 
     m_ExtHdrMetadata->m_vkSetHdrMetadataEXT(m_VulkanDevice, 1, &m_VulkanSwapchain, &RenderingHdrMetaData);
@@ -4025,7 +4455,7 @@ bool Vulkan::QueueSubmit(const std::span<const VkSubmitInfo2KHR> SubmitInfo, uin
 {
     VkQueue Queue = m_VulkanQueues[QueueIndex].Queue;
     assert(Queue != VK_NULL_HANDLE);
-    assert( m_ExtKhrSynchronization2 && m_ExtKhrSynchronization2->Status == VulkanExtension::eLoaded );
+    assert( m_ExtKhrSynchronization2 && m_ExtKhrSynchronization2->Status == VulkanExtensionStatus::eLoaded );
     VkResult RetVal = m_ExtKhrSynchronization2->m_vkQueueSubmit2KHR(Queue, (uint32_t)SubmitInfo.size(), SubmitInfo.data(), CompletedFence);
     if (!CheckVkError("vkQueueSubmit2KHR()", RetVal))
     {
@@ -4066,12 +4496,16 @@ bool Vulkan::PresentQueue(const std::span<const VkSemaphore> pWaitSemaphores, ui
     }
     else if (RetVal == VK_SUBOPTIMAL_KHR)
     {
-        // This should not be spammed.
-        // TODO: maybe log it every so often?
-        VkSurfaceCapabilitiesKHR optimalSurfaceCaps;
-        if (QuerySurfaceCapabilities(optimalSurfaceCaps))
+        // This should not be spammed, print it 5 times and then be done!
+        static int spamCount = 0;
+        if (spamCount < 5)
         {
-            LOGE("Swapchain is not optimal! Should still be presented\n  Ideal swapchain %d x %d (actual %d x %d)", optimalSurfaceCaps.currentExtent.width, optimalSurfaceCaps.currentExtent.height, m_SurfaceWidth, m_SurfaceHeight);
+            ++spamCount;
+            VkSurfaceCapabilitiesKHR optimalSurfaceCaps;
+            if (QuerySurfaceCapabilities(optimalSurfaceCaps))
+            {
+                LOGE("Swapchain is not optimal! Should still be presented\n  Ideal swapchain %d x %d (actual %d x %d)", optimalSurfaceCaps.currentExtent.width, optimalSurfaceCaps.currentExtent.height, m_SurfaceWidth, m_SurfaceHeight);
+            }
         }
     }
     else
@@ -4185,7 +4619,7 @@ bool Vulkan::HasLoadedVulkanDeviceExtension( const std::string& extensionName ) 
     auto foundIt = m_DeviceExtensions.m_Extensions.find( extensionName );
     if (foundIt == m_DeviceExtensions.m_Extensions.end())
         return false;
-    return foundIt->second->Status == VulkanExtension::eLoaded;
+    return foundIt->second->Status == VulkanExtensionStatus::eLoaded;
 }
 
 //-----------------------------------------------------------------------------
@@ -4574,9 +5008,9 @@ void Vulkan::QueryPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice, Physic
 
     if (featuresOut.Base.pNext != nullptr)
     {
-        if (fpGetPhysicalDeviceFeatures2 != nullptr)
+        if (m_ExtKhrGetPhysicalDeviceProperties2->Status == VulkanExtensionStatus::eLoaded)
         {
-            fpGetPhysicalDeviceFeatures2(physicalDevice, &featuresOut.Base);
+            m_ExtKhrGetPhysicalDeviceProperties2->m_vkGetPhysicalDeviceFeatures2KHR(physicalDevice, &featuresOut.Base);
         }
         else
         {
@@ -4602,9 +5036,9 @@ void Vulkan::QueryPhysicalDeviceProperties( VkPhysicalDevice physicalDevice, con
 
     m_GetPhysicalDevicePropertiesExtensions.PushExtensions( &propertiesOut.Base );
 
-    if (fpGetPhysicalDeviceProperties2)
+    if (m_ExtKhrGetPhysicalDeviceProperties2->Status == VulkanExtensionStatus::eLoaded)
     {
-        fpGetPhysicalDeviceProperties2( physicalDevice, &propertiesOut.Base );
+        m_ExtKhrGetPhysicalDeviceProperties2->m_vkGetPhysicalDeviceProperties2KHR( physicalDevice, &propertiesOut.Base );
     }
     else
     {
@@ -4878,13 +5312,4 @@ void Vulkan::DumpDeviceInfo( const std::span<PhysicalDeviceFeatures> DeviceFeatu
         }
     }
 
-}
-
-void Vulkan::RegisteredExtensions::RegisterAll( Vulkan& vulkan )
-{
-    for (auto& extension : m_Extensions)
-    {
-        LOGI( "Registering extension: %s (%s)", extension.first.c_str(), VulkanExtension::cStatusNames[extension.second->Status] );
-        extension.second->Register( vulkan );
-    }
 }

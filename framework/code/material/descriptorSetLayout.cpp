@@ -51,6 +51,13 @@ bool DescriptorSetLayout::Init(Vulkan& vulkan, const DescriptorSetDescription& d
     m_descriptorSetLayoutBindings.reserve(numBindings);
     for (const auto& it : description.m_descriptorTypes)
     {
+        if (it.type == DescriptorSetDescription::DescriptorType::Unused)
+        {
+            // 'Unused' descriptor indicates a 'gap' in the descriptor set
+            assert( it.readOnly );
+            index++;
+            continue;
+        }
         auto& binding = m_descriptorSetLayoutBindings.emplace_back();
         binding.binding = index++;
         binding.descriptorCount = it.count;
@@ -96,8 +103,15 @@ bool DescriptorSetLayout::Init(Vulkan& vulkan, const DescriptorSetDescription& d
         case DescriptorSetDescription::DescriptorType::DrawIndirectBuffer:
             assert(0 && "DrawIndirectBuffer is not a supported binding to a descriptor set");
             break;
+        case DescriptorSetDescription::DescriptorType::Unused:
+            // Handled before switch, never hit!
+            break;
         }
         VkShaderStageFlagBits stageFlags = (VkShaderStageFlagBits)0;
+        if (it.stages & DescriptorSetDescription::StageFlag::t::Task)
+            binding.stageFlags = VK_SHADER_STAGE_TASK_BIT_EXT;
+        if (it.stages & DescriptorSetDescription::StageFlag::t::Mesh)
+            binding.stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
         if (it.stages & DescriptorSetDescription::StageFlag::t::Vertex)
             binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         if (it.stages & DescriptorSetDescription::StageFlag::t::Fragment)

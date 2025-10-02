@@ -176,48 +176,6 @@ bool CRenderTarget::InitializeResolve(const std::span<const TextureFormat> Resol
 }
 
 //-----------------------------------------------------------------------------
-bool CRenderTarget::InitializeColor(const SwapchainBuffers& SwapchainBuffer)
-//-----------------------------------------------------------------------------
-{
-    LOGI("Creating Swapchain Render Target (%s): (%d x %d)", m_Name.c_str(), m_Width, m_Height);
-
-    m_ColorAttachments.clear();
-    m_ColorAttachments.reserve(1);
-    m_ClearColorValues.clear();
-    m_ClearColorValues.resize(1, {{0.0f,0.0f,0.0f,0.0f}});
-
-    char szName[256];
-
-    sprintf(szName, "%s: Swapchain", m_Name.c_str());
-
-    m_ColorAttachments.emplace_back(TextureVulkan(m_Width, m_Height, 1, 0, m_pVulkan->m_SurfaceFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, SwapchainBuffer.image, VK_NULL_HANDLE, VK_NULL_HANDLE, SwapchainBuffer.view));
-
-    return true;
-}
-
-//-----------------------------------------------------------------------------
-bool CRenderTarget::InitializeResolve(const SwapchainBuffers& SwapchainBuffer)
-//-----------------------------------------------------------------------------
-{
-    m_ResolveAttachments.clear();
-
-    if (!m_Msaa.empty())
-    {
-        LOGI("Creating Swapchain resolved Render Target (%s): (%d x %d)", m_Name.c_str(), m_Width, m_Height);
-
-        m_ResolveAttachments.reserve(1);
-
-        char szName[256];
-
-        sprintf(szName, "%s: resolve Swapchain", m_Name.c_str());
-
-        m_ResolveAttachments.emplace_back(TextureVulkan(m_Width, m_Height, 1, 0, m_pVulkan->m_SurfaceFormat, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, SwapchainBuffer.image, VK_NULL_HANDLE, VK_NULL_HANDLE, SwapchainBuffer.view));
-    }
-
-    return true;
-}
-
-//-----------------------------------------------------------------------------
 bool CRenderTarget::InitializeFrameBuffer(VkRenderPass renderPass, const std::span<const TextureVulkan> ColorAttachments, const TextureVulkan* pDepthAttachment, const std::span<const TextureVulkan> ResolveAttachments, const TextureVulkan* pVRSAttachment, VkFramebuffer* pFramebuffer )
 //-----------------------------------------------------------------------------
 {

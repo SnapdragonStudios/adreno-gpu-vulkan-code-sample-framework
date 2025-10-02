@@ -100,6 +100,12 @@ bool ShaderModuleT<Vulkan>::Load(Vulkan& vulkan, AssetManager& assetManager, con
     case ShaderType::RayMiss:
         shaderFileName = &shaderDescription.m_rayMissName;
         break;
+    case ShaderType::Mesh:
+        shaderFileName = &shaderDescription.m_meshName;
+        break;
+    case ShaderType::Task:
+        shaderFileName = &shaderDescription.m_taskName;
+        break;
     }
 
     assert(shaderFileName!=nullptr);

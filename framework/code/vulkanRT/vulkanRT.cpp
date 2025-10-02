@@ -25,7 +25,7 @@ VulkanRT::~VulkanRT()
 bool VulkanRT::Init()
 {
     // We MUST have bufferDeviceAddress for Ray Tracing (vkGetBufferDeviceAddress)
-    if (m_pExtKhrBufferDeviceAddress->Status!=VulkanExtension::eLoaded || m_pExtKhrBufferDeviceAddress->RequestedFeatures.bufferDeviceAddress == VK_FALSE)
+    if (m_pExtKhrBufferDeviceAddress->Status!=VulkanExtensionStatus::eLoaded || m_pExtKhrBufferDeviceAddress->RequestedFeatures.bufferDeviceAddress == VK_FALSE)
     {
         LOGE("Vulkan physical device must support bufferDeviceAddress (VK_KHR_buffer_device_address extension)");
         return false;
@@ -80,7 +80,7 @@ void VulkanRT::RegisterRequiredVulkanLayerExtensions( Vulkan::AppConfiguration& 
 
 bool VulkanRT::HasRayPipelines() const
 {
-    return m_pExtKhrRayTracingPipeline != nullptr && m_pExtKhrRayTracingPipeline->Status == VulkanExtension::eLoaded;
+    return m_pExtKhrRayTracingPipeline != nullptr && m_pExtKhrRayTracingPipeline->Status == VulkanExtensionStatus::eLoaded;
 }
 
 void VulkanRT::vkGetAccelerationStructureBuildSizesKHR(VkAccelerationStructureBuildTypeKHR buildType, const VkAccelerationStructureBuildGeometryInfoKHR* pBuildInfo, const uint32_t* pMaxPrimitiveCounts, VkAccelerationStructureBuildSizesInfoKHR* pSizeInfo) const

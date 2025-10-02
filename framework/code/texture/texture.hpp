@@ -1,12 +1,12 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2023 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 #pragma once
 
+#include <cassert>
 #include <memory>
 #include "textureFormat.hpp"
 
@@ -14,6 +14,8 @@
 // Forward declarations
 class GraphicsApiBase;
 template<typename T_GFXAPI> class TextureT;
+template<typename T_GFXAPI> class ImageT;
+template<typename T_GFXAPI> class ImageViewT;
 template<typename T_GFXAPI> class SamplerT;
 
 
@@ -51,6 +53,62 @@ public:
 
 protected:
     static_assert(sizeof(TextureT<T_GFXAPI>) != sizeof(Texture));   // Ensure this class template is specialized (and not used as-is)
+};
+
+
+/// @brief Base class for a image  object.
+/// Is subclassed for each graphics API.
+class Image
+{
+    Image( const Image& ) = delete;
+    Image& operator=( const Image& ) = delete;
+public:
+    template<typename T_GFXAPI> using tApiDerived = ImageT<T_GFXAPI>; // make apiCast work!
+protected:
+    Image() noexcept {}
+};
+
+
+/// @brief Template for image to be specialized by graphics api.
+template<typename T_GFXAPI>
+class ImageT final : public Image
+{
+    ImageT( const ImageT<T_GFXAPI>& ) = delete;
+    ImageT& operator=( const ImageT<T_GFXAPI>& ) = delete;
+public:
+    ImageT() noexcept = delete;                                             // template class expected to be specialized
+    ImageT( ImageT<T_GFXAPI>&& ) noexcept = delete;                         // template class expected to be specialized
+    ImageT<T_GFXAPI>& operator=( ImageT<T_GFXAPI>&& ) noexcept = delete;    // template class expected to be specialized
+
+    static_assert(sizeof( ImageT<T_GFXAPI> ) != sizeof( Image ));           // Ensure this class template is specialized (and not used as-is)
+};
+
+
+/// @brief Base class for a image view object.
+/// Is subclassed for each graphics API.
+class ImageView
+{
+    ImageView(const ImageView&) = delete;
+    ImageView& operator=(const ImageView&) = delete;
+public:
+    template<typename T_GFXAPI> using tApiDerived = ImageViewT<T_GFXAPI>; // make apiCast work!
+protected:
+    ImageView() noexcept {}
+};
+
+
+/// @brief Template for image view to be specialized by graphics api.
+template<typename T_GFXAPI>
+class ImageViewT final : public ImageView
+{
+    ImageViewT(const ImageViewT<T_GFXAPI>&) = delete;
+    ImageViewT& operator=(const ImageViewT<T_GFXAPI>&) = delete;
+public:
+    ImageViewT() noexcept = delete;                                             // template class expected to be specialized
+    ImageViewT( ImageViewT<T_GFXAPI>&&) noexcept = delete;                      // template class expected to be specialized
+    ImageViewT<T_GFXAPI>& operator=( ImageViewT<T_GFXAPI>&&) noexcept = delete; // template class expected to be specialized
+
+    static_assert(sizeof(ImageViewT<T_GFXAPI>) != sizeof(ImageView));           // Ensure this class template is specialized (and not used as-is)
 };
 
 
@@ -136,6 +194,18 @@ enum TEXTURE_FLAGS
 };
 
 
+enum class ImageViewType {
+    View1D = 0,
+    View2D = 1,
+    View3D = 2,
+    ViewCube = 3,
+    View1DArray = 4,
+    View2DArray = 5,
+    ViewCubeArray = 6,
+};;
+
+
+
 /// Parameters for CreateTextureObject
 struct CreateTexObjectInfo
 {
@@ -160,11 +230,13 @@ struct CreateSamplerObjectInfo
 {
     SamplerAddressMode  Mode = SamplerAddressMode::Repeat;
     SamplerFilter       Filter = SamplerFilter::Linear;
+    SamplerFilter       MipFilter = SamplerFilter::Linear;
     SamplerBorderColor  BorderColor = SamplerBorderColor::TransparentBlackFloat;
     bool                UnnormalizedCoordinates = false;
     float               MipBias = 0.0f;
     float               MinLod = 0.0f;
     float               MaxLod = FLT_MAX;
+    float               Anisotropy = 4.0f;
 };
 
 
@@ -202,7 +274,7 @@ std::unique_ptr<Texture> CreateTextureObject(GraphicsApiBase& gfxApi, const Crea
 
 /// Create texture from a memory buffer.
 template<typename T_GFXAPI>
-TextureT<T_GFXAPI> CreateTextureFromBuffer( T_GFXAPI& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName = nullptr, uint32_t extraFlags = 0 )
+TextureT<T_GFXAPI> CreateTextureFromBuffer( T_GFXAPI& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName = nullptr )
 {
     assert( 0 && "Expecting CreateTextureFromBuffer (per graphics api) to be used" );
     return {};
@@ -210,10 +282,10 @@ TextureT<T_GFXAPI> CreateTextureFromBuffer( T_GFXAPI& gfxApi, const void* pData,
 
 /// Create texture (unique_ptr) (generally for render target usage).  Uses CreateTexObjectInfo structure to define texture creation parameters.
 template<typename T_GFXAPI>
-std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName = nullptr, uint32_t extraFlags = 0 )
+std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName = nullptr )
 {
     auto pTexture = std::make_unique<TextureT<T_GFXAPI>>();
-    *pTexture = std::move( CreateTextureFromBuffer( static_cast<T_GFXAPI&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName, extraFlags) );
+    *pTexture = std::move( CreateTextureFromBuffer( static_cast<T_GFXAPI&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName ) );
     return pTexture;
 }
 
@@ -222,6 +294,27 @@ std::unique_ptr<Texture> CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const
 template<typename T_GFXAPI>
 void ReleaseTexture(T_GFXAPI& gfxApi, TextureT<T_GFXAPI>*);
 
+
+/// Release an image.
+/// Must be specialized for the graphics api - will give linker error if called by application code.
+template<typename T_GFXAPI>
+void ReleaseImage( T_GFXAPI& gfxApi, ImageT<T_GFXAPI>* );
+
+
+/// Create a texture image view
+/// Must be specialized for the graphics api - will give linker error if called by application code.
+template<typename T_GFXAPI>
+ImageViewT<T_GFXAPI> CreateImageView( T_GFXAPI& gfxApi, const ImageT< T_GFXAPI>& image, TextureFormat format, uint32_t numMipLevels, uint32_t baseMipLevel, uint32_t numFaces, uint32_t firstFace, ImageViewType viewType )
+{
+    assert( 0 && "Expecting CreateImageView (per graphics api) to be used" );
+    return {};
+}
+
+/// Release a texture image view.
+/// Must be specialized for the graphics api - will give linker error if called by application code.
+template<typename T_GFXAPI>
+void ReleaseImageView( T_GFXAPI& gfxApi, ImageViewT<T_GFXAPI>* );
+
 /// Create a texture sampler (with some commonly used parameters)
 template<typename T_GFXAPI>
 SamplerT<T_GFXAPI> CreateSampler( T_GFXAPI& gfxApi, SamplerAddressMode SamplerMode, SamplerFilter FilterMode, SamplerBorderColor BorderColor, float MipBias )
@@ -229,6 +322,7 @@ SamplerT<T_GFXAPI> CreateSampler( T_GFXAPI& gfxApi, SamplerAddressMode SamplerMo
     CreateSamplerObjectInfo createInfo{};
     createInfo.Mode = SamplerMode;
     createInfo.Filter = FilterMode;
+    createInfo.MipFilter = FilterMode,
     createInfo.BorderColor = BorderColor;
     createInfo.MipBias = MipBias;
     return CreateSampler( gfxApi, createInfo );

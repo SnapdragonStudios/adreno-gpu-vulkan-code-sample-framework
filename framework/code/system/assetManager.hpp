@@ -174,6 +174,17 @@ public:
         return true;
     }
 
+    size_t GetFileSize(const std::string& portableFileName) 
+    {
+        AssetHandle* handle = OpenFile(portableFileName, Mode::Read);
+        if (!handle)
+        {
+            return 0;
+        }
+
+        return FileSize(handle);
+    }
+
     AssetHandleGuard OpenFile( const std::string& portableFilename )
     {
         auto* fileHandle = OpenFile( portableFilename, Mode::Read );

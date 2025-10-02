@@ -44,6 +44,7 @@ protected:
     MaterialManager() noexcept {};
 
 public:
+    virtual ~MaterialManager() {};
     typedef std::vector<const Texture*> tPerFrameTexInfo;
     typedef std::vector<AccelerationStructureHandle> tPerFrameVkAccelerationStructure;
 

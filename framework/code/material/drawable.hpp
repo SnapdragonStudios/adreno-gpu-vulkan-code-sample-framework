@@ -97,14 +97,29 @@ public:
     Drawable(Drawable&&) noexcept;
     ~Drawable();
 
+    /// Initialize this Drawable with the given mesh and render passes.
+    bool Init(std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::optional<DrawIndirectBufferObject> indirectDrawBuffer = std::nullopt, std::span<const VkSampleCountFlagBits> passMultisample = {}, std::span<const uint32_t> subpasses = {}, int nodeId = -1);
+
     /// Initialize this Drawable with the given mesh and (single) render pass.
     bool Init(VkRenderPass vkRenderPass, const char* passNames, Mesh<Vulkan> meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer = std::nullopt, std::optional<DrawIndirectBufferObject> indirectDrawBuffer = std::nullopt, const VkSampleCountFlagBits* const passMultisample = nullptr, const uint32_t* const subpasses = nullptr, int nodeId = -1);
     /// Initialize this Drawable with the given mesh and render passes.
     bool Init( std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, Mesh<Vulkan> meshObject, std::optional<VertexBufferObject> vertexInstanceBuffer = std::nullopt, std::optional<DrawIndirectBufferObject> indirectDrawBuffer = std::nullopt, std::span<const VkSampleCountFlagBits> passMultisample = {}, std::span<const uint32_t> subpasses = {}, int nodeId = -1);
+    /// Initialize this Drawable with the given mesh, (single) render pass, and raster information (triangles, lines, points, etc.).
+    bool Init(VkRenderPass vkRenderPass, const char* passName, Mesh<Vulkan> meshObject, VkPipelineInputAssemblyStateCreateInfo  ia_custom, VkPipelineRasterizationStateCreateInfo  rs_custom);
+
+    bool InitMeshShader( std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::optional<DrawIndirectBufferObject> indirectDrawBuffer = std::nullopt, std::span<const VkSampleCountFlagBits> passMultisample = {}, std::span<const uint32_t> subpasses = {}, int nodeId = -1);
+
     /// Re-initialize the drawable.  Used internally by Init but can be used by the user when the render pass has been modified.
     bool ReInit( VkRenderPass vkRenderPass, const char* passNames, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses );
+    /// Re-initialize the drawable.  Used internally by Init but can be used by the user when the render pass has been modified.
+    bool ReInit( VkRenderPass vkRenderPass, const char* passNames, const VkSampleCountFlagBits* const passMultisample, const uint32_t* const subpasses, VkPipelineInputAssemblyStateCreateInfo  ia_custom, VkPipelineRasterizationStateCreateInfo  rs_custom);
     /// Re-initialize the drawable.  Used internally by Init but can be used by the user when the render passes have been modified.
     bool ReInit(std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses);
+    /// Re-initialize the drawable.  Used internally by Init but can be used by the user when the render passes have been modified.
+    bool ReInit(std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses, VkPipelineInputAssemblyStateCreateInfo ia_custom, VkPipelineRasterizationStateCreateInfo rs_custom);
+
+
+    bool ReInitMeshShader(std::span<VkRenderPass> vkRenderPasses, const char* const* passNames, uint32_t passMask, std::span<const VkSampleCountFlagBits> passMultisample, std::span<const uint32_t> subpasses);
 
     /// Issues the Vulkan commands needed to draw this DrawablePass.
     /// Binds the pipeline, descriptor sets, vertex buffers, index buffers, and issues the appropriate vkCmdDraw*
@@ -120,9 +135,18 @@ public:
     const auto& GetDrawIndirectBuffer() const { return mDrawIndirectBuffer; }
     const int GetNodeId() const { return mNodeId; }
 
+    /// number of workgroup dispatches to execute (value after the local workgroup sizes are accounted for)
+    void SetDispatchGroupCount(std::array<uint32_t, 3> count) { mDispatchGroupCount = count; }
+    const auto& GetDispatchGroupCount() const { return mDispatchGroupCount; }
+
+    // Need non const access to mMeshObject but don't want to break anyone using GetMeshObject()
+public:
+    Mesh<Vulkan>                    mMeshObject;
+
 protected:
     Material                        mMaterial;
-    Mesh<Vulkan>                    mMeshObject;
+
+    std::array<uint32_t, 3>         mDispatchGroupCount{ 1u,1u,1u };
 
     std::vector<DrawablePass>       mPasses;
     std::map<std::string, uint32_t> mPassNameToIndex;   // Index in to mpasses  ///TODO: allow for generation of a list of these - so each pass can iterate through the passes easily

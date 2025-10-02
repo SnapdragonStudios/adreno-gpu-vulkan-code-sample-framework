@@ -1,10 +1,9 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2023 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 #include "textureManager.hpp"
 #include "texture.hpp"
 #include "imageWrapper.hpp"
@@ -33,12 +32,14 @@ bool TextureManagerT<Vulkan>::Initialize()
 {
     m_Loader = std::make_unique<TextureKtxT<tGfxApi>>( static_cast<tGfxApi&>(m_GfxApi) );
 
-    m_DefaultSamplers.resize( size_t(SamplerAddressMode::End), {} );
+    m_DefaultSamplers.reserve( size_t(SamplerAddressMode::End) );
     for (size_t i = (size_t)SamplerAddressMode::Repeat; i < (size_t)SamplerAddressMode::End; ++i)
     {
         SamplerAddressMode samplerMode = (SamplerAddressMode)i;
         if (samplerMode != SamplerAddressMode::MirroredClampEdge || m_MirrorClampToEdgeSupported)
-            m_DefaultSamplers[i] = CreateSampler( m_GfxApi, samplerMode, SamplerFilter::Linear, SamplerBorderColor::TransparentBlackFloat, 0.0f );
+            m_DefaultSamplers.push_back( CreateSampler( m_GfxApi, samplerMode, SamplerFilter::Linear, SamplerBorderColor::TransparentBlackFloat, 0.0f ) );
+        else
+            m_DefaultSamplers.push_back( {} );
     }
 
     return TextureManager::Initialize();
@@ -82,7 +83,7 @@ const Texture* TextureManagerT<Vulkan>::GetOrLoadTexture_(const std::string& tex
     if (!pTexture)
     {
         const SamplerVulkan& samplerVulkan = static_cast<const SamplerVulkan&>(sampler);
-        auto loadedTexture = GetLoader()->LoadKtx(m_GfxApi, rAssetManager, filename.c_str(), samplerVulkan);
+        auto loadedTexture = GetLoader()->LoadKtx(m_GfxApi, rAssetManager, filename.c_str(), std::move(samplerVulkan.Copy()));
         if (!loadedTexture.IsEmpty())
         {
             auto insertedIt = m_LoadedTextures.insert({ textureSlotName, std::move(loadedTexture) });
@@ -142,7 +143,7 @@ void TextureManagerT<Vulkan>::BatchLoad(AssetManager& rAssetManager, const std::
                 params.loadedFileQueue.pop();
             }
             if (ktxData)
-                params.vulkanTextures[slotIndex] = pThis->GetLoader()->LoadKtx(pThis->m_GfxApi, ktxData, params.defaultSampler);
+                params.vulkanTextures[slotIndex] = pThis->GetLoader()->LoadKtx(pThis->m_GfxApi, ktxData, std::move(params.defaultSampler.Copy()) );
             --texturesRemaining;
         }
         params.finishedSema.Post();
@@ -200,11 +201,11 @@ std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureObject(GraphicsAp
 }
 
 //-----------------------------------------------------------------------------
-std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName, uint32_t extraFlags)
+std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName )
 //-----------------------------------------------------------------------------
 {
     auto pTexture = std::make_unique<TextureT<Vulkan>>();
-    *pTexture = ::CreateTextureFromBuffer( static_cast<Vulkan&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName, extraFlags);
+    *pTexture = ::CreateTextureFromBuffer( static_cast<Vulkan&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName );
     return pTexture;
 }
 

@@ -11,14 +11,73 @@
 #include <cassert>
 #include <cinttypes>
 
-void VulkanFunctionPointerExtensionHelper::Register(Vulkan& vulkan)
+template<>
+void VulkanFunctionPointerExtensionHelper<VulkanExtensionType::eDevice>::Register(Vulkan& vulkan)
 {
     vulkan.AddExtensionHooks( &m_InstanceFunctionPointerHook );
     vulkan.AddExtensionHooks( &m_DeviceFunctionPointerHook );
 }
 
+template<>
+void VulkanFunctionPointerExtensionHelper<VulkanExtensionType::eInstance>::Register(Vulkan& vulkan)
+{
+    vulkan.AddExtensionHooks(&m_InstanceFunctionPointerHook);
+}
+
 
 namespace ExtensionHelper {
+
+#if VK_EXT_mesh_shader
+    void Ext_VK_KHR_mesh_shader::LookupFunctionPointers(VkDevice vkDevice, PFN_vkGetDeviceProcAddr deviceProcAddr)
+    {
+        m_vkCmdDrawMeshTasksEXT = (PFN_vkCmdDrawMeshTasksEXT)deviceProcAddr(vkDevice, "vkCmdDrawMeshTasksEXT");
+        m_vkCmdDrawMeshTasksIndirectEXT = (PFN_vkCmdDrawMeshTasksIndirectEXT)deviceProcAddr(vkDevice, "vkCmdDrawMeshTasksIndirectEXT");
+        m_vkCmdDrawMeshTasksIndirectCountEXT = (PFN_vkCmdDrawMeshTasksIndirectCountEXT)deviceProcAddr(vkDevice, "vkCmdDrawMeshTasksIndirectCountEXT");
+    }
+    void Ext_VK_KHR_mesh_shader::PrintFeatures() const
+    {
+        LOGI("FeaturesMeshShader: ");
+        LOGI("    taskShader: %s", this->AvailableFeatures.taskShader ? "True" : "False");
+        LOGI("    meshShader: %s", this->AvailableFeatures.meshShader ? "True" : "False");
+        LOGI("    multiviewMeshShader: %s", this->AvailableFeatures.multiviewMeshShader ? "True" : "False");
+        LOGI("    primitiveFragmentShadingRateMeshShader: %s", this->AvailableFeatures.primitiveFragmentShadingRateMeshShader ? "True" : "False");
+        LOGI("    meshShaderQueries: %s", this->AvailableFeatures.meshShaderQueries ? "True" : "False");
+    }
+    void Ext_VK_KHR_mesh_shader::PrintProperties() const
+    {
+        LOGI("VK_EXT_descriptor_indexing (VkPhysicalDeviceDescriptorIndexingProperties): ");
+        LOGI("    maxTaskWorkGroupTotalCount: %u", Properties.maxTaskWorkGroupTotalCount);
+        LOGI("    maxTaskWorkGroupCount: %u %u %u", Properties.maxTaskWorkGroupCount[0], Properties.maxTaskWorkGroupCount[0], Properties.maxTaskWorkGroupCount[0]);
+        LOGI("    maxTaskWorkGroupTotalCount: %u", Properties.maxTaskWorkGroupTotalCount);
+        LOGI("    maxTaskWorkGroupCount: %u %u %u", Properties.maxTaskWorkGroupCount[0], Properties.maxTaskWorkGroupCount[0], Properties.maxTaskWorkGroupCount[0]);
+        LOGI("    maxTaskWorkGroupInvocations: %u", Properties.maxTaskWorkGroupInvocations);
+        LOGI("    maxTaskWorkGroupSize: %u %u %u", Properties.maxTaskWorkGroupSize[0], Properties.maxTaskWorkGroupSize[0], Properties.maxTaskWorkGroupSize[0]);
+        LOGI("    maxTaskPayloadSize: %u", Properties.maxTaskPayloadSize);
+        LOGI("    maxTaskSharedMemorySize: %u", Properties.maxTaskSharedMemorySize);
+        LOGI("    maxTaskPayloadAndSharedMemorySize: %u", Properties.maxTaskPayloadAndSharedMemorySize);
+        LOGI("    maxMeshWorkGroupTotalCount: %u", Properties.maxMeshWorkGroupTotalCount);
+        LOGI("    maxMeshWorkGroupCount: %u %u %u", Properties.maxMeshWorkGroupCount[0], Properties.maxMeshWorkGroupCount[0], Properties.maxMeshWorkGroupCount[0]);
+        LOGI("    maxMeshWorkGroupInvocations: %u", Properties.maxMeshWorkGroupInvocations);
+        LOGI("    maxMeshWorkGroupSize: %u %u %u", Properties.maxMeshWorkGroupSize[0], Properties.maxMeshWorkGroupSize[0], Properties.maxMeshWorkGroupSize[0]);
+        LOGI("    maxMeshSharedMemorySize: %u", Properties.maxMeshSharedMemorySize);
+        LOGI("    maxMeshPayloadAndSharedMemorySize: %u", Properties.maxMeshPayloadAndSharedMemorySize);
+        LOGI("    maxMeshOutputMemorySize: %u", Properties.maxMeshOutputMemorySize);
+        LOGI("    maxMeshPayloadAndOutputMemorySize: %u", Properties.maxMeshPayloadAndOutputMemorySize);
+        LOGI("    maxMeshOutputComponents: %u", Properties.maxMeshOutputComponents);
+        LOGI("    maxMeshOutputVertices: %u", Properties.maxMeshOutputVertices);
+        LOGI("    maxMeshOutputPrimitives: %u", Properties.maxMeshOutputPrimitives);
+        LOGI("    maxMeshOutputLayers: %u", Properties.maxMeshOutputLayers);
+        LOGI("    maxMeshMultiviewViewCount: %u", Properties.maxMeshMultiviewViewCount);
+        LOGI("    meshOutputPerVertexGranularity: %u", Properties.meshOutputPerVertexGranularity);
+        LOGI("    meshOutputPerPrimitiveGranularity: %u", Properties.meshOutputPerPrimitiveGranularity);
+        LOGI("    maxPreferredTaskWorkGroupInvocations: %u", Properties.maxPreferredTaskWorkGroupInvocations);
+        LOGI("    maxPreferredMeshWorkGroupInvocations: %u", Properties.maxPreferredMeshWorkGroupInvocations);
+        LOGI("    prefersLocalInvocationVertexOutput: %s", Properties.prefersLocalInvocationVertexOutput ? "True" : "False");
+        LOGI("    prefersLocalInvocationVertexOutput: %s", Properties.prefersLocalInvocationPrimitiveOutput ? "True" : "False");
+        LOGI("    prefersLocalInvocationVertexOutput: %s", Properties.prefersCompactVertexOutput ? "True" : "False");
+        LOGI("    prefersLocalInvocationVertexOutput: %s", Properties.prefersCompactPrimitiveOutput ? "True" : "False");
+    }
+#endif
 
 
 #if VK_KHR_shader_float16_int8
@@ -178,6 +237,24 @@ namespace ExtensionHelper {
     }
 #endif // VK_KHR_fragment_shading_rate
 
+#if VK_KHR_create_renderpass2
+    void Ext_VK_KHR_create_renderpass2::LookupFunctionPointers( VkInstance vkInstance )
+    {
+        m_vkCreateRenderPass2KHR = (PFN_vkCreateRenderPass2KHR)vkGetInstanceProcAddr( vkInstance, "vkCreateRenderPass2KHR" );
+        m_vkCmdBeginRenderPass2KHR = (PFN_vkCmdBeginRenderPass2KHR)vkGetInstanceProcAddr( vkInstance, "vkCmdBeginRenderPass2KHR" );
+        m_vkCmdNextSubpass2KHR = (PFN_vkCmdNextSubpass2KHR)vkGetInstanceProcAddr( vkInstance, "vkCmdNextSubpass2KHR" );
+        m_vkCmdEndRenderPass2KHR = (PFN_vkCmdEndRenderPass2KHR)vkGetInstanceProcAddr( vkInstance, "vkCmdEndRenderPass2KHR" );
+    }
+#endif // VK_KHR_create_renderpass2
+
+#if VK_KHR_draw_indirect_count
+    void Ext_VK_KHR_draw_indirect_count::LookupFunctionPointers( VkInstance vkInstance )
+    {
+        m_vkCmdDrawIndirectCountKHR = (PFN_vkCmdDrawIndirectCountKHR)vkGetInstanceProcAddr( vkInstance, "vkCmdDrawIndirectCountKHR" );
+        m_vkCmdDrawIndexedIndirectCountKHR = (PFN_vkCmdDrawIndexedIndirectCountKHR)vkGetInstanceProcAddr( vkInstance, "vkCmdDrawIndexedIndirectCountKHR" );
+    }
+#endif // VK_KHR_draw_indirect_count
+
 #if VK_EXT_debug_utils
     bool Ext_VK_EXT_debug_utils::SetDebugUtilsObjectName( VkDevice vkDevice, uint64_t object, VkObjectType objectType, const char* name ) const
     {
@@ -253,6 +330,48 @@ namespace ExtensionHelper {
     }
 #endif // VK_EXT_host_query_reset
 
+#if VK_ARM_tensors
+    void Ext_VK_ARM_tensors::PrintFeatures() const
+    {
+        LOGI("VK_ARM_tensors (VkPhysicalDeviceTensorFeaturesARM):");
+        LOGI("    tensorNonPacked: %s", this->AvailableFeatures.tensorNonPacked ? "True" : "False");
+        LOGI("    shaderTensorAccess: %s", this->AvailableFeatures.shaderTensorAccess ? "True" : "False");
+        LOGI("    shaderStorageTensorArrayDynamicIndexing: %s", this->AvailableFeatures.shaderStorageTensorArrayDynamicIndexing ? "True" : "False");
+        LOGI("    shaderStorageTensorArrayNonUniformIndexing: %s", this->AvailableFeatures.shaderStorageTensorArrayNonUniformIndexing ? "True" : "False");
+        LOGI("    descriptorBindingStorageTensorUpdateAfterBind: %s", this->AvailableFeatures.descriptorBindingStorageTensorUpdateAfterBind ? "True" : "False");
+        LOGI("    tensors: %s", this->AvailableFeatures.tensors ? "True" : "False");
+    }
+
+    void Ext_VK_ARM_tensors::PrintProperties() const
+    {
+        LOGI("VK_ARM_tensors (VkPhysicalDeviceTensorPropertiesARM):");
+        LOGI("    maxTensorDimensionCount: %u", this->Properties.maxTensorDimensionCount);
+        LOGI("    maxTensorElements: %" PRIu64, this->Properties.maxTensorElements);
+        LOGI("    maxPerDimensionTensorElements: %" PRIu64, this->Properties.maxPerDimensionTensorElements);
+        LOGI("    maxTensorStride: %" PRId64, this->Properties.maxTensorStride);
+        LOGI("    maxTensorSize: %" PRIu64, this->Properties.maxTensorSize);
+        LOGI("    maxTensorShaderAccessArrayLength: %u", this->Properties.maxTensorShaderAccessArrayLength);
+        LOGI("    maxTensorShaderAccessSize: %u", this->Properties.maxTensorShaderAccessSize);
+        LOGI("    maxDescriptorSetStorageTensors: %u", this->Properties.maxDescriptorSetStorageTensors);
+        LOGI("    maxPerStageDescriptorSetStorageTensors: %u", this->Properties.maxPerStageDescriptorSetStorageTensors);
+        LOGI("    maxDescriptorSetUpdateAfterBindStorageTensors: %u", this->Properties.maxDescriptorSetUpdateAfterBindStorageTensors);
+        LOGI("    maxPerStageDescriptorUpdateAfterBindStorageTensors: %u", this->Properties.maxPerStageDescriptorUpdateAfterBindStorageTensors);
+        LOGI("    shaderStorageTensorArrayNonUniformIndexingNative: %s", this->Properties.shaderStorageTensorArrayNonUniformIndexingNative ? "True" : "False");
+        LOGI("    shaderTensorSupportedStages: 0x%08X", this->Properties.shaderTensorSupportedStages);
+    }
+#endif // VK_ARM_tensors
+
+#if VK_ARM_data_graph
+    void Ext_VK_ARM_data_graph::PrintFeatures() const
+    {
+        LOGI("VK_ARM_data_graph (VkPhysicalDeviceDataGraphFeaturesARM):");
+        LOGI("    dataGraph: %s", this->AvailableFeatures.dataGraph ? "True" : "False");
+        LOGI("    dataGraphUpdateAfterBind: %s", this->AvailableFeatures.dataGraphUpdateAfterBind ? "True" : "False");
+        LOGI("    dataGraphSpecializationConstants: %s", this->AvailableFeatures.dataGraphSpecializationConstants ? "True" : "False");
+        LOGI("    dataGraphDescriptorBuffer: %s", this->AvailableFeatures.dataGraphDescriptorBuffer ? "True" : "False");
+        LOGI("    dataGraphShaderModule: %s", this->AvailableFeatures.dataGraphShaderModule ? "True" : "False");
+    }
+#endif // VK_ARM_data_graph
 #if VK_KHR_timeline_semaphore
     void Ext_VK_KHR_timeline_semaphore::PrintFeatures() const
     {
@@ -275,9 +394,64 @@ namespace ExtensionHelper {
     void Ext_VK_KHR_synchronization2::LookupFunctionPointers(VkInstance vkInstance)
     {
         m_vkQueueSubmit2KHR = (PFN_vkQueueSubmit2KHR)vkGetInstanceProcAddr(vkInstance, "vkQueueSubmit2KHR");
+        m_vkCmdSetEvent2KHR = (PFN_vkCmdSetEvent2KHR)vkGetInstanceProcAddr(vkInstance, "vkCmdSetEvent2KHR");
+        m_vkCmdResetEvent2KHR = (PFN_vkCmdResetEvent2KHR)vkGetInstanceProcAddr(vkInstance, "vkCmdResetEvent2KHR");
+        m_vkCmdWaitEvents2KHR = (PFN_vkCmdWaitEvents2KHR)vkGetInstanceProcAddr(vkInstance, "vkCmdWaitEvents2KHR");
+        m_vkCmdPipelineBarrier2KHR = (PFN_vkCmdPipelineBarrier2KHR)vkGetInstanceProcAddr(vkInstance, "vkCmdPipelineBarrier2KHR");
+        m_vkCmdWriteTimestamp2KHR = (PFN_vkCmdWriteTimestamp2KHR)vkGetInstanceProcAddr(vkInstance, "vkCmdWriteTimestamp2KHR");
     }
 #endif // VK_KHR_synchronization2
 
+#if VK_KHR_get_physical_device_properties2
+
+    void Ext_VK_KHR_get_physical_device_properties2::LookupFunctionPointers(VkInstance vkInstance)
+    {
+        m_vkGetPhysicalDeviceFeatures2KHR = (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(vkInstance, "vkGetPhysicalDeviceFeatures2KHR");
+        m_vkGetPhysicalDeviceFormatProperties2KHR = (PFN_vkGetPhysicalDeviceFormatProperties2KHR)vkGetInstanceProcAddr( vkInstance, "vkGetPhysicalDeviceFormatProperties2KHR" );
+        m_vkGetPhysicalDeviceImageFormatProperties2KHR = (PFN_vkGetPhysicalDeviceImageFormatProperties2KHR)vkGetInstanceProcAddr( vkInstance, "vkGetPhysicalDeviceImageFormatProperties2KHR" );
+        m_vkGetPhysicalDeviceMemoryProperties2KHR = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR)vkGetInstanceProcAddr( vkInstance, "vkGetPhysicalDeviceMemoryProperties2KHR" );
+        m_vkGetPhysicalDeviceProperties2KHR = (PFN_vkGetPhysicalDeviceProperties2KHR)vkGetInstanceProcAddr( vkInstance, "vkGetPhysicalDeviceProperties2KHR" );
+    }
+
+#endif // VK_KHR_get_physical_device_properties2
+
+#if VK_KHR_surface
+
+    void Ext_VK_KHR_surface::LookupFunctionPointers( VkInstance vkInstance )
+    {
+        m_vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)vkGetInstanceProcAddr( vkInstance, "vkDestroySurfaceKHR" );
+        m_vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)vkGetInstanceProcAddr( vkInstance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR" );
+        m_vkGetPhysicalDeviceSurfaceFormatsKHR = (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)vkGetInstanceProcAddr( vkInstance, "vkGetPhysicalDeviceSurfaceFormatsKHR" );
+        m_vkGetPhysicalDeviceSurfacePresentModesKHR = (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)vkGetInstanceProcAddr( vkInstance, "vkGetPhysicalDeviceSurfacePresentModesKHR" );
+        m_vkGetPhysicalDeviceSurfaceSupportKHR = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)vkGetInstanceProcAddr( vkInstance, "vkGetPhysicalDeviceSurfaceSupportKHR" );
+    }
+
+#endif // VK_KHR_surface
+
+#if VK_KHR_get_surface_capabilities2
+
+    void Ext_VK_KHR_get_surface_capabilities2::LookupFunctionPointers( VkInstance vkInstance )
+    {
+        m_vkGetPhysicalDeviceSurfaceCapabilities2KHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR)vkGetInstanceProcAddr(vkInstance, "vkGetPhysicalDeviceSurfaceCapabilities2KHR");
+        m_vkGetPhysicalDeviceSurfaceFormats2KHR = (PFN_vkGetPhysicalDeviceSurfaceFormats2KHR)vkGetInstanceProcAddr(vkInstance, "vkGetPhysicalDeviceSurfaceFormats2KHR");
+    }
+
+#endif // VK_KHR_get_surface_capabilities2
+
+#if VK_QCOM_tile_properties
+
+    void Ext_VK_QCOM_tile_properties::LookupFunctionPointers( VkDevice vkDevice, PFN_vkGetDeviceProcAddr deviceProcAddr )
+    {
+        m_vkGetDynamicRenderingTilePropertiesQCOM = (PFN_vkGetDynamicRenderingTilePropertiesQCOM)deviceProcAddr( vkDevice, "vkGetDynamicRenderingTilePropertiesQCOM" );
+        m_vkGetFramebufferTilePropertiesQCOM = (PFN_vkGetFramebufferTilePropertiesQCOM)deviceProcAddr( vkDevice, "vkGetFramebufferTilePropertiesQCOM" );
+    }
+
+    void Ext_VK_QCOM_tile_properties::PrintFeatures() const
+    {
+        LOGI( "TileProperties: " );
+    }
+
+#endif // VK_QCOM_tile_properties
 
     void Vulkan_SubgroupPropertiesHook::PrintProperties() const
     {

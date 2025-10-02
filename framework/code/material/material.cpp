@@ -19,6 +19,8 @@
 MaterialPass::MaterialPass(Vulkan& vulkan, const ShaderPass<Vulkan>& shaderPass, VkDescriptorPool&& descriptorPool, std::vector<VkDescriptorSet>&& descriptorSets, std::vector<VkDescriptorSetLayout>&& dynamicDescriptorSetLayouts, tTextureBindings&& textureBindings, tImageBindings&& imageBindings, tBufferBindings&& bufferBindings, tAccelerationStructureBindings&& accelerationStructureBindings, SpecializationConstants&& specializationConstants )
 	: mShaderPass(shaderPass)
     , mVulkan( vulkan )
+    , mNumDescriptorSetsPerBuffer(uint32_t(shaderPass.GetDescriptorSetLayouts().size()))
+    , mNumBuffers(mNumDescriptorSetsPerBuffer>0 ? uint32_t(descriptorSets.size() / mNumDescriptorSetsPerBuffer) : 0)
     , mDescriptorPool(descriptorPool)
 	, mDescriptorSets(std::move(descriptorSets))
 	, mDynamicDescriptorSetLayouts(std::move(dynamicDescriptorSetLayouts))
@@ -30,6 +32,7 @@ MaterialPass::MaterialPass(Vulkan& vulkan, const ShaderPass<Vulkan>& shaderPass,
 {
 	if (!mDynamicDescriptorSetLayouts.empty())
 		mDynamicPipelineLayout.Init(vulkan, mDynamicDescriptorSetLayouts);
+    assert( mDescriptorSets.size() == mNumBuffers*mNumDescriptorSetsPerBuffer );
 
 	descriptorPool = VK_NULL_HANDLE;	// we took owenership
 }
@@ -37,6 +40,8 @@ MaterialPass::MaterialPass(Vulkan& vulkan, const ShaderPass<Vulkan>& shaderPass,
 MaterialPass::MaterialPass(MaterialPass&& other) noexcept
 	: mShaderPass(other.mShaderPass)
     , mVulkan( other.mVulkan )
+    , mNumDescriptorSetsPerBuffer( other.mNumDescriptorSetsPerBuffer )
+    , mNumBuffers( other.mNumBuffers )
     , mDescriptorPool(other.mDescriptorPool)
 	, mDescriptorSets(std::move(other.mDescriptorSets))
 	, mDynamicDescriptorSetLayouts(std::move(other.mDynamicDescriptorSetLayouts))
@@ -136,19 +141,22 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 	uint32_t writeInfoIdx = 0;
 	uint32_t imageInfoCount = 0;
 	uint32_t bufferInfoCount = 0;
+    const size_t numDescriptorSetsPerFrame = mShaderPass.GetDescriptorSetLayouts().size();
+    const auto descriptorSetBaseIdx = bufferIdx * numDescriptorSetsPerFrame;
 
 	// Go through the textures first
 	for (const auto& textureBinding : mTextureBindings)
 	{
-		uint32_t bindingIndex = textureBinding.second.index;
-		VkDescriptorType bindingType = textureBinding.second.type;
+        uint32_t setIndex = textureBinding.second.setIndex;
+        uint32_t bindingIndex = textureBinding.second.setBinding.index;
+        VkDescriptorType bindingType = textureBinding.second.setBinding.type;
 
-		uint32_t numTexToBind = textureBinding.second.isArray ? (uint32_t)textureBinding.first.size() : 1;
-		uint32_t texIndex = textureBinding.second.isArray ? 0 : (bufferIdx % textureBinding.first.size());
+		uint32_t numTexToBind = textureBinding.second.setBinding.isArray ? (uint32_t)textureBinding.first.size() : 1;
+		uint32_t texIndex = textureBinding.second.setBinding.isArray ? 0 : (bufferIdx % textureBinding.first.size());
 
 		writeInfo[writeInfoIdx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writeInfo[writeInfoIdx].descriptorType = bindingType;
-		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[bufferIdx];
+		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[descriptorSetBaseIdx + setIndex];
 		writeInfo[writeInfoIdx].dstBinding = bindingIndex;
 		writeInfo[writeInfoIdx].dstArrayElement = 0;
 		writeInfo[writeInfoIdx].descriptorCount = numTexToBind;
@@ -156,9 +164,7 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 		writeInfo[writeInfoIdx].pImageInfo = &imageInfo[imageInfoCount];
 		for (uint32_t t = 0; t < numTexToBind; ++t, ++imageInfoCount, ++texIndex)
         {
-			if (texIndex >= textureBinding.first.size())
-				texIndex = 0;
-			if (imageInfoCount >= cMAX_IMAGE_INFOS)
+            if (imageInfoCount >= cMAX_IMAGE_INFOS)
             {
                 LOGE("Max number (%d) of VkDescriptorImageInfo elements reached!", cMAX_IMAGE_INFOS);
                 assert(0);
@@ -180,17 +186,18 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 	// Go through the images
 	for (const auto& imageBinding : mImageBindings)
 	{
-		uint32_t bindingIndex = imageBinding.second.index;
-		VkDescriptorType bindingType = imageBinding.second.type;
+        uint32_t setIndex = imageBinding.second.setIndex;
+        uint32_t bindingIndex = imageBinding.second.setBinding.index;
+		VkDescriptorType bindingType = imageBinding.second.setBinding.type;
 		assert(bindingType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && bindingType != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);	// combined image sampler or sampled image should go through mTextureBindings
 		//assert(imageBinding.first.imageLayout == VK_IMAGE_LAYOUT_GENERAL);
 
-		uint32_t numImgToBind = imageBinding.second.isArray ? (uint32_t)imageBinding.first.size() : 1;
-		uint32_t imgIndex = imageBinding.second.isArray ? 0 : (bufferIdx % imageBinding.first.size());
+		uint32_t numImgToBind = imageBinding.second.setBinding.isArray ? (uint32_t)imageBinding.first.size() : 1;
+		uint32_t imgIndex = imageBinding.second.setBinding.isArray ? 0 : (bufferIdx % imageBinding.first.size());
 
 		writeInfo[writeInfoIdx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writeInfo[writeInfoIdx].descriptorType = bindingType;
-		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[bufferIdx];
+		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[descriptorSetBaseIdx + setIndex];
 		writeInfo[writeInfoIdx].dstBinding = bindingIndex;
 		writeInfo[writeInfoIdx].dstArrayElement = 0;
 		writeInfo[writeInfoIdx].descriptorCount = numImgToBind;
@@ -198,8 +205,6 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 		writeInfo[writeInfoIdx].pImageInfo = &imageInfo[imageInfoCount];
 		for (uint32_t t = 0; t < numImgToBind; ++t, ++imageInfoCount, ++imgIndex)
 		{
-			if (imgIndex >= imageBinding.first.size())
-				imgIndex = 0;
             if (imageInfoCount >= cMAX_IMAGE_INFOS)
             {
                 LOGE("Max number (%d) of VkDescriptorImageInfo elements reached!", cMAX_IMAGE_INFOS);
@@ -225,7 +230,7 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 
     for (const auto& bufferBinding : mBufferBindings)
     {
-        bufferInfoCount += bufferBinding.second.isArray ? (uint32_t) bufferBinding.first.size() : 1;
+        bufferInfoCount += bufferBinding.second.setBinding.isArray ? (uint32_t) bufferBinding.first.size() : 1;
     }
     auto* pBufferInfo = bufferInfoFixed.data();
     if (bufferInfoCount > cMAX_BUFFER_INFOS)
@@ -236,15 +241,16 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 
     for (const auto& bufferBinding : mBufferBindings)
     {
-        uint32_t bindingIndex = bufferBinding.second.index;
-		VkDescriptorType bindingType = bufferBinding.second.type;
+        uint32_t setIndex = bufferBinding.second.setIndex;
+        uint32_t bindingIndex = bufferBinding.second.setBinding.index;
+		VkDescriptorType bindingType = bufferBinding.second.setBinding.type;
 
-		uint32_t numBuffersToBind = bufferBinding.second.isArray ? (uint32_t)bufferBinding.first.size() : 1;
-		uint32_t bufferIndex = bufferBinding.second.isArray ? 0 : (bufferIdx % bufferBinding.first.size());
+		uint32_t numBuffersToBind = bufferBinding.second.setBinding.isArray ? (uint32_t)bufferBinding.first.size() : 1;
+		uint32_t bufferIndex = bufferBinding.second.setBinding.isArray ? 0 : (bufferIdx % bufferBinding.first.size());
 
 		writeInfo[writeInfoIdx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writeInfo[writeInfoIdx].descriptorType = bindingType;
-		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[bufferIdx];
+		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[descriptorSetBaseIdx + setIndex];
 		writeInfo[writeInfoIdx].dstBinding = bindingIndex;
 		writeInfo[writeInfoIdx].dstArrayElement = 0;
 		writeInfo[writeInfoIdx].descriptorCount = numBuffersToBind;
@@ -253,8 +259,6 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 
 		for (uint32_t t = 0; t < numBuffersToBind; ++t, ++bufferIndex)
 		{
-			if (bufferIndex >= bufferBinding.first.size())
-				bufferIndex = 0;
 			pBufferInfo->buffer = bufferBinding.first[bufferIndex].buffer;
             pBufferInfo->offset = bufferBinding.first[bufferIndex].offset;
             pBufferInfo->range = VK_WHOLE_SIZE;
@@ -277,11 +281,12 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 
 	for (const auto& accelerationBinding : mAccelerationStructureBindings)
 	{
-		uint32_t bindingIndex = accelerationBinding.second.index;
-		VkDescriptorType bindingType = accelerationBinding.second.type;
+        uint32_t setIndex = accelerationBinding.second.setIndex;
+        uint32_t bindingIndex = accelerationBinding.second.setBinding.index;
+		VkDescriptorType bindingType = accelerationBinding.second.setBinding.type;
 
-		uint32_t numAccelToBind = accelerationBinding.second.isArray ? (uint32_t)accelerationBinding.first.size() : 1;
-		uint32_t accelIndex = accelerationBinding.second.isArray ? 0 : (bufferIdx < accelerationBinding.first.size() ? bufferIdx : 0);
+		uint32_t numAccelToBind = accelerationBinding.second.setBinding.isArray ? (uint32_t)accelerationBinding.first.size() : 1;
+		uint32_t accelIndex = accelerationBinding.second.setBinding.isArray ? 0 : (bufferIdx < accelerationBinding.first.size() ? bufferIdx : 0);
 
         if (writeInfoIdx >= cMAX_WRITES)
         {
@@ -304,7 +309,7 @@ bool MaterialPass::UpdateDescriptorSets(uint32_t bufferIdx)
 
 		writeInfo[writeInfoIdx].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writeInfo[writeInfoIdx].descriptorType = bindingType;//VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
-		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[bufferIdx];
+		writeInfo[writeInfoIdx].dstSet = mDescriptorSets[descriptorSetBaseIdx + setIndex];
 		writeInfo[writeInfoIdx].dstBinding = bindingIndex;
 		writeInfo[writeInfoIdx].dstArrayElement = 0;
 		writeInfo[writeInfoIdx].descriptorCount = accelerationStructureInfo[accelerationStructureCount].accelerationStructureCount;
@@ -332,32 +337,37 @@ bool MaterialPass::UpdateDescriptorSetBinding(uint32_t bufferIdx, const std::str
 	uint32_t writeInfoIdx = 0;
 	uint32_t imageInfoCount = 0;
 
-	const auto& descriptorSet = GetVkDescriptorSet(bufferIdx);
-	const auto& passLayout = mShaderPass.GetDescriptorSetLayouts()[0];
-	const auto& nameToBinding = passLayout.GetNameToBinding();
-	const auto bindingIt = nameToBinding.find(bindingName);
-	if (bindingIt != nameToBinding.end())
-	{
-		VkDescriptorType bindingType = bindingIt->second.type;
-		assert(bindingType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || bindingType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+    for (int setIdx = 0; const auto & setLayout : mShaderPass.GetDescriptorSetLayouts())
+    {
+        const auto& nameToBinding = setLayout.GetNameToBinding();
+        const auto bindingIt = nameToBinding.find( bindingName );
+        if (bindingIt != nameToBinding.end())
+        {
+            const auto& descriptorSet = GetVkDescriptorSet( bufferIdx, setIdx );
+            VkDescriptorType bindingType = bindingIt->second.type;
+            assert( bindingType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || bindingType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
 
-		uint32_t bindingIndex = bindingIt->second.index;
+            uint32_t bindingIndex = bindingIt->second.index;
 
-		writeInfo[writeInfoIdx].descriptorType = bindingType;
-		writeInfo[writeInfoIdx].dstSet = descriptorSet;
-		writeInfo[writeInfoIdx].dstBinding = bindingIndex;
-		writeInfo[writeInfoIdx].dstArrayElement = 0;
-		writeInfo[writeInfoIdx].descriptorCount = 1;
-		writeInfo[writeInfoIdx].pBufferInfo = nullptr;
-		writeInfo[writeInfoIdx].pImageInfo = &imageInfo[imageInfoCount];
-		imageInfo[imageInfoCount] = newTexture.GetVkDescriptorImageInfo();
+            writeInfo[writeInfoIdx].descriptorType = bindingType;
+            writeInfo[writeInfoIdx].dstSet = descriptorSet;
+            writeInfo[writeInfoIdx].dstBinding = bindingIndex;
+            writeInfo[writeInfoIdx].dstArrayElement = 0;
+            writeInfo[writeInfoIdx].descriptorCount = 1;
+            writeInfo[writeInfoIdx].pBufferInfo = nullptr;
+            writeInfo[writeInfoIdx].pImageInfo = &imageInfo[imageInfoCount];
+            imageInfo[imageInfoCount] = newTexture.GetVkDescriptorImageInfo();
 
-		++imageInfoCount;
-		++writeInfoIdx;
+            ++imageInfoCount;
+            ++writeInfoIdx;
 
-		vkUpdateDescriptorSets(mVulkan.m_VulkanDevice, writeInfoIdx, writeInfo.data(), 0, NULL);
-	}
-	return true;
+            vkUpdateDescriptorSets( mVulkan.m_VulkanDevice, writeInfoIdx, writeInfo.data(), 0, NULL );
+            return true;
+        }
+        ++setIdx;
+    }
+    assert( 0 && "Binding name not found" );
+    return false;
 }
 
 

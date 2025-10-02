@@ -34,6 +34,30 @@ ShaderPassDescription::ShaderPassDescription(std::vector<DescriptorSetDescriptio
     , m_constants(std::move(specializationConstants))
 //    , m_vertexInstanceFormatBindings(std::move(vertexInstanceFormatBindings))
 {
+    m_taskName = "";
+    m_meshName = "";
+}
+
+ShaderPassDescription::ShaderPassDescription(std::vector<DescriptorSetDescription> setDescriptions, std::vector<Output> outputs, std::string taskName, std::string meshName, std::string computeName, std::string vertexName, std::string fragmentName, std::string rayGenerationName, std::string rayClosestHitName, std::string rayAnyHitName, std::string rayMissName, ShaderPassDescription::FixedFunctionSettings fixedFunctionSettings, ShaderPassDescription::SampleShadingSettings sampleShadingSettings, ShaderPassDescription::WorkGroupSettings workGroupSettings, ShaderPassDescription::RayTracingSettings rayTracingSettings, std::vector<uint32_t> vertexFormatBindings, std::vector<SpecializationConstantDescription> specializationConstants )
+    : m_sets(std::move(setDescriptions))
+    , m_outputs(std::move(outputs))
+    , m_taskName(std::move(taskName))
+    , m_meshName(std::move(meshName))
+    , m_computeName(std::move(computeName))
+    , m_vertexName(std::move(vertexName))
+    , m_fragmentName(std::move(fragmentName))
+    , m_rayGenerationName(std::move(rayGenerationName))
+    , m_rayClosestHitName(std::move(rayClosestHitName))
+    , m_rayAnyHitName(std::move(rayAnyHitName))
+    , m_rayMissName(std::move(rayMissName))
+    , m_fixedFunctionSettings(std::move(fixedFunctionSettings))
+    , m_sampleShadingSettings(std::move(sampleShadingSettings))
+    , m_workGroupSettings(std::move(workGroupSettings))
+    , m_rayTracingSettings(std::move(rayTracingSettings))
+    , m_vertexFormatBindings(std::move(vertexFormatBindings))
+    , m_constants(std::move(specializationConstants))
+//    , m_vertexInstanceFormatBindings(std::move(vertexInstanceFormatBindings))
+{
 }
 
 const static std::map<std::string, VertexFormat::Element::ElementType> cElementTypeByName{
@@ -59,14 +83,15 @@ struct DescriptorTypeAndReadOnly {
     bool readOnly = false;
 };
 const static std::map<std::string, DescriptorTypeAndReadOnly> cBufferTypeByName {
-    {"ImageSampler",  {DescriptorSetDescription::DescriptorType::ImageSampler, true}},
-    {"ImageSampled",  {DescriptorSetDescription::DescriptorType::ImageSampled, true}},
-    {"Sampler",  {DescriptorSetDescription::DescriptorType::Sampler, true}},
-    {"UniformBuffer", {DescriptorSetDescription::DescriptorType::UniformBuffer, true}},
-    {"StorageBuffer", {DescriptorSetDescription::DescriptorType::StorageBuffer, false}},
-    {"ImageStorage",  {DescriptorSetDescription::DescriptorType::ImageStorage, false}},
-    {"InputAttachment",  {DescriptorSetDescription::DescriptorType::InputAttachment, true}},
-    {"AccelerationStructure",  {DescriptorSetDescription::DescriptorType::AccelerationStructure, true}}
+    {"Unused",                  {DescriptorSetDescription::DescriptorType::Unused,                  true}},
+    {"ImageSampler",            {DescriptorSetDescription::DescriptorType::ImageSampler,            true}},
+    {"ImageSampled",            {DescriptorSetDescription::DescriptorType::ImageSampled,            true}},
+    {"Sampler",                 {DescriptorSetDescription::DescriptorType::Sampler,                 true}},
+    {"UniformBuffer",           {DescriptorSetDescription::DescriptorType::UniformBuffer,           true}},
+    {"StorageBuffer",           {DescriptorSetDescription::DescriptorType::StorageBuffer,           false}},
+    {"ImageStorage",            {DescriptorSetDescription::DescriptorType::ImageStorage,            false}},
+    {"InputAttachment",         {DescriptorSetDescription::DescriptorType::InputAttachment,         true}},
+    {"AccelerationStructure",   {DescriptorSetDescription::DescriptorType::AccelerationStructure,   true}}
 };
 
 const static std::map<std::string, DescriptorSetDescription::StageFlag> cStageFlagBitsByName{
@@ -77,7 +102,9 @@ const static std::map<std::string, DescriptorSetDescription::StageFlag> cStageFl
     {"RayGeneration", DescriptorSetDescription::StageFlag::t::RayGeneration},
     {"RayClosestHit", DescriptorSetDescription::StageFlag::t::RayClosestHit},
     {"RayAnyHit", DescriptorSetDescription::StageFlag::t::RayAnyHit},
-    {"RayMiss", DescriptorSetDescription::StageFlag::t::RayMiss}
+    {"RayMiss", DescriptorSetDescription::StageFlag::t::RayMiss},
+    {"Task", DescriptorSetDescription::StageFlag::t::Task},
+    {"Mesh", DescriptorSetDescription::StageFlag::t::Mesh}
 };
 
 const static std::map<std::string, ShaderPassDescription::DepthCompareOp> cDepthCompareOpByName{
@@ -263,6 +290,8 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
     std::vector<ShaderPassDescription> descriptions;
     for(const auto& ar: json["Passes"] )
     {
+        std::string taskShader;
+        std::string meshShader;
         std::string computeShader;
         std::string vertexShader;
         std::string fragmentShader;
@@ -291,6 +320,8 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
             {
                 // Either Compute or Vertex shader has to be defined, but Fragment is optional.
                 // Or none of the above and Ray Generation has to be defined, but any hit, closest hit and miss are optional
+                taskShader = el.value().contains( "Task" ) ? (std::string) el.value()["Task"] : std::string();
+                meshShader = el.value().contains( "Mesh" ) ? (std::string) el.value()["Mesh"] : std::string();
                 computeShader = el.value().contains( "Compute" ) ? (std::string) el.value()["Compute"] : std::string();
                 vertexShader = el.value().contains( "Vertex" ) ? (std::string) el.value()["Vertex"] : std::string();
                 fragmentShader = el.value().contains( "Fragment" ) ? (std::string) el.value()["Fragment"] : std::string();
@@ -299,9 +330,13 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
                 rayAnyHitShader = el.value().contains( "RayAnyHit" ) ? (std::string) el.value()["RayAnyHit"] : std::string();
                 rayMissShader = el.value().contains( "RayMiss" ) ? (std::string) el.value()["RayMiss"] : std::string();
 
-                if (computeShader.empty() && vertexShader.empty() && rayGenerationShader.empty())
+                if (meshShader.empty() && computeShader.empty() && fragmentShader.empty() && vertexShader.empty() && rayGenerationShader.empty())
                 {
-                    throw std::runtime_error( "must have a Vertex, Compute or RayGeneration shader name!" );
+                    throw std::runtime_error( "must have a Vertex, Compute, Mesh or RayGeneration shader name!" );
+                }
+                if (!taskShader.empty() && meshShader.empty())
+                {
+                    throw std::runtime_error( "must have a Mesh shader when a Task is provided !" );
                 }
             }
             else if (el.key().compare( "DescriptorSets" ) == 0)
@@ -394,7 +429,10 @@ std::optional<ShaderDescription> ShaderDescriptionLoader::Load(AssetManager& ass
         }
 
         descriptions.emplace_back(  std::move(sets),
-                                    std::move(outputs), std::move(computeShader),
+                                    std::move(outputs), 
+                                    std::move(taskShader),
+                                    std::move(meshShader),
+                                    std::move(computeShader),
                                     std::move(vertexShader),
                                     std::move(fragmentShader),
                                     std::move(rayGenerationShader),
