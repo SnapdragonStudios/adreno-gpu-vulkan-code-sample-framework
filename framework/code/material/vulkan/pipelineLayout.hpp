@@ -1,20 +1,21 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
 #include <vector>
-#include <vulkan/vulkan.h>
+#include <volk/volk.h>
 #include <span>
 #include "material/pipelineLayout.hpp"
 
 // Forward declarations
 class Vulkan;
-class DescriptorSetLayout;
+template<typename T_GFXAPI> class DescriptorSetLayout;
+struct CreateSamplerObjectInfo;
 
 
 /// Simple wrapper around VkPipelineLayout.
@@ -31,7 +32,9 @@ public:
 	PipelineLayout(PipelineLayout<Vulkan>&&) noexcept;
 	~PipelineLayout();
 
-	bool Init(Vulkan& vulkan, const std::span<const DescriptorSetLayout>);
+	operator bool() const { return m_pipelineLayout != VK_NULL_HANDLE; }
+
+	bool Init(Vulkan& vulkan, const std::span<const DescriptorSetLayout<Vulkan>>, const std::span<const CreateSamplerObjectInfo>);
 	bool Init(Vulkan& vulkan, const std::span<const VkDescriptorSetLayout> vkDescriptorSetLayouts);
 	void Destroy(Vulkan& vulkan);
 

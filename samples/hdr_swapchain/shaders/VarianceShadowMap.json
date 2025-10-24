@@ -1,0 +1,47 @@
+{
+	"$schema": "../../../framework/schema/shaderSchema.json",
+	"Passes": [
+		{
+			"Name": "vsm_horizontal",
+			"Shaders": {
+				"Compute": "Media/Shaders/VarianceShadowMap1024_horizontal.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "ImageSampler",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "ShadowDepth" ]
+						},
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VarianceShadowMap" ]
+						}
+					]
+				}
+			]
+		},
+		{
+			"Name": "vsm_vertical",
+			"Shaders": {
+				"Compute": "Media/Shaders/VarianceShadowMap1024_vertical.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "ImageStorage",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "VarianceShadowMap" ]
+						}
+					]
+				}
+			]
+		}
+	]
+}

@@ -23,6 +23,9 @@
 #include "mesh/meshLoader.hpp"
 #include "system/math_common.hpp"
 #include "texture/textureManager.hpp"
+#include "vulkan/extensionLib.hpp"
+#include "material/vulkan/computable.hpp"
+#include "material/vulkan/drawable.hpp"
 #include "imgui.h"
 
 #include <random>
@@ -45,8 +48,8 @@ namespace
 {
     static constexpr std::array<const char*, NUM_RENDER_PASSES> sRenderPassNames = { "RP_SCENE", "RP_HUD", "RP_BLIT" };
 
-    glm::vec3 gCameraStartPos = glm::vec3(26.48f, 20.0f, -5.21f);
-    glm::vec3 gCameraStartRot = glm::vec3(0.0f, 110.0f, 0.0f);
+    glm::vec3 gCameraStartPos = glm::vec3(0.0f, 3.5f, 0.0f);
+    glm::vec3 gCameraStartRot = glm::vec3(0.0f, 0.0f, 0.0f);
 
     float   gFOV = PI_DIV_4;
     float   gNearPlane = 1.0f;
@@ -54,9 +57,8 @@ namespace
     float   gNormalAmount = 0.3f;
     float   gNormalMirrorReflectAmount = 0.05f;
 
-    const char* gModelAssetPath = "Media\\Models\\PipelineCache.bin";
-    const char* gMuseumAssetPath = "Media\\Meshes\\Museum.gltf";
-    const char* gTextureFolder    = "Media\\Textures\\";
+    const char* gSceneAssetGraphModel = "PipelineCache.bin";
+    const char* gSceneAssetModel      = "SteamPunkSauna.gltf";
 
     static uint32_t FindMemoryType(VkPhysicalDevice& physicalDevice, uint32_t type_bits, VkMemoryPropertyFlags properties)
     {
@@ -96,12 +98,16 @@ void Application::PreInitializeSetVulkanConfiguration(Vulkan::AppConfiguration& 
 //-----------------------------------------------------------------------------
 {
     ApplicationHelperBase::PreInitializeSetVulkanConfiguration(config);
-    config.RequiredExtension<ExtensionHelper::Ext_VK_KHR_synchronization2>();
-    config.RequiredExtension<ExtensionHelper::Ext_VK_KHR_create_renderpass2>();
-    config.RequiredExtension<ExtensionHelper::Ext_VK_KHR_get_physical_device_properties2>();
+    config.RequiredExtension<ExtensionLib::Ext_VK_KHR_synchronization2>();
+    config.RequiredExtension<ExtensionLib::Ext_VK_KHR_create_renderpass2>();
+    config.RequiredExtension<ExtensionLib::Ext_VK_KHR_get_physical_device_properties2>();
 
-    config.OptionalExtension<ExtensionHelper::Ext_VK_ARM_tensors>();
-    config.OptionalExtension<ExtensionHelper::Ext_VK_ARM_data_graph>();
+    // config.RequiredExtension<ExtensionLib::Ext_VK_ARM_tensors>();
+    // config.RequiredExtension<ExtensionLib::Ext_VK_ARM_data_graph>();
+    // config.RequiredExtension<ExtensionLib::Ext_VK_QCOM_data_graph_model>();
+    
+    config.OptionalExtension<ExtensionLib::Ext_VK_ARM_tensors>();
+    config.OptionalExtension<ExtensionLib::Ext_VK_ARM_data_graph>();
 }
 
 //-----------------------------------------------------------------------------
@@ -116,18 +122,25 @@ bool Application::Initialize(uintptr_t windowHandle, uintptr_t hInstance)
     m_IsGraphPipelinesSupported &= GetVulkan()->HasLoadedVulkanDeviceExtension(VK_ARM_TENSORS_EXTENSION_NAME)
         && GetVulkan()->HasLoadedVulkanDeviceExtension(VK_ARM_DATA_GRAPH_EXTENSION_NAME);
         
-    // TODO: Remove when supported by the driver
+    // If Ext_VK_ARM_data_graph->AvailableFeatures.dataGraph is supported, force graph pipeline support here while that
+    // isn't fully supported publicly by the driver
 #if defined(OS_ANDROID)
     {
-        auto* Ext_VK_ARM_tensors = static_cast<ExtensionHelper::Ext_VK_ARM_tensors*>(GetVulkan()->m_DeviceExtensions.GetExtension(VK_ARM_TENSORS_EXTENSION_NAME));
-        auto* Ext_VK_ARM_data_graph = static_cast<ExtensionHelper::Ext_VK_ARM_data_graph*>(GetVulkan()->m_DeviceExtensions.GetExtension(VK_ARM_DATA_GRAPH_EXTENSION_NAME));
-        auto fpGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(GetVulkan()->GetVulkanInstance(), "vkGetDeviceProcAddr");
-        if (Ext_VK_ARM_tensors && Ext_VK_ARM_data_graph && fpGetDeviceProcAddr)
+        auto* Ext_VK_ARM_tensors = static_cast<ExtensionLib::Ext_VK_ARM_tensors*>(GetVulkan()->m_DeviceExtensions.GetExtension(VK_ARM_TENSORS_EXTENSION_NAME));
+        auto* Ext_VK_ARM_data_graph = static_cast<ExtensionLib::Ext_VK_ARM_data_graph*>(GetVulkan()->m_DeviceExtensions.GetExtension(VK_ARM_DATA_GRAPH_EXTENSION_NAME));
+        if (Ext_VK_ARM_tensors && Ext_VK_ARM_data_graph && Ext_VK_ARM_data_graph->AvailableFeatures.dataGraph)
         {
             m_IsGraphPipelinesSupported = true;
         }
     }
 #endif
+
+    // If for some reason we are able to enable the extension, but no graph queue was detected, disable
+    // graph pipelines here (this check probably isn't necessary)
+    if (!GetVulkan()->IsDataGraphQueueSupported())
+    {
+        m_IsGraphPipelinesSupported = false;
+    }
 
     // NOTE: You should configure these according to what the model expects.
     m_RenderResolution   = glm::ivec2(960, 540);
@@ -198,11 +211,6 @@ bool Application::Initialize(uintptr_t windowHandle, uintptr_t hInstance)
         return false;
     }
 
-    if (!GetVulkan()->IsDataGraphQueueSupported())
-    {
-        return false;
-    }
-
     return true;
 }
 
@@ -240,7 +248,7 @@ void Application::Destroy()
     // Render passes / Semaphores
     for (int whichPass = 0; whichPass < NUM_RENDER_PASSES; whichPass++)
     {
-        vkDestroyRenderPass(pVulkan->m_VulkanDevice, m_RenderPassData[whichPass].RenderPass, nullptr);
+        m_RenderPassData[whichPass].RenderContext.clear();
         vkDestroySemaphore(pVulkan->m_VulkanDevice, m_RenderPassData[whichPass].PassCompleteSemaphore, nullptr);
     }
 
@@ -322,8 +330,6 @@ bool Application::CreateTensors()
     }
 
     auto& vulkan = *GetVulkan();
-    const auto& tensor_extension = vulkan.GetExtension<ExtensionHelper::Ext_VK_ARM_tensors>();
-    assert(tensor_extension != nullptr);
 
     LOGI("Creating Tensors...");
 
@@ -375,7 +381,7 @@ bool Application::CreateTensors()
             .pQueueFamilyIndices = nullptr
         };
 
-        if (tensor_extension->m_vkCreateTensorARM(vulkan.m_VulkanDevice, &tensorInfo, nullptr, &targetTensor.tensor) != VK_SUCCESS)
+        if (vkCreateTensorARM(vulkan.m_VulkanDevice, &tensorInfo, nullptr, &targetTensor.tensor) != VK_SUCCESS)
         {
             return false;
         }
@@ -400,7 +406,7 @@ bool Application::CreateTensors()
         };
 
         VkMemoryRequirements2 memReq = { VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
-        tensor_extension->m_vkGetTensorMemoryRequirementsARM(vulkan.m_VulkanDevice, &memReqInfo, &memReq);
+        vkGetTensorMemoryRequirementsARM(vulkan.m_VulkanDevice, &memReqInfo, &memReq);
 #else
 
         VkDeviceTensorMemoryRequirementsARM deviceMemReqInfo = 
@@ -410,7 +416,7 @@ bool Application::CreateTensors()
             .pCreateInfo = &tensorInfo
         };
         VkMemoryRequirements2 memReq = { VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
-        tensor_extension->m_vkGetDeviceTensorMemoryRequirementsARM(vulkan.m_VulkanDevice, &deviceMemReqInfo, &memReq);
+        vkGetDeviceTensorMemoryRequirementsARM(vulkan.m_VulkanDevice, &deviceMemReqInfo, &memReq);
 #endif
 
         // TENSOR ALIASED BUFFER //
@@ -471,7 +477,7 @@ bool Application::CreateTensors()
 
         LOGI("Binding Tensor Memory");
 
-        if(tensor_extension->m_vkBindTensorMemoryARM(vulkan.m_VulkanDevice, 1, &bindInfo) != VK_SUCCESS)
+        if(vkBindTensorMemoryARM(vulkan.m_VulkanDevice, 1, &bindInfo) != VK_SUCCESS)
         {
             return false;
         }
@@ -496,7 +502,7 @@ bool Application::CreateTensors()
             .format = targetTensor.tensorDescription.format
         };
 
-        if (tensor_extension->m_vkCreateTensorViewARM(vulkan.m_VulkanDevice, &viewInfo, nullptr, &targetTensor.tensorView) != VK_SUCCESS)
+        if (vkCreateTensorViewARM(vulkan.m_VulkanDevice, &viewInfo, nullptr, &targetTensor.tensorView) != VK_SUCCESS)
         {
             return false;
         }
@@ -641,14 +647,13 @@ bool Application::CreateGraphPipeline()
     }
 
     auto& vulkan = *GetVulkan();
-    const auto& data_graph_extension = vulkan.GetExtension<ExtensionHelper::Ext_VK_ARM_data_graph>();
-    assert(data_graph_extension != nullptr);
     
     LOGI("Loading file model from disk...");
 
     std::vector<unsigned char> modelData;
     {
-        if (!m_AssetManager->LoadFileIntoMemory(gModelAssetPath, modelData))
+        const auto sceneAssetGraphModel = std::filesystem::path(MISC_DESTINATION_PATH).append(gSceneAssetGraphModel).string();
+        if (!m_AssetManager->LoadFileIntoMemory(sceneAssetGraphModel, modelData))
         {
             LOGE("Failed to load Model file, disabling the Graph Pipelines extension");
             m_IsGraphPipelinesSupported = false;
@@ -739,7 +744,7 @@ bool Application::CreateGraphPipeline()
         .pResourceInfos = resourceInfos
     };
 
-    if (data_graph_extension->m_vkCreateDataGraphPipelinesARM(
+    if (vkCreateDataGraphPipelinesARM(
         vulkan.m_VulkanDevice, 
         VK_NULL_HANDLE, 
         m_GraphPipelineInstance.pipelineCache, 
@@ -761,7 +766,7 @@ bool Application::CreateGraphPipeline()
         .dataGraphPipeline = m_GraphPipelineInstance.graphPipeline
     };
 
-    if (data_graph_extension->m_vkCreateDataGraphPipelineSessionARM(
+    if (vkCreateDataGraphPipelineSessionARM(
         vulkan.m_VulkanDevice, 
         &sessionInfo, 
         nullptr, 
@@ -778,7 +783,7 @@ bool Application::CreateGraphPipeline()
     bindReqsInfo.sType = VK_STRUCTURE_TYPE_DATA_GRAPH_PIPELINE_SESSION_BIND_POINT_REQUIREMENTS_INFO_ARM;
     bindReqsInfo.session = m_GraphPipelineInstance.graphSession;
 
-    if (data_graph_extension->m_vkGetDataGraphPipelineSessionBindPointRequirementsARM(vulkan.m_VulkanDevice, &bindReqsInfo, &bindReqsCount, NULL) != VK_SUCCESS)
+    if (vkGetDataGraphPipelineSessionBindPointRequirementsARM(vulkan.m_VulkanDevice, &bindReqsInfo, &bindReqsCount, NULL) != VK_SUCCESS)
     {
         return false;
     }
@@ -789,7 +794,7 @@ bool Application::CreateGraphPipeline()
         bindReqs[i].sType = VK_STRUCTURE_TYPE_DATA_GRAPH_PIPELINE_SESSION_BIND_POINT_REQUIREMENT_ARM;
     }
 
-    if (data_graph_extension->m_vkGetDataGraphPipelineSessionBindPointRequirementsARM(vulkan.m_VulkanDevice, &bindReqsInfo, &bindReqsCount, bindReqs.data()) != VK_SUCCESS)
+    if (vkGetDataGraphPipelineSessionBindPointRequirementsARM(vulkan.m_VulkanDevice, &bindReqsInfo, &bindReqsCount, bindReqs.data()) != VK_SUCCESS)
     {
         return false;
     }
@@ -813,7 +818,7 @@ bool Application::CreateGraphPipeline()
                     memReqsInfo.objectIndex = j;
 
                     VkMemoryRequirements2 memReqs = { VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 };
-                    data_graph_extension->m_vkGetDataGraphPipelineSessionMemoryRequirementsARM(vulkan.m_VulkanDevice, &memReqsInfo, &memReqs);
+                    vkGetDataGraphPipelineSessionMemoryRequirementsARM(vulkan.m_VulkanDevice, &memReqsInfo, &memReqs);
 
                     VkMemoryAllocateInfo info = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
                     info.pNext = nullptr;
@@ -838,7 +843,7 @@ bool Application::CreateGraphPipeline()
                     bindMem.objectIndex = j;
                     bindMem.memory      = m_GraphPipelineInstance.sessionMemory[memCount];
 
-                    if (data_graph_extension->m_vkBindDataGraphPipelineSessionMemoryARM(vulkan.m_VulkanDevice, 1, &bindMem) != VK_SUCCESS)
+                    if (vkBindDataGraphPipelineSessionMemoryARM(vulkan.m_VulkanDevice, 1, &bindMem) != VK_SUCCESS)
                     {
                         return false;
                     }
@@ -864,14 +869,11 @@ bool Application::CreateGraphPipeline()
 //-----------------------------------------------------------------------------
 void Application::CopyImageToTensor(
     CommandListVulkan&         cmdList,
-    TextureVulkan&             srcImage,
+    const TextureVulkan&       srcImage,
     VkImageLayout              currentLayout, 
     const GraphPipelineTensor& tensorBinding)
 //-----------------------------------------------------------------------------
 {
-    const auto& synchronization2_extension = GetVulkan()->GetExtension<ExtensionHelper::Ext_VK_KHR_synchronization2>();
-    assert(synchronization2_extension != nullptr);
-
     VkImageMemoryBarrier2 imageBarrierToTransfer = 
     {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -900,7 +902,7 @@ void Application::CopyImageToTensor(
         .pImageMemoryBarriers = &imageBarrierToTransfer
     };
 
-    synchronization2_extension->m_vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfo);
+    vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfo);
 
     VkBufferImageCopy copyRegion = 
     {
@@ -930,18 +932,18 @@ void Application::CopyImageToTensor(
     std::swap(imageBarrierToTransfer.srcAccessMask, imageBarrierToTransfer.dstAccessMask);
     std::swap(imageBarrierToTransfer.srcStageMask, imageBarrierToTransfer.dstStageMask);
 
-    synchronization2_extension->m_vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfo);
+    vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfo);
 }
 
 //-----------------------------------------------------------------------------
 void Application::CopyTensorToImage(
     CommandListVulkan&         cmdList,
-    TextureVulkan&             dstImage,
+    const TextureVulkan&       dstImage,
     VkImageLayout              currentLayout, 
     const GraphPipelineTensor& tensorBinding)
 //-----------------------------------------------------------------------------
 {
-    const auto& synchronization2_extension = GetVulkan()->GetExtension<ExtensionHelper::Ext_VK_KHR_synchronization2>();
+    const auto& synchronization2_extension = GetVulkan()->GetExtension<ExtensionLib::Ext_VK_KHR_synchronization2>();
     assert(synchronization2_extension != nullptr);
 
     VkImageMemoryBarrier2 imageBarrierToTransfer = 
@@ -972,7 +974,7 @@ void Application::CopyTensorToImage(
         .pImageMemoryBarriers = &imageBarrierToTransfer
     };
 
-    synchronization2_extension->m_vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfo);
+    vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfo);
 
     VkBufferImageCopy copyRegion = 
     {
@@ -1001,20 +1003,19 @@ void Application::CopyTensorToImage(
     std::swap(imageBarrierToTransfer.srcAccessMask, imageBarrierToTransfer.dstAccessMask);
     std::swap(imageBarrierToTransfer.srcStageMask, imageBarrierToTransfer.dstStageMask);
 
-    synchronization2_extension->m_vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfo);
+    vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfo);
 }
-
 
 //-----------------------------------------------------------------------------
 void Application::CopyImageToImageBlit(
-    CommandListVulkan& cmdList,
-    TextureVulkan&     srcImage,
-    VkImageLayout      srcLayout,
-    TextureVulkan&     dstImage,
-    VkImageLayout      dstFinalLayout)
+    CommandListVulkan&   cmdList,
+    const TextureVulkan& srcImage,
+    VkImageLayout        srcLayout,
+    const TextureVulkan& dstImage,
+    VkImageLayout        dstFinalLayout)
 //-----------------------------------------------------------------------------
 {
-    const auto& synchronization2_extension = GetVulkan()->GetExtension<ExtensionHelper::Ext_VK_KHR_synchronization2>();
+    const auto& synchronization2_extension = GetVulkan()->GetExtension<ExtensionLib::Ext_VK_KHR_synchronization2>();
     assert(synchronization2_extension != nullptr);
 
     VkImageMemoryBarrier2 dstBarrier = 
@@ -1045,7 +1046,7 @@ void Application::CopyImageToImageBlit(
         .pImageMemoryBarriers = &dstBarrier
     };
 
-    synchronization2_extension->m_vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfoDst);
+    vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfoDst);
 
     // Blit image
     VkImageBlit blitRegion = {};
@@ -1082,7 +1083,7 @@ void Application::CopyImageToImageBlit(
     dstBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
     dstBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
 
-    synchronization2_extension->m_vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfoDst);
+    vkCmdPipelineBarrier2KHR(cmdList.m_VkCommandBuffer, &depInfoDst);
 }
 
 
@@ -1090,10 +1091,10 @@ void Application::CopyImageToImageBlit(
 bool Application::LoadShaders()
 //-----------------------------------------------------------------------------
 {
-    m_ShaderManager = std::make_unique<ShaderManagerT<Vulkan>>(*GetVulkan());
+    m_ShaderManager = std::make_unique<ShaderManager>(*GetVulkan());
     m_ShaderManager->RegisterRenderPassNames(sRenderPassNames);
 
-    m_MaterialManager = std::make_unique<MaterialManagerT<Vulkan>>();
+    m_MaterialManager = std::make_unique<MaterialManager>(*GetVulkan());
 
     LOGI("******************************");
     LOGI("Loading Shaders...");
@@ -1101,12 +1102,12 @@ bool Application::LoadShaders()
 
     typedef std::pair<std::string, std::string> tIdAndFilename;
     for (const tIdAndFilename& i :
-            { tIdAndFilename { "Blit",  "Media\\Shaders\\Blit.json" },
-              tIdAndFilename { "SceneOpaque", "Media\\Shaders\\SceneOpaque.json" },
-              tIdAndFilename { "SceneTransparent", "Media\\Shaders\\SceneTransparent.json" }
+            { tIdAndFilename { "Blit",             "Blit.json" },
+              tIdAndFilename { "SceneOpaque",      "SceneOpaque.json" },
+              tIdAndFilename { "SceneTransparent", "SceneTransparent.json" }
             })
     {
-        if (!m_ShaderManager->AddShader(*m_AssetManager, i.first, i.second))
+        if (!m_ShaderManager->AddShader(*m_AssetManager, i.first, i.second, SHADER_DESTINATION_PATH))
         {
             LOGE("Error Loading shader %s from %s", i.first.c_str(), i.second.c_str());
             LOGI("Please verify if you have all required assets on the sample media folder");
@@ -1131,10 +1132,14 @@ bool Application::CreateRenderTargets()
     TextureFormat vkDesiredDepthFormat = pVulkan->GetBestSurfaceDepthFormat();
     TextureFormat desiredDepthFormat = vkDesiredDepthFormat;
 
-    const TextureFormat MainColorType[]       = { TextureFormat::R8G8B8_UNORM };
+    // Note: R8G8B8_UNORM is used here since that's what the upscaling model expects, if no upscaling will ever
+    // be performed, just default to the usual R8G8B8A8_SRGB format
+    // It's likely R8G8B8_UNORM isn't supported where graph pipelines aren't also supported
+    const TextureFormat MainColorType[]       = { m_IsGraphPipelinesSupported ? TextureFormat::R8G8B8_UNORM : TextureFormat::R8G8B8A8_SRGB };
     const TEXTURE_TYPE  MainTextureType[]     = { TEXTURE_TYPE::TT_RENDER_TARGET_TRANSFERSRC }; // Needed for tensor copy from operation.
     const TEXTURE_TYPE  UpscaledTextureType   = TEXTURE_TYPE::TT_CPU_UPDATE;                    // Needed for tensor copy to operation.
     const TextureFormat HudColorType[]        = { TextureFormat::R8G8B8A8_SRGB };
+    const Msaa          MSAA[]                = { Msaa::Samples1 };
 
     if (!m_RenderPassData[RP_SCENE].RenderTarget.Initialize(
         pVulkan, 
@@ -1142,14 +1147,14 @@ bool Application::CreateRenderTargets()
         m_RenderResolution.y, 
         MainColorType, 
         desiredDepthFormat, 
-        VK_SAMPLE_COUNT_1_BIT, 
         "Scene RT", 
-        MainTextureType))
+        MainTextureType, 
+        MSAA))
     {
         LOGE("Unable to create scene render target");
         return false;
     }
-    
+
     {
         CreateTexObjectInfo createInfo{};
         createInfo.uiWidth = m_UpscaledResolution.x;
@@ -1158,14 +1163,20 @@ bool Application::CreateRenderTargets()
         createInfo.Format = MainColorType[0];
         createInfo.TexType = UpscaledTextureType;
         createInfo.pName = "Upscaled RT";
-        createInfo.Msaa = VK_SAMPLE_COUNT_1_BIT;
+        createInfo.Msaa = Msaa::Samples1;
         createInfo.FilterMode = SamplerFilter::Linear;
 
         m_UpscaledImageResult = CreateTextureObject(*GetVulkan(), createInfo);
     }
 
     // Notice no depth on the HUD RT
-    if (!m_RenderPassData[RP_HUD].RenderTarget.Initialize(pVulkan, gSurfaceWidth, gSurfaceHeight, HudColorType, TextureFormat::UNDEFINED, VK_SAMPLE_COUNT_1_BIT, "HUD RT"))
+    if (!m_RenderPassData[RP_HUD].RenderTarget.Initialize(
+        pVulkan, 
+        gSurfaceWidth, 
+        gSurfaceHeight, 
+        HudColorType, 
+        TextureFormat::UNDEFINED, 
+        "HUD RT"))
     {
         LOGE("Unable to create hud render target");
         return false;
@@ -1201,43 +1212,53 @@ bool Application::InitUniforms()
 bool Application::InitAllRenderPasses()
 //-----------------------------------------------------------------------------
 {
-    Vulkan* const pVulkan = GetVulkan();
+    Vulkan& vulkan = *GetVulkan();
 
     //                                       ColorInputUsage |               ClearDepthRenderPass | ColorOutputUsage |                     DepthOutputUsage |              ClearColor
-    m_RenderPassData[RP_SCENE].PassSetup = { RenderPassInputUsage::Clear,    true,                  RenderPassOutputUsage::StoreReadOnly,  RenderPassOutputUsage::Store,   {}};
-    m_RenderPassData[RP_HUD].PassSetup   = { RenderPassInputUsage::Clear,    false,                 RenderPassOutputUsage::StoreReadOnly,  RenderPassOutputUsage::Discard, {}};
-    m_RenderPassData[RP_BLIT].PassSetup  = { RenderPassInputUsage::DontCare, true,                  RenderPassOutputUsage::Present,        RenderPassOutputUsage::Discard, {}};
+    m_RenderPassData[RP_SCENE].RenderPassSetup = { RenderPassInputUsage::Clear,    true,                  RenderPassOutputUsage::StoreReadOnly,  RenderPassOutputUsage::Store,   {}};
+    m_RenderPassData[RP_HUD].RenderPassSetup   = { RenderPassInputUsage::Clear,    false,                 RenderPassOutputUsage::StoreReadOnly,  RenderPassOutputUsage::Discard, {}};
+    m_RenderPassData[RP_BLIT].RenderPassSetup  = { RenderPassInputUsage::DontCare, true,                  RenderPassOutputUsage::Present,        RenderPassOutputUsage::Discard, {}};
 
-    TextureFormat surfaceFormat = pVulkan->m_SurfaceFormat;
-    auto swapChainColorFormat = std::span<const TextureFormat>({ &surfaceFormat, 1 });
-    auto swapChainDepthFormat = pVulkan->m_SwapchainDepth.format;
+    TextureFormat surfaceFormat = vulkan.m_SurfaceFormat;
+    auto swapChainColorFormat   = std::span<const TextureFormat>({ &surfaceFormat, 1 });
+    auto swapChainDepthFormat   = vulkan.m_SwapchainDepth.format;
 
     LOGI("******************************");
     LOGI("Initializing Render Passes... ");
     LOGI("******************************");
 
-    for (uint32_t whichPass = 0; whichPass < NUM_RENDER_PASSES; whichPass++)
+    for (uint32_t whichPass = 0; whichPass < RP_BLIT; whichPass++)
     {
-        bool isSwapChainRenderPass = whichPass == RP_BLIT;
+        std::span<const TextureFormat> colorFormats = m_RenderPassData[whichPass].RenderTarget.m_pLayerFormats;
+        TextureFormat                  depthFormat  = m_RenderPassData[whichPass].RenderTarget.m_DepthFormat;
 
-        std::span<const TextureFormat> colorFormats = isSwapChainRenderPass ? swapChainColorFormat : m_RenderPassData[whichPass].RenderTarget[0].m_pLayerFormats;
-        TextureFormat                  depthFormat  = isSwapChainRenderPass ? swapChainDepthFormat : m_RenderPassData[whichPass].RenderTarget[0].m_DepthFormat;
-
-        const auto& passSetup = m_RenderPassData[whichPass].PassSetup;
+        const auto& passSetup = m_RenderPassData[whichPass].RenderPassSetup;
+        auto& passData = m_RenderPassData[whichPass];
         
-        if (!pVulkan->CreateRenderPass(
+        RenderPass renderPass;
+        if (!vulkan.CreateRenderPass(
             { colorFormats },
             depthFormat,
-            VK_SAMPLE_COUNT_1_BIT,
+            Msaa::Samples1,
             passSetup.ColorInputUsage,
             passSetup.ColorOutputUsage,
             passSetup.ClearDepthRenderPass,
             passSetup.DepthOutputUsage,
-            & m_RenderPassData[whichPass].RenderPass))
+            renderPass))
         {
             return false;
         }
-            
+        Framebuffer<Vulkan> framebuffer;
+        framebuffer.Initialize( vulkan,
+                                renderPass,
+                                passData.RenderTarget.m_ColorAttachments,
+                                &passData.RenderTarget.m_DepthAttachment,
+                                sRenderPassNames[whichPass] );
+        passData.RenderContext.push_back({std::move(renderPass), {}/*pipeline*/, std::move(framebuffer), sRenderPassNames[whichPass]});
+    }
+    for (auto whichBuffer = 0; whichBuffer < vulkan.GetSwapchainBufferCount(); ++whichBuffer)
+    {
+        m_RenderPassData[RP_BLIT].RenderContext.push_back( {vulkan.m_SwapchainRenderPass.Copy(), {}, vulkan.GetSwapchainFramebuffer( whichBuffer ), "RP_BLIT"} );
     }
 
     return true;
@@ -1248,12 +1269,12 @@ bool Application::InitGui(uintptr_t windowHandle)
 //-----------------------------------------------------------------------------
 {
     const auto& hudRenderTarget = m_RenderPassData[RP_HUD].RenderTarget;
-    m_Gui = std::make_unique<GuiImguiGfx<Vulkan>>(*GetVulkan(), m_RenderPassData[RP_HUD].RenderPass);
-    if (!m_Gui->Initialize(windowHandle, hudRenderTarget[0].m_Width, hudRenderTarget[0].m_Height))
+    m_Gui = std::make_unique<GuiImguiGfx>(*GetVulkan(), m_RenderPassData[RP_HUD].RenderContext[0].GetRenderPass().Copy());
+    if (!m_Gui->Initialize(windowHandle, TextureFormat::R8G8B8A8_UNORM, hudRenderTarget.m_Width, hudRenderTarget.m_Height))
     {
         return false;
     }
-    
+
     return true;
 }
 
@@ -1279,12 +1300,13 @@ bool Application::LoadMeshObjects()
     LOGI("Loading and preparing the museum...");
     LOGI("***********************************");
 
-    m_TextureManager->SetDefaultFilenameManipulators(PathManipulator_PrefixDirectory{ "Media\\" }, PathManipulator_ChangeExtension{ ".ktx" });
+    m_TextureManager->SetDefaultFilenameManipulators(PathManipulator_PrefixDirectory(TEXTURE_DESTINATION_PATH));
 
-    auto* whiteTexture         = m_TextureManager->GetOrLoadTexture(*m_AssetManager, "Textures\\white_d.ktx", m_SamplerEdgeClamp);
-    auto* blackTexture         = m_TextureManager->GetOrLoadTexture(*m_AssetManager, "Textures\\black_d.ktx", m_SamplerEdgeClamp);
-    auto* normalDefaultTexture = m_TextureManager->GetOrLoadTexture(*m_AssetManager, "Textures\\normal_default.ktx", m_SamplerEdgeClamp);
-
+    const PathManipulator_PrefixDirectory prefixTextureDir{ TEXTURE_DESTINATION_PATH };
+    auto* whiteTexture         = m_TextureManager->GetOrLoadTexture("white_d.ktx", m_SamplerRepeat, prefixTextureDir);
+    auto* blackTexture         = m_TextureManager->GetOrLoadTexture("black_d.ktx", m_SamplerRepeat, prefixTextureDir);
+    auto* normalDefaultTexture = m_TextureManager->GetOrLoadTexture("normal_default.ktx", m_SamplerRepeat, prefixTextureDir);
+    
     if (!whiteTexture || !blackTexture || !normalDefaultTexture)
     {
         LOGE("Failed to load supporting textures");
@@ -1310,14 +1332,17 @@ bool Application::LoadMeshObjects()
 
     auto MaterialLoader = [&](const MeshObjectIntermediate::MaterialDef& materialDef)->std::optional<Material>
     {
-        auto* diffuseTexture           = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.diffuseFilename, m_SamplerEdgeClamp);
-        auto* normalTexture            = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.bumpFilename, m_SamplerEdgeClamp);
-        auto* emissiveTexture          = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.emissiveFilename, m_SamplerEdgeClamp);
-        auto* metallicRoughnessTexture = m_TextureManager->GetOrLoadTexture(*m_AssetManager, materialDef.specMapFilename, m_SamplerEdgeClamp);
+        const PathManipulator_PrefixDirectory prefixTextureDir{ TEXTURE_DESTINATION_PATH };
+        const PathManipulator_ChangeExtension changeTextureExt{".ktx"};
+
+        auto* diffuseTexture           = m_TextureManager->GetOrLoadTexture(materialDef.diffuseFilename, m_SamplerRepeat, prefixTextureDir, changeTextureExt);
+        auto* normalTexture            = m_TextureManager->GetOrLoadTexture(materialDef.bumpFilename, m_SamplerRepeat, prefixTextureDir, changeTextureExt);
+        auto* emissiveTexture          = m_TextureManager->GetOrLoadTexture(materialDef.emissiveFilename, m_SamplerRepeat, prefixTextureDir, changeTextureExt);
+        auto* metallicRoughnessTexture = m_TextureManager->GetOrLoadTexture(materialDef.specMapFilename, m_SamplerRepeat, prefixTextureDir, changeTextureExt);
         bool alphaCutout               = materialDef.alphaCutout;
         bool transparent               = materialDef.transparent;
 
-        const Shader* targetShader = transparent ? pSceneTransparentShader : pSceneOpaqueShader;
+        const auto* targetShader = transparent ? pSceneTransparentShader : pSceneOpaqueShader;
 
         ObjectMaterialParameters objectMaterial;
         objectMaterial.objectFragUniformData.Color.r = static_cast<float>(materialDef.baseColorFactor[0]);
@@ -1332,8 +1357,8 @@ bool Application::LoadMeshObjects()
             return std::nullopt;
         }
 
-        auto shaderMaterial = m_MaterialManager->CreateMaterial(*pVulkan, *targetShader, NUM_VULKAN_BUFFERS,
-            [&](const std::string& texName) -> const MaterialPass::tPerFrameTexInfo
+        auto shaderMaterial = m_MaterialManager->CreateMaterial(*targetShader, NUM_VULKAN_BUFFERS,
+            [&](const std::string& texName) -> const MaterialManager::tPerFrameTexInfo
             {
                 if (texName == "Diffuse")
                 {
@@ -1352,9 +1377,10 @@ bool Application::LoadMeshObjects()
                     return { metallicRoughnessTexture ? metallicRoughnessTexture : blackTexture };
                 }
 
+                assert(false);
                 return {};
             },
-            [&](const std::string& bufferName) -> tPerFrameVkBuffer
+            [&](const std::string& bufferName) -> PerFrameBufferVulkan
             {
                 if (bufferName == "Vert")
                 {
@@ -1369,6 +1395,7 @@ bool Application::LoadMeshObjects()
                     return { m_LightUniform.buf.GetVkBuffer() };
                 }
 
+                assert(false);
                 return {};
             }
             );
@@ -1380,20 +1407,19 @@ bool Application::LoadMeshObjects()
     const auto loaderFlags = 0; // No instancing
     const bool ignoreTransforms = (loaderFlags & DrawableLoader::LoaderFlags::IgnoreHierarchy) != 0;
 
-    MeshLoaderModelSceneSanityCheck meshSanityCheckProcessor(gMuseumAssetPath);
-    MeshObjectIntermediateGltfProcessor meshObjectProcessor(gMuseumAssetPath, ignoreTransforms, glm::vec3(1.0f,1.0f,1.0f));
+    const auto sceneAssetPath = std::filesystem::path(MESH_DESTINATION_PATH).append(gSceneAssetModel).string();
+    MeshLoaderModelSceneSanityCheck meshSanityCheckProcessor(sceneAssetPath);
+    MeshObjectIntermediateGltfProcessor meshObjectProcessor(sceneAssetPath, ignoreTransforms, glm::vec3(1.0f, 1.0f, 1.0f));
     CameraGltfProcessor meshCameraProcessor{};
 
-    if (!MeshLoader::LoadGltf(*m_AssetManager, gMuseumAssetPath, meshSanityCheckProcessor, meshObjectProcessor, meshCameraProcessor) ||
-        !DrawableLoader::CreateDrawables(*pVulkan,
-                                        std::move(meshObjectProcessor.m_meshObjects),
-                                        { &m_RenderPassData[RP_SCENE].RenderPass, 1 },
-                                        &sRenderPassNames[RP_SCENE],
-                                        MaterialLoader,
-                                        m_SceneDrawables,
-                                        {},    // RenderPassMultisample
-                                        loaderFlags,
-                                        {}))   // RenderPassSubpasses
+    if (!MeshLoader::LoadGltf(*m_AssetManager, sceneAssetPath, meshSanityCheckProcessor, meshObjectProcessor, meshCameraProcessor) ||
+        !DrawableLoader::CreateDrawables(
+            *pVulkan,
+            std::move(meshObjectProcessor.m_meshObjects),
+            m_RenderPassData[RP_SCENE].RenderContext,
+            MaterialLoader,
+            m_SceneDrawables,
+            loaderFlags))
     {
         LOGE("Error Loading the museum gltf file");
         LOGI("Please verify if you have all required assets on the sample media folder");
@@ -1412,12 +1438,12 @@ bool Application::LoadMeshObjects()
     LOGI("Creating Quad mesh...");
     LOGI("*********************");
 
-    MeshObject blitQuadMesh;
+    Mesh blitQuadMesh;
     MeshHelper::CreateScreenSpaceMesh(pVulkan->GetMemoryManager(), 0, &blitQuadMesh);
 
     // Blit Material
-    auto blitQuadShaderMaterial = m_MaterialManager->CreateMaterial(*pVulkan, *pBlitQuadShader, pVulkan->m_SwapchainImageCount,
-        [this](const std::string& texName) -> const MaterialPass::tPerFrameTexInfo
+    auto blitQuadShaderMaterial = m_MaterialManager->CreateMaterial(*pBlitQuadShader, pVulkan->m_SwapchainImageCount,
+        [this](const std::string& texName) -> const MaterialManager::tPerFrameTexInfo
         {
             if (texName == "Diffuse")
             {
@@ -1425,18 +1451,18 @@ bool Application::LoadMeshObjects()
             }
             else if (texName == "Overlay")
             {
-                return { &m_RenderPassData[RP_HUD].RenderTarget[0].m_ColorAttachments[0] };
+                return { &m_RenderPassData[RP_HUD].RenderTarget.GetColorAttachments()[0] };
             }
             return {};
         },
-        [this](const std::string& bufferName) -> tPerFrameVkBuffer
+        [this](const std::string& bufferName) -> PerFrameBufferVulkan
         {
             return {};
         }
         );
 
     m_BlitQuadDrawable = std::make_unique<Drawable>(*pVulkan, std::move(blitQuadShaderMaterial));
-    if (!m_BlitQuadDrawable->Init(m_RenderPassData[RP_BLIT].RenderPass, sRenderPassNames[RP_BLIT], std::move(blitQuadMesh)))
+    if (!m_BlitQuadDrawable->Init(m_RenderPassData[RP_BLIT].RenderContext[0], std::move(blitQuadMesh)))
     {
         return false;
     }
@@ -1473,14 +1499,14 @@ bool Application::InitCommandBuffers()
     m_RenderPassData[RP_BLIT].ObjectsCmdBuffer.resize(pVulkan->m_SwapchainImageCount);
 
     char szName[256];
-    const VkCommandBufferLevel CmdBuffLevel = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+    const CommandListBase::Type CmdBuffLevel = CommandListBase::Type::Secondary;
     for (uint32_t whichPass = 0; whichPass < NUM_RENDER_PASSES; whichPass++)
     {
         for (uint32_t whichBuffer = 0; whichBuffer < m_RenderPassData[whichPass].PassCmdBuffer.size(); whichBuffer++)
         {
             // The Pass Command Buffer => Primary
             sprintf(szName, "Primary (%s; Buffer %d of %d)", GetPassName(whichPass), whichBuffer + 1, NUM_VULKAN_BUFFERS);
-            if (!m_RenderPassData[whichPass].PassCmdBuffer[whichBuffer].Initialize(pVulkan, szName, VK_COMMAND_BUFFER_LEVEL_PRIMARY))
+            if (!m_RenderPassData[whichPass].PassCmdBuffer[whichBuffer].Initialize(pVulkan, szName, CommandListBase::Type::Primary))
             {
                 return false;
             }
@@ -1500,7 +1526,7 @@ bool Application::InitCommandBuffers()
         m_GraphPipelineCommandLists.resize(NUM_VULKAN_BUFFERS);
         for (auto& graphPipelineCommandList : m_GraphPipelineCommandLists)
         {
-            if (!graphPipelineCommandList.Initialize(GetVulkan(), "Graph Pipeline CMD Buffer", VK_COMMAND_BUFFER_LEVEL_PRIMARY, Vulkan::eDataGraphQueue))
+            if (!graphPipelineCommandList.Initialize(GetVulkan(), "Graph Pipeline CMD Buffer", CommandListBase::Type::Primary, Vulkan::eDataGraphQueue))
             {
                 return false;
             }
@@ -1561,8 +1587,8 @@ bool Application::BuildCmdBuffers()
         {
             auto& cmdBufer = renderPassData.ObjectsCmdBuffer[whichBuffer];
 
-            uint32_t targetWidth  = bisSwapChainRenderPass ? pVulkan->m_SurfaceWidth : renderPassData.RenderTarget[0].m_Width;
-            uint32_t targetHeight = bisSwapChainRenderPass ? pVulkan->m_SurfaceHeight : renderPassData.RenderTarget[0].m_Height;
+            uint32_t targetWidth  = bisSwapChainRenderPass ? pVulkan->m_SurfaceWidth : renderPassData.RenderTarget.GetWidth();
+            uint32_t targetHeight = bisSwapChainRenderPass ? pVulkan->m_SurfaceHeight : renderPassData.RenderTarget.GetHeight();
 
             VkViewport viewport = {};
             viewport.x          = 0.0f;
@@ -1579,11 +1605,10 @@ bool Application::BuildCmdBuffers()
             scissor.extent.height = targetHeight;
 
             // Set up some values that change based on render pass
-            VkRenderPass  whichRenderPass  = renderPassData.RenderPass;
-            VkFramebuffer whichFramebuffer = bisSwapChainRenderPass ? pVulkan->m_SwapchainBuffers[whichBuffer].framebuffer : renderPassData.RenderTarget[0].m_FrameBuffer;
+            VkFramebuffer whichFramebuffer = bisSwapChainRenderPass ? pVulkan->m_SwapchainBuffers[whichBuffer].framebuffer : renderPassData.RenderContext[0].GetFramebuffer()->m_FrameBuffer;
 
             // Objects (can render into any pass except Blit)
-            if (!cmdBufer.Begin(whichFramebuffer, whichRenderPass, bisSwapChainRenderPass))
+            if (!cmdBufer.Begin(whichFramebuffer, renderPassData.RenderContext[0].GetRenderPass(), bisSwapChainRenderPass))
             {
                 return false;
             }
@@ -1764,7 +1789,7 @@ void Application::Render(float fltDiffTime)
         {
             CopyImageToTensor(
                 m_RenderPassData[RP_SCENE].PassCmdBuffer[whichBuffer],
-                m_RenderPassData[RP_SCENE].RenderTarget.m_RenderTargets[0].m_ColorAttachments[0],
+                m_RenderPassData[RP_SCENE].RenderTarget.GetColorAttachments()[0],
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 m_InputTensor);
         }
@@ -1772,7 +1797,7 @@ void Application::Render(float fltDiffTime)
         {
             CopyImageToImageBlit(
                 m_RenderPassData[RP_SCENE].PassCmdBuffer[whichBuffer], 
-                m_RenderPassData[RP_SCENE].RenderTarget.m_RenderTargets[0].m_ColorAttachments[0], 
+                m_RenderPassData[RP_SCENE].RenderTarget.GetColorAttachments()[0], 
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 m_UpscaledImageResult,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -1787,9 +1812,6 @@ void Application::Render(float fltDiffTime)
     // Data Graph preparation + dispatch for Upscaling
     if (isUpscalingActive)
     {
-        const auto& data_graph_extension = GetVulkan()->GetExtension<ExtensionHelper::Ext_VK_ARM_data_graph>();
-        assert(data_graph_extension != nullptr);
-
         m_GraphPipelineCommandLists[whichBuffer].Begin();
 
         vkCmdBindPipeline(
@@ -1811,7 +1833,7 @@ void Application::Render(float fltDiffTime)
         dispatchInfo.sType = VK_STRUCTURE_TYPE_DATA_GRAPH_PIPELINE_DISPATCH_INFO_ARM;
         dispatchInfo.flags = 0;
 
-        data_graph_extension->m_vkCmdDispatchDataGraphARM(
+        vkCmdDispatchDataGraphARM(
             m_GraphPipelineCommandLists[whichBuffer].m_VkCommandBuffer, 
             m_GraphPipelineInstance.graphSession,
             &dispatchInfo);
@@ -1828,7 +1850,7 @@ void Application::Render(float fltDiffTime)
     if (m_Gui)
     {
         // Render gui (has its own command buffer, optionally returns vk_null_handle if not rendering anything)
-        guiCommandBuffer = GetGui()->Render(whichBuffer, m_RenderPassData[RP_HUD].RenderTarget[0].m_FrameBuffer);
+        guiCommandBuffer = GetGui()->Render(whichBuffer, m_RenderPassData[RP_HUD].RenderContext[0].GetFramebuffer()->m_FrameBuffer);
         if (guiCommandBuffer != VK_NULL_HANDLE)
         {
             BeginRenderPass(whichBuffer, RP_HUD, currentVulkanBuffer.swapchainPresentIdx);
@@ -1909,10 +1931,10 @@ void Application::BeginRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, u
     switch (whichPass)
     {
     case RP_SCENE:
-        framebuffer = m_RenderPassData[whichPass].RenderTarget[0].m_FrameBuffer;
+        framebuffer = m_RenderPassData[whichPass].RenderContext[0].GetFramebuffer()->m_FrameBuffer;
         break;
     case RP_HUD:
-        framebuffer = m_RenderPassData[whichPass].RenderTarget[0].m_FrameBuffer;
+        framebuffer = m_RenderPassData[whichPass].RenderContext[0].GetFramebuffer()->m_FrameBuffer;
         break;
     case RP_BLIT:
         framebuffer = pVulkan->m_SwapchainBuffers[WhichSwapchainImage].framebuffer;
@@ -1927,16 +1949,16 @@ void Application::BeginRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, u
     VkRect2D passArea = {};
     passArea.offset.x = 0;
     passArea.offset.y = 0;
-    passArea.extent.width  = bisSwapChainRenderPass ? pVulkan->m_SurfaceWidth  : renderPassData.RenderTarget[0].m_Width;
-    passArea.extent.height = bisSwapChainRenderPass ? pVulkan->m_SurfaceHeight : renderPassData.RenderTarget[0].m_Height;
+    passArea.extent.width  = bisSwapChainRenderPass ? pVulkan->m_SurfaceWidth  : renderPassData.RenderTarget.GetWidth();
+    passArea.extent.height = bisSwapChainRenderPass ? pVulkan->m_SurfaceHeight : renderPassData.RenderTarget.GetHeight();
 
     TextureFormat                  swapChainColorFormat = pVulkan->m_SurfaceFormat;
     auto                           swapChainColorFormats = std::span<const TextureFormat>({ &swapChainColorFormat, 1 });
     TextureFormat                  swapChainDepthFormat = pVulkan->m_SwapchainDepth.format;
-    std::span<const TextureFormat> colorFormats         = bisSwapChainRenderPass ? swapChainColorFormats : m_RenderPassData[whichPass].RenderTarget[0].m_pLayerFormats;
-    TextureFormat                  depthFormat          = bisSwapChainRenderPass ? swapChainDepthFormat : m_RenderPassData[whichPass].RenderTarget[0].m_DepthFormat;
+    std::span<const TextureFormat> colorFormats         = bisSwapChainRenderPass ? swapChainColorFormats : m_RenderPassData[whichPass].RenderTarget.GetLayerFormats();
+    TextureFormat                  depthFormat          = bisSwapChainRenderPass ? swapChainDepthFormat : m_RenderPassData[whichPass].RenderTarget.GetDepthFormat();
 
-    VkClearColorValue clearColor = { renderPassData.PassSetup.ClearColor[0], renderPassData.PassSetup.ClearColor[1], renderPassData.PassSetup.ClearColor[2], renderPassData.PassSetup.ClearColor[3] };
+    VkClearColorValue clearColor = { renderPassData.RenderPassSetup.ClearColor[0], renderPassData.RenderPassSetup.ClearColor[1], renderPassData.RenderPassSetup.ClearColor[2], renderPassData.RenderPassSetup.ClearColor[3] };
 
     m_RenderPassData[whichPass].PassCmdBuffer[whichBuffer].BeginRenderPass(
         passArea,
@@ -1945,7 +1967,7 @@ void Application::BeginRenderPass(uint32_t whichBuffer, RENDER_PASS whichPass, u
         { &clearColor , 1 },
         (uint32_t)colorFormats.size(),
         depthFormat != TextureFormat::UNDEFINED,
-        m_RenderPassData[whichPass].RenderPass,
+        m_RenderPassData[whichPass].RenderContext[0].GetRenderPass(),
         bisSwapChainRenderPass,
         framebuffer,
         VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -13,14 +13,9 @@
 #include "system/os_common.h"
 
 // Bring in the timestamp (and assign to a variable)
-// Temporary fix for Android not building the timestamp, upstream cmake update will fix this in a future update
-#if defined(_WIN32)
-#include "../../project/buildtimestamp.h"
-#else
-#define BUILD_TIMESTAMP "UNDEFINED"
-#endif
-
-const char* const FrameworkApplicationBase::sm_BuildTimestamp = BUILD_TIMESTAMP;
+//#include "../../project/buildtimestamp.h"
+//const char* const FrameworkApplicationBase::sm_BuildTimestamp = BUILD_TIMESTAMP;
+const char* const FrameworkApplicationBase::sm_BuildTimestamp = "";
 
 
 //#########################################################
@@ -29,20 +24,20 @@ const char* const FrameworkApplicationBase::sm_BuildTimestamp = BUILD_TIMESTAMP;
 // ************************************
 // General Settings
 // ************************************
-VAR(uint32_t, gSurfaceWidth, 1920, kVariableNonpersistent);
-VAR(uint32_t, gSurfaceHeight, 1080, kVariableNonpersistent);
+VAR(uint32_t, gSurfaceWidth, 1280, kVariableNonpersistent);
+VAR(uint32_t, gSurfaceHeight, 720, kVariableNonpersistent);
 
-VAR(uint32_t, gRenderWidth, 1920, kVariableNonpersistent);
-VAR(uint32_t, gRenderHeight, 1080, kVariableNonpersistent);
+VAR(uint32_t, gRenderWidth, 1280, kVariableNonpersistent);
+VAR(uint32_t, gRenderHeight, 720, kVariableNonpersistent);
 
-VAR(uint32_t, gReflectMapWidth, 1920, kVariableNonpersistent);
-VAR(uint32_t, gReflectMapHeight, 1080, kVariableNonpersistent);
+VAR(uint32_t, gReflectMapWidth, 1280/2, kVariableNonpersistent);
+VAR(uint32_t, gReflectMapHeight, 720/2, kVariableNonpersistent);
 
 VAR(uint32_t, gShadowMapWidth, 1024, kVariableNonpersistent);
 VAR(uint32_t, gShadowMapHeight, 1024, kVariableNonpersistent);
 
-VAR(uint32_t, gHudRenderWidth, 1920, kVariableNonpersistent);
-VAR(uint32_t, gHudRenderHeight, 1080, kVariableNonpersistent);
+VAR(uint32_t, gHudRenderWidth, 1280, kVariableNonpersistent);
+VAR(uint32_t, gHudRenderHeight, 720, kVariableNonpersistent);
 
 VAR(float,    gFixedFrameRate, 0.0f, kVariableNonpersistent);
 
@@ -77,7 +72,7 @@ FrameworkApplicationBase::FrameworkApplicationBase()
     m_WindowWidth = 0;
     m_WindowHeight = 0;
 
-    LOGI("Application build time: %s", sm_BuildTimestamp);
+    //LOGI("Application build time: %s", sm_BuildTimestamp);
 }
 
 //-----------------------------------------------------------------------------
@@ -111,7 +106,7 @@ void FrameworkApplicationBase::SetConfigFilename(const std::string& filename)
 bool FrameworkApplicationBase::LoadConfigFile()
 //-----------------------------------------------------------------------------
 {
-    const std::string ConfigFileFallbackPath = std::string("Media\\") + m_ConfigFilename;
+    const std::string ConfigFileFallbackPath = std::string("build\\Media\\") + m_ConfigFilename;
     LOGI("Loading Configuration File: %s", m_ConfigFilename.c_str());
     std::string configFile;
     if (!m_AssetManager->LoadFileIntoMemory(m_ConfigFilename, configFile ) &&

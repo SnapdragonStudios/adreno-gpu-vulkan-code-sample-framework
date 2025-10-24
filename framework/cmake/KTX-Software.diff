@@ -1,0 +1,40 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 5e239daf..e6b93a3f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -217,7 +217,8 @@ if(MSVC)
+     add_compile_options($<$<VERSION_GREATER_EQUAL:${CMAKE_CXX_COMPILER_VERSION},19.16>:/W4>)
+     add_compile_options( $<IF:$<CONFIG:Debug>,/Gz,/O2> )
+ elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU"
+-       OR ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
++       OR ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"
++       OR ${CMAKE_CXX_COMPILER_ID} MATCHES "AppleClang")
+     add_compile_options(-Wall -Wextra)
+     add_compile_options( $<IF:$<CONFIG:Debug>,-O0,-O3> )
+     if(EMSCRIPTEN)
+diff --git a/cmake/cputypetest.cmake b/cmake/cputypetest.cmake
+index 31d38882..119533c5 100644
+--- a/cmake/cputypetest.cmake
++++ b/cmake/cputypetest.cmake
+@@ -1,7 +1,7 @@
+ # Copyright 2016, Simon Werta (@webmaster128).
+ # SPDX-License-Identifier: Apache-2.0
+ 
+-cmake_minimum_required(VERSION 2.8.12)
++cmake_minimum_required(VERSION 3.6)
+ 
+ set(cputypetest_code "
+ //
+diff --git a/cmake/version.cmake b/cmake/version.cmake
+index f9f20015..ce8c5532 100644
+--- a/cmake/version.cmake
++++ b/cmake/version.cmake
+@@ -148,7 +148,7 @@ else()
+             set(KTX_VERSION_PATCH "0")
+         endif()
+     else()
+-        message(WARNING "Error retrieving version from GIT tag. Falling back to 0.0.0-noversion ")
++        #message(WARNING "Error retrieving version from GIT tag. Falling back to 0.0.0-noversion ")
+         set(KTX_VERSION_MAJOR "0" )
+         set(KTX_VERSION_MINOR "0" )
+         set(KTX_VERSION_PATCH "0" )

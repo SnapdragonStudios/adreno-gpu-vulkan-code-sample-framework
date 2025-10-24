@@ -20,29 +20,48 @@ endif()
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_ROOT_DIR}/cmake)
 
 #
-# Add in the contents of 'shaders' directory
-#
-include(AddShadersDir)
-
-#
 # Do all the build steps for a Framework application.
 # needs Framework_dir and project_name variables.
 #
 include(FrameworkApplicationHelper)
 
 #
+# Setup asset source and target folders
+#
+
+# cmake will use our GameSampleAssets (default for no parameter) as root directory for any asset request (see FrameworkApplicationHelper.cmake for more info)
+inject_root_asset_path()
+
+# Register local variables for asset request, while also defining them in the C++ code for easy access
+# Here we use the default destionation paths, all defined at FrameworkApplicationHelper.cmake
+register_local_asset_path(SHADER_DESTINATION  "${DEFAULT_LOCAL_SHADER_DESTINATION}")
+register_local_asset_path(MESH_DESTINATION    "${DEFAULT_LOCAL_MESH_DESTINATION}")
+register_local_asset_path(TEXTURE_DESTINATION "${DEFAULT_LOCAL_TEXTURE_DESTINATION}")
+register_local_asset_path(MISC_DESTINATION    "${DEFAULT_LOCAL_MISC_DESTINATION}")
+
+#
+# Add in the contents of 'shaders' directory
+#
+include(AddShadersDir)
+
+# Search and include all project shaders
+scan_for_shaders()
+
+#
 # Copy required models to local folders
 #
 include(ModelPackager)
 
-# Museum GLTF
-add_gltf(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/Museum/Museum)
+# Scene GLTF
+add_gltf(scenes/SteamPunkSauna/SteamPunkSauna.gltf)
 
 #
 # Convert and copy textures to local folders
 #
 include(TexturePackager)
 
-# Textures
-add_textures_from_path(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/scenes/Museum/Textures)
-add_textures_from_path(${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures)
+# Scene Textures
+add_textures_from_path(scenes/SteamPunkSauna UASTC)
+
+# Supporting Textures
+add_textures_from_path(textures)

@@ -1,0 +1,7 @@
+external
+
+# executables (linux)
+ktxinfo
+libktx.so.0.0.0
+toktx
+

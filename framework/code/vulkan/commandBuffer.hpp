@@ -1,80 +1,93 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
 #include <string>
-//#include <assert.h>
-//#include <stdlib.h>
-//#include <sstream>
-//#include <array>
-//#include <span>
-//#include "vulkan/vulkan.hpp"
-//#include "vulkan/TextureFuncts.h"
-//#include "texture/vulkan/texture.hpp"
-//#include "material/vulkan/shaderModule.hpp"
-//
-//#include "system/os_common.h"
-//
 
 // Need the vulkan wrapper
 #include "vulkan.hpp"
 #include "graphicsApi/commandList.hpp"
 
-//class TimerPoolBase;
-//typedef uint64_t VkFlags64;
-//typedef VkFlags64 VkPipelineStageFlags2;
-//typedef VkPipelineStageFlags2 VkPipelineStageFlags2KHR;
-
 // Forward declarations
-class CRenderTarget;
 class Vulkan;
+class RenderPassClearData;
 class TimerPoolBase;
 class SemaphoreWait;
 class SemaphoreSignal;
 
-template<class T_GFXAPI> class CommandListT;
-using CommandListVulkan = CommandListT<Vulkan>;
-using Wrap_VkCommandBuffer = CommandListT<Vulkan>;  // legacy name
+template<class T_GFXAPI> class CommandList;
+using CommandListVulkan = CommandList<Vulkan>;
+template<class T_GFXAPI> class Framebuffer;
+template<class T_GFXAPI> class RenderTarget;
+template<class T_GFXAPI> class RenderContext;
+
 
 ///
 /// Wrapper around VkCommandBuffer.
 /// Simplifies creation, use and destruction of VkCommandBuffer.
 /// 
 template<>
-class CommandListT<Vulkan> : public CommandList
+class CommandList<Vulkan> final : public CommandListBase
 {
-    CommandListT(const CommandListT<Vulkan>&) = delete;
-    CommandListT<Vulkan>& operator=(const CommandListT<Vulkan>&) = delete;
+    CommandList(const CommandList<Vulkan>&) = delete;
+    CommandList<Vulkan>& operator=(const CommandList<Vulkan>&) = delete;
     // Functions
 public:
-    CommandListT() noexcept;
-    ~CommandListT();
-    CommandListT(CommandListT<Vulkan>&&) noexcept;
-    CommandListT<Vulkan>& operator=(CommandListT<Vulkan>&&) noexcept;
+    CommandList() noexcept;
+    ~CommandList();
+    CommandList(CommandList<Vulkan>&&) noexcept;
+    CommandList<Vulkan>& operator=(CommandList<Vulkan>&&) noexcept;
+    
+    // Curtesty
+    operator VkCommandBuffer() const { return m_VkCommandBuffer; }
 
-    bool Initialize(Vulkan* pVulkan, const std::string& Name = {}, VkCommandBufferLevel CmdBuffLevel = VK_COMMAND_BUFFER_LEVEL_PRIMARY, uint32_t QueueIndex = Vulkan::eGraphicsQueue, TimerPoolBase* pTimerPool = nullptr);
+    bool Initialize(Vulkan* pVulkan, const std::string& Name = {}, CommandListBase::Type CmdBuffType = Type::Primary, uint32_t QueueIndex = Vulkan::eGraphicsQueue, TimerPoolBase* pTimerPool = nullptr);
     //bool Initialize(Vulkan* pVulkan, const std::string& Name, VkCommandBufferLevel CmdBuffLevel, std::same_as<bool> auto QueueIndex, TimerPoolBase* pTimerPool = nullptr) = delete;
-    bool Reset();
 
     // Begin primary command buffer
     bool Begin(VkCommandBufferUsageFlags CmdBuffUsage = 0);
-    // Begin secondary command buffer (with inheritance)
+    // Begin command buffer
+    bool Begin(const VkCommandBufferBeginInfo& CmdBeginInfo);
+
+    // Begin secondary command buffer with inheritance
     bool Begin(VkFramebuffer FrameBuffer, VkRenderPass RenderPass, bool IsSwapChainRenderPass = false, uint32_t SubPass = 0, VkCommandBufferUsageFlags CmdBuffUsage = 0);
+    // Begin secondary command buffer with inheritance
+    bool Begin(VkFramebuffer FrameBuffer, const RenderPass<Vulkan>& RenderPass, bool IsSwapChainRenderPass = false, uint32_t SubPass = 0, VkCommandBufferUsageFlags CmdBuffUsage = 0);
+    // Begin secondary command buffer with inheritance
+    bool Begin(const Framebuffer<Vulkan>& FrameBuffer, const RenderPass<Vulkan>& RenderPass, bool IsSwapChainRenderPass = false, uint32_t SubPass = 0, VkCommandBufferUsageFlags CmdBuffUsage = 0);
+    // Begin secondary command buffer (dynamic rendering)
+    bool Begin(const VkCommandBufferInheritanceRenderingInfo& DynamicRenderingInheritanceInfo, VkCommandBufferUsageFlags CmdBuffUsage);
+    // Begin secondary command buffer with inheritance
+    bool Begin(const RenderContext<Vulkan>& RenderContext, VkCommandBufferUsageFlags CmdBuffUsage = 0 );
 
     bool BeginRenderPass(VkRect2D RenderExtent, float MinDepth, float MaxDepth, const std::span<const VkClearColorValue> ClearColors, uint32_t NumColorBuffers, bool HasDepth, VkRenderPass RenderPass, bool IsSwapChainRenderPass, VkFramebuffer FrameBuffer, VkSubpassContents SubContents = VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
-    bool BeginRenderPass(const CRenderTarget& renderTarget, VkRenderPass RenderPass, VkSubpassContents SubContents);
-    bool NextSubpass( VkSubpassContents SubContents = VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS );
+    bool BeginRenderPass(VkRect2D RenderExtent, float MinDepth, float MaxDepth, const std::span<const VkClearColorValue> ClearColors, uint32_t NumColorBuffers, bool HasDepth, const RenderPass<Vulkan>& RenderPass, bool IsSwapChainRenderPass, VkFramebuffer FrameBuffer, VkSubpassContents SubContents = VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+    bool BeginRenderPass(const RenderTarget<Vulkan>& renderTarget, VkRenderPass RenderPass, VkSubpassContents SubContents);
+    bool BeginRenderPass(const RenderTarget<Vulkan>& renderTarget, const RenderPass<Vulkan>& RenderPass, VkSubpassContents SubContents);
+    bool BeginRenderPass(const Framebuffer<Vulkan>& Framebuffer, const RenderPass<Vulkan>& RenderPass, const RenderPassClearData& RenderPassClearData, VkSubpassContents SubContents);
+    bool BeginRenderPass(const VkRenderPassBeginInfo&, VkSubpassContents SubContents);
+    bool BeginSwapchainRenderPass(uint32_t SwapchainImageIndex, const RenderPass<Vulkan>& RenderPass, const RenderPassClearData& RenderPassClearData, VkSubpassContents SubContents);
+    bool BeginRenderPass(const RenderContext<Vulkan>& renderContext, VkSubpassContents SubContents = VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+    void BeginRenderPass(const VkRenderingInfo& renderingInfo); // dynamic rendering
+    bool NextSubpass(VkSubpassContents SubContents = VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
     bool EndRenderPass();
 
     int StartGpuTimer(const std::string_view& timerName);
     void StopGpuTimer(int timerId);
 
+    /// Execute contents of the supplied command buffer (must be a secondary command buffer)
+    void ExecuteCommands( const CommandList<Vulkan>& secondaryCommands );
+    void ExecuteCommands( VkCommandBuffer );
+
     bool End();
+
+    /// @brief Get command list ready for re-recording
+    bool Reset();
 
     /// @brief Call vkQueueSubmit for this command buffer.
     /// Will submit to the compute or graphics queue (depending on m_QueueIndex).
@@ -110,18 +123,12 @@ public:
     void QueueSubmit( const Vulkan::BufferIndexAndFence& CurrentVulkanBuffer, VkSemaphore renderCompleteSemaphore ) const;
 
     /// @brief Release the Vulkan resources used by this wrapper and cleanup.
-    void Release();
+    void Release() override;
 
 private:
 
     // Attributes
 public:
-    std::string         m_Name;
-
-    uint32_t            m_NumDrawCalls = 0;
-    uint32_t            m_NumTriangles = 0;
-
-    bool                m_IsPrimary = true;
     uint32_t            m_QueueIndex = 0;
     VkCommandBuffer     m_VkCommandBuffer = VK_NULL_HANDLE;
     TimerPoolBase*      m_GpuTimerPool = nullptr;

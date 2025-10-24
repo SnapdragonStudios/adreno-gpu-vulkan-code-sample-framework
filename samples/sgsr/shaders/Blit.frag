@@ -20,9 +20,8 @@ layout(set = 0, binding = SHADER_OVERLAY_TEXTURE_LOC) uniform sampler2D u_Overla
 
 // Varying's
 layout (location = 0) in vec2   v_TexCoord;
-layout (location = 1) in vec4   v_VertColor;
 
-// Finally, the output color
+// Output color
 layout (location = 0) out vec4 FragColor;
 
 
@@ -37,9 +36,6 @@ void main()
     // ********************************
     // Get base color from the color texture
     vec4 DiffuseColor = texture( u_DiffuseTex, LocalTexCoord.xy );
-
-    // Multiply by vertex color.
-    DiffuseColor.xyzw *= v_VertColor.xyzw;
 
     // Apply darkening/lightening control
     // float lerp01 = min(1,FragCB.Diffuse);

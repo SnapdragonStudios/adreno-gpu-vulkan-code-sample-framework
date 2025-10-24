@@ -1,14 +1,16 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #include "postProcessStandard.hpp"
 #include "imgui/imgui.h"
-#include "material/materialManager.hpp"
-#include "material/drawable.hpp"
+#include "material/vulkan/drawable.hpp"
+#include "material/vulkan/material.hpp"
+#include "material/vulkan/materialManager.hpp"
+#include "vulkan/renderPass.hpp"
 #include "material/shader.hpp"
 #include "mesh/meshHelper.hpp"
 #include "system/os_common.h"
@@ -25,7 +27,7 @@ PostProcessStandard::~PostProcessStandard()
     ReleaseUniformBuffer(&m_Vulkan, m_FragUniform);
 }
 
-bool PostProcessStandard::Init(const Shader& shader, MaterialManagerT<Vulkan>& materialManager, VkRenderPass blitRenderPass, std::span<const TextureT<Vulkan>> diffuseRenderTargets, TextureT<Vulkan>* bloomRenderTarget, TextureT<Vulkan>* uiRenderTarget)
+bool PostProcessStandard::Init(const Shader<Vulkan>& shader, MaterialManager<Vulkan>& materialManager, const RenderPass<Vulkan>& blitRenderPass, std::span<const Texture<Vulkan>> diffuseRenderTargets, Texture<Vulkan>* bloomRenderTarget, Texture<Vulkan>* uiRenderTarget)
 {
     assert(!diffuseRenderTargets.empty());
     assert(bloomRenderTarget);
@@ -42,8 +44,8 @@ bool PostProcessStandard::Init(const Shader& shader, MaterialManagerT<Vulkan>& m
     Mesh<Vulkan> blitMesh;
     MeshHelper::CreateScreenSpaceMesh(m_Vulkan.GetMemoryManager(), 0, &blitMesh);
 
-    auto blitShaderMaterial = materialManager.CreateMaterial(m_Vulkan, shader, NUM_VULKAN_BUFFERS,
-        [&](const std::string& texName) -> const MaterialManagerT<Vulkan>::tPerFrameTexInfo {
+    auto blitShaderMaterial = materialManager.CreateMaterial(shader, NUM_VULKAN_BUFFERS,
+        [&](const std::string& texName) -> const MaterialManager<Vulkan>::tPerFrameTexInfo {
             if (texName == "Diffuse") {
                 return { diffuseRenderTargets.data() };
             }
@@ -56,14 +58,14 @@ bool PostProcessStandard::Init(const Shader& shader, MaterialManagerT<Vulkan>& m
             assert(0);
             return {};
         },
-        [this](const std::string& bufferName) -> tPerFrameVkBuffer {
+        [this](const std::string& bufferName) -> PerFrameBufferVulkan {
             //BlitFragCB
-            return { m_FragUniform.vkBuffers.begin(), m_FragUniform.vkBuffers.end() };
+            return { m_FragUniform.bufferHandles };
         }
         );
 
     m_Drawable = std::make_unique<Drawable>(m_Vulkan, std::move(blitShaderMaterial));
-    if (!m_Drawable->Init(blitRenderPass, "RP_BLIT", std::move(blitMesh)))
+    if (!m_Drawable->Init( blitRenderPass, {}, "RP_BLIT", std::move( blitMesh ) ))
     {
         return false;
     }
@@ -132,7 +134,7 @@ void PostProcessStandard::Save(Json& json) const
     json = Json(*this);
 }
 
-const Drawable* const PostProcessStandard::GetDrawable() const
+const Drawable<Vulkan>* const PostProcessStandard::GetDrawable() const
 {
     return m_Drawable.get();
 }

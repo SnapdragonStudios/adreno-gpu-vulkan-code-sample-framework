@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -13,15 +13,21 @@
 
 // Forward declarations
 class Vulkan;
-class Drawable;
-class Computable;
+class ComputableBase;
+template<typename T_GFXAPI> class Drawable;
 using Json = nlohmann::json;
 
 /// @brief Base class for Post Process classes.
 /// Roughly defines interface for a post processing class that does the final compositing of output image (generally using a fullscreen shader pass).
-/// 
+///
+template<typename T_GFXAPI>
 class PostProcess
 {
+protected:
+    using Drawable = Drawable<T_GFXAPI>;
+    PostProcess(const PostProcess&) = delete;
+    PostProcess& operator=(const PostProcess&) = delete;
+    PostProcess() noexcept = default;
 public:
     virtual ~PostProcess() = 0;
 
@@ -32,7 +38,8 @@ public:
     virtual void UpdateGui() {};
 
     virtual const Drawable* const GetDrawable() const { return nullptr; }
-    virtual const Computable* const GetComputable() const { return nullptr; }
+    virtual const ComputableBase* const GetComputable() const { return nullptr; }
 };
 
-inline PostProcess::~PostProcess() {}
+template<typename T_GFXAPI>
+inline PostProcess< T_GFXAPI>::~PostProcess() {}

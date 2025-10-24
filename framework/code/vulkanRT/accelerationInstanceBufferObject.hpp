@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -14,7 +14,7 @@
 // forward declarations
 
 // Class
-class AccelerationInstanceBufferObject : public BufferT<Vulkan>
+class AccelerationInstanceBufferObject : public Buffer<Vulkan>
 {
     AccelerationInstanceBufferObject& operator=(const AccelerationInstanceBufferObject&) = delete;
     AccelerationInstanceBufferObject(const AccelerationInstanceBufferObject&) = delete;

@@ -1,14 +1,14 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
 // Forward declarations
-class DescriptorSetLayout;
+class DescriptorSetLayoutBase;
 
 
 /// Simple wrapper around VkPipelineLayout or RootSignature.
@@ -25,5 +25,5 @@ public:
 	PipelineLayout(PipelineLayout<T_GFXAPI>&&) noexcept = delete;
 	~PipelineLayout() = delete;
 
-    static_assert(sizeof(PipelineLayout<T_GFXAPI>) >= 1);   // Ensure this class template is specialized (and not used as-is)
+    static_assert(sizeof(PipelineLayout<T_GFXAPI>) >= 1, "Must use the specialized version of this class.  Your are likely missing #include \"material/<GFXAPI>/pipelineLayout.hpp\"");   // Ensure this class template is specialized (and not used as-is)
 };

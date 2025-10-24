@@ -25,6 +25,12 @@
             "examples": [ "vulkan1.1", "spirv1.4" ],
             "minLength": 1
         },
+        "Stage": {
+            "type": "string",
+            "description": "uses specified stage rather than parsing the file extension",
+            "examples": [ "frag", "vert", "tesc", "tese", "geom", "or", "comp" ],
+            "minLength": 1
+        },
         "$schema": {
             "type": "string"
         }

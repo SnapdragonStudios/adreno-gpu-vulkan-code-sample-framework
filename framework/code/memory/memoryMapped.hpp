@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -17,38 +17,32 @@ template<class T_GFXAPI> class MemoryAllocation;
 
 /// Wraps the VMA or D3D12MA allocation handle.  Represents an allocation out of 'gpu' memory.  Cannot be copied (only moved) - single owner.
 /// Passed around between whomever is 'owner' of the allocation (when mapping etc)
+/// Expected for this class to be specialized for each graphics api.
 /// @ingroup Memory
 template<typename T_GFXAPI>
 class MemoryAllocation final
 {
-    friend class MemoryManager<T_GFXAPI>;
 public:
-    MemoryAllocation(const MemoryAllocation&) = delete;
-    MemoryAllocation& operator=(const MemoryAllocation&) = delete;
-    MemoryAllocation() noexcept {}
-    MemoryAllocation(MemoryAllocation&& other) noexcept;
-    MemoryAllocation& operator=(MemoryAllocation&& other) noexcept;
-    ~MemoryAllocation() { assert(!allocation); }	// protect accidental deletion (leak)
-    explicit operator bool() const { return allocation != nullptr; }
-private:
-    void clear() { allocation = nullptr; }
-    void* allocation = nullptr;             // anonymous handle (gpx api specific)
+    MemoryAllocation() noexcept {}       // This class is expected to be specialized!
+    ~MemoryAllocation() = delete;        // This class is expected to be specialized!
+protected:
+    static_assert(sizeof( MemoryAllocation<T_GFXAPI> ) >= 1);   // Ensure this class template is specialized (and not used as-is).  Maybe the correct #include is not being pulled in!
 };
 
 
 /// Represents a memory block allocated on the gfx device and that has an associated buffer/resource handle alongside the allocation
-/// @tparam T_VKTYPE underlying buffer/resource type - eg VkImage or VkBuffer on Vulkan
+/// @tparam T_BUFFERTYPE underlying buffer/resource type - eg VkImage or VkBuffer on Vulkan
 /// @ingroup Memory
-template<typename T_GFXAPI, typename T_VKTYPE /*VkImage or VkBuffer*/>
+template<typename T_GFXAPI, typename T_BUFFERTYPE /*VkImage or VkBuffer or ID3D12Resource*/>
 class MemoryAllocatedBuffer
 {
-    MemoryAllocatedBuffer(const MemoryAllocatedBuffer<T_GFXAPI, T_VKTYPE>&) = delete;
-    MemoryAllocatedBuffer& operator=(const MemoryAllocatedBuffer<T_GFXAPI, T_VKTYPE>&) = delete;
+    MemoryAllocatedBuffer(const MemoryAllocatedBuffer<T_GFXAPI, T_BUFFERTYPE>&) = delete;
+    MemoryAllocatedBuffer& operator=(const MemoryAllocatedBuffer<T_GFXAPI, T_BUFFERTYPE>&) = delete;
 public:
     friend class MemoryManager<T_GFXAPI>;
     // Restrict MemoryAllocatedBuffer to not be duplicated and not accidentally deleted (leaking memory).
-    MemoryAllocatedBuffer(MemoryAllocatedBuffer<T_GFXAPI, T_VKTYPE>&& other) noexcept;
-    MemoryAllocatedBuffer& operator=(MemoryAllocatedBuffer<T_GFXAPI, T_VKTYPE>&& other) noexcept;
+    MemoryAllocatedBuffer(MemoryAllocatedBuffer<T_GFXAPI, T_BUFFERTYPE>&& other) noexcept;
+    MemoryAllocatedBuffer& operator=(MemoryAllocatedBuffer<T_GFXAPI, T_BUFFERTYPE>&& other) noexcept;
     MemoryAllocatedBuffer() noexcept {}
     explicit operator bool() const { return static_cast<bool>(allocation); }
 private:
@@ -92,26 +86,6 @@ MemoryCpuMappedUntyped<T_GFXAPI>::MemoryCpuMappedUntyped(MemoryCpuMappedUntyped<
     , mCpuLocation(other.mCpuLocation)
 {
     other.mCpuLocation = nullptr;
-}
-
-//
-// MemoryAllocation implementation
-//
-template<typename T_GFXAPI>
-MemoryAllocation<T_GFXAPI>::MemoryAllocation(MemoryAllocation<T_GFXAPI>&& other) noexcept
-{
-    allocation = other.allocation;
-    other.allocation = nullptr;
-}
-
-template<typename T_GFXAPI>
-MemoryAllocation<T_GFXAPI>& MemoryAllocation<T_GFXAPI>::operator=(MemoryAllocation<T_GFXAPI>&& other) noexcept
-{
-    if (&other != this) {
-        allocation = other.allocation;
-        other.allocation = nullptr;
-    }
-    return *this;
 }
 
 //

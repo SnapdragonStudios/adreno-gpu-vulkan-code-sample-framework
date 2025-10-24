@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -66,4 +66,6 @@ public:
     /// Log the results from a collection of timers (logs using LOGI)
     void Log(const tTimers& timers) const;
     void Log2( const TimerPoolSimple::tTimers& timers ) const;
+    /// Take a snapshot of the current timer pool and reset the cumulative counters
+    TimerPoolSimple::tTimers SnapshotAndReset();
 };

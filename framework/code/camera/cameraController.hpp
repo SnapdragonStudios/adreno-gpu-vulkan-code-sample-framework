@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -24,6 +24,7 @@ public:
     virtual void TouchDownEvent(int iPointerID, float xPos, float yPos) {}
     virtual void TouchMoveEvent(int iPointerID, float xPos, float yPos) {}
     virtual void TouchUpEvent(int iPointerID, float xPos, float yPos) {}
+    virtual void TouchDoubleClickEvent(int iPointerID) {}
 
     /// Set screen size (for mouse events)
     void    SetSize(uint32_t width, uint32_t height);
@@ -38,7 +39,8 @@ public:
     /// @param frameTime time in seconds since last Update.
     /// @param position in - current camera position, out - camera position after applying controller
     /// @param rot in - current camera rotation, out - camera rotation after applying controller
-    virtual void Update(float frameTime, glm::vec3& position, glm::quat& rot) = 0;
+    /// @param cut in - current camera cut, out - camera cut after applying controller
+    virtual void Update(float frameTime, glm::vec3& position, glm::quat& rot, bool& cut) = 0;
 
 protected:
     enum KeysDownBits {
@@ -48,7 +50,8 @@ protected:
         eLeft = 0x4,
         eRight = 0x8,
         eUp = 0x10,
-        eDown = 0x20
+        eDown = 0x20,
+        eShift = 0x40
     };
     typedef std::underlying_type_t<KeysDownBits> KeysDownBits_base;
     static enum KeysDownBits KeyToBits(uint32_t key);
@@ -86,7 +89,8 @@ public:
     /// @param frameTime time in seconds since last Update.
     /// @param position in - current camera position, out - camera position after applying controller
     /// @param rot in - current camera rotation, out - camera rotation after applying controller
-    void    Update(float frameTime, glm::vec3& position, glm::quat& rot) override;
+    /// @param cut in - current camera cut, out - camera cut after applying controller
+    void    Update(float frameTime, glm::vec3& position, glm::quat& rot, bool& cut ) override;
 
 protected:
     glm::vec2       m_LastMousePosition;

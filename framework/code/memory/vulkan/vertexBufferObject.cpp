@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -11,7 +11,7 @@
 
 
 VertexBuffer<Vulkan>::VertexBuffer() noexcept
-    : BufferT<Vulkan>()
+    : Buffer<Vulkan>()
     , mSpan(0)
     , mNumVertices(0)
     , mDspUsable(false)
@@ -38,7 +38,7 @@ VertexBuffer<Vulkan>::VertexBuffer(VertexBuffer<Vulkan>&& other) noexcept
 
 VertexBuffer<Vulkan>& VertexBuffer<Vulkan>::operator=(VertexBuffer<Vulkan>&& other) noexcept
 {
-    BufferT::operator=(std::move(other));
+    Buffer::operator=(std::move(other));
     if (&other != this)
     {
         mSpan = other.mSpan;
@@ -68,8 +68,22 @@ bool VertexBuffer<Vulkan>::Initialize(MemoryManager* pManager, size_t span, size
     }
     else
     {
-        return BufferT::Initialize(pManager, static_cast<size_t>(mSpan * mNumVertices), usage, initialData);
+        return Buffer::Initialize(pManager, static_cast<size_t>(mSpan * mNumVertices), usage, initialData);
     }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+bool VertexBuffer<Vulkan>::Update(MemoryManager* pManager, size_t dataSize, const void* newData)
+{
+    return Buffer::Update(pManager, dataSize, newData);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+bool VertexBuffer<Vulkan>::GetMeshData(MemoryManager* pManager, size_t dataSize, void* outputData) const
+{
+    return Buffer::GetMeshData(pManager, dataSize, outputData);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -79,7 +93,7 @@ void VertexBuffer<Vulkan>::Destroy()
     mBindings.clear();
     mAttributes.clear();
     mNumVertices = 0;
-    BufferT::Destroy();
+    Buffer::Destroy();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -117,7 +131,7 @@ VertexBuffer<Vulkan> VertexBuffer<Vulkan>::Copy( VkCommandBuffer vkCommandBuffer
 
     // Create the buffer we are copying into.
     size_t size = GetSpan() * GetNumVertices();
-    if (!copy.BufferT::Initialize( mManager, size, bufferUsage, memoryUsage ))
+    if (!copy.Buffer::Initialize( mManager, size, bufferUsage, memoryUsage ))
         return {};
 
     if (((mBufferUsageFlags & BufferUsageFlags::TransferSrc) == 0) || ((bufferUsage & BufferUsageFlags::TransferDst) == 0))

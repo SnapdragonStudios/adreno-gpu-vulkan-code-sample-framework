@@ -11,16 +11,10 @@
 #extension GL_ARB_shading_language_420pack : enable
 
 #define SHADER_ATTRIB_LOC_POSITION          0
-#define SHADER_ATTRIB_LOC_NORMAL            1
-#define SHADER_ATTRIB_LOC_TEXCOORD0         2
-#define SHADER_ATTRIB_LOC_COLOR             3
-#define SHADER_ATTRIB_LOC_TANGENT           4
+#define SHADER_ATTRIB_LOC_TEXCOORD0         1
 
 layout (location = SHADER_ATTRIB_LOC_POSITION ) in vec4 a_Position;
-layout (location = SHADER_ATTRIB_LOC_NORMAL   ) in vec3 a_Normal;
 layout (location = SHADER_ATTRIB_LOC_TEXCOORD0) in vec2 a_TexCoord;
-layout (location = SHADER_ATTRIB_LOC_COLOR    ) in vec4 a_Color;
-layout (location = SHADER_ATTRIB_LOC_TANGENT  ) in vec4 a_Tangent;
 
 // Varying's
 layout (location = 0) out vec4    v_TexCoord;

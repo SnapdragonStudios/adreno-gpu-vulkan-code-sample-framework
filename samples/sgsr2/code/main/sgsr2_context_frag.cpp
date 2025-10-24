@@ -7,10 +7,9 @@
 //============================================================================================================
 
 #include "sgsr2_context_frag.hpp"
-#include "material/drawable.hpp"
-#include "material/materialManager.hpp"
-#include "material/shaderDescription.hpp"
-#include "material/shaderManager.hpp"
+#include "material/vulkan/drawable.hpp"
+#include "material/vulkan/materialManager.hpp"
+#include "material/vulkan/shaderManager.hpp"
 #include "mesh/meshHelper.hpp"
 #include "vulkan/commandBuffer.hpp"
 #include "memory/vulkan/uniform.hpp"
@@ -51,9 +50,9 @@ SGSR2_Frag::Context::Context()
 }
 
 bool SGSR2_Frag::Context::Initialize(
-    GraphicsApiBase& gfxApi, 
-    const ShaderManager& shaderManager, 
-    const MaterialManager& materialManager,
+    GraphicsApiBase& gfxApi,
+    const ShaderManager<Vulkan>& shaderManager,
+    const MaterialManager<Vulkan>& materialManager,
     const UpscalerConfiguration& upscaler_configuration,
     const InputImages& input_images )
 {
@@ -101,16 +100,16 @@ bool SGSR2_Frag::Context::Initialize(
 
     auto CreateTextureWithSampler = [&](
         auto& target_unique_ptr,
-        uint32_t uiWidth, 
-        uint32_t uiHeight, 
-        TextureFormat Format, 
-        const char* pName, 
+        uint32_t uiWidth,
+        uint32_t uiHeight,
+        TextureFormat Format,
+        const char* pName,
         SGSRSamplerType samplerType)
-    {
-        SamplerFilter samplerFilter = SamplerFilter::Undefined;
-        SamplerAddressMode samplerAddressMode = SamplerAddressMode::Undefined;
-        switch (samplerType)
         {
+            SamplerFilter samplerFilter = SamplerFilter::Undefined;
+            SamplerAddressMode samplerAddressMode = SamplerAddressMode::Undefined;
+            switch (samplerType)
+            {
             case SGSRSamplerType::NEAREST_CLAMP:
             {
                 samplerFilter = SamplerFilter::Nearest;
@@ -129,83 +128,100 @@ bool SGSR2_Frag::Context::Initialize(
                 samplerAddressMode = SamplerAddressMode::ClampEdge;
                 break;
             }
-        }
+            }
 
-        target_unique_ptr = std::make_unique<TextureVulkan>( std::move(CreateTextureObject(
-            vulkan, 
-            CreateTexObjectInfo{
-                uiWidth, 
-                uiHeight,
-                1,
-                1,
-                1,
-                Format, 
-                TEXTURE_TYPE::TT_COMPUTE_TARGET,
-                TEXTURE_FLAGS::None,
-                pName,
-                1,
-                samplerFilter,
-                samplerAddressMode,
-                false,
-            })));
-    };
+            target_unique_ptr = std::make_unique<TextureVulkan>( std::move(CreateTextureObject(
+                vulkan,
+                CreateTexObjectInfo{
+                    uiWidth,
+                    uiHeight,
+                    1,
+                    1,
+                    1,
+                    Format,
+                    TEXTURE_TYPE::TT_COMPUTE_TARGET,
+                    TEXTURE_FLAGS::None,
+                    pName,
+                    Msaa::Samples1,
+                    samplerFilter,
+                    samplerAddressMode,
+                    false,
+                })));
+        };
 
     //
     // Render passes
     //
-    std::array<VkRenderPass, 2> renderPasses{};
+    std::array< RenderPass<Vulkan>, 2> renderPasses{};
     std::array< TextureFormat, 1> convertPassOutputFormats{TextureFormat::R16G16B16A16_SFLOAT};
-    if (!vulkan.CreateRenderPass( convertPassOutputFormats, TextureFormat::UNDEFINED, VK_SAMPLE_COUNT_1_BIT, RenderPassInputUsage::DontCare, RenderPassOutputUsage::StoreReadOnly, false, RenderPassOutputUsage::Discard, &renderPasses[0] ))
+    if (!vulkan.CreateRenderPass( convertPassOutputFormats, TextureFormat::UNDEFINED, Msaa::Samples1, RenderPassInputUsage::DontCare, RenderPassOutputUsage::StoreReadOnly, false, RenderPassOutputUsage::Discard, renderPasses[0] ))
     {
         return false;
     }
     std::array< TextureFormat, 1> upscalePassOutputFormats{TextureFormat::R16G16B16A16_SFLOAT};
-    if (!vulkan.CreateRenderPass( upscalePassOutputFormats, TextureFormat::UNDEFINED, VK_SAMPLE_COUNT_1_BIT, RenderPassInputUsage::DontCare, RenderPassOutputUsage::StoreReadOnly, false, RenderPassOutputUsage::Discard, &renderPasses[1] ))
+    if (!vulkan.CreateRenderPass( upscalePassOutputFormats, TextureFormat::UNDEFINED, Msaa::Samples1, RenderPassInputUsage::DontCare, RenderPassOutputUsage::StoreReadOnly, false, RenderPassOutputUsage::Discard, renderPasses[1] ))
     {
         return false;
     }
 
+    //
+    // Image buffers
+    //
     if (!m_motion_depth_clip_alpha_buffer.Initialize( &vulkan,
                                                       upscaler_configuration.render_size.x,
                                                       upscaler_configuration.render_size.y,
                                                       convertPassOutputFormats,
                                                       TextureFormat::UNDEFINED,
-                                                      renderPasses[0],
-                                                      VK_NULL_HANDLE,
-                                                      {},
+                                                      Msaa::Samples1,
                                                       "motion_depth_clip_alpha_buffer" ))
     {
         return false;
     }
 
-    if (!m_scene_color_output.Initialize( &vulkan,
-                                          upscaler_configuration.display_size.x,
-                                          upscaler_configuration.display_size.y,
-                                          upscalePassOutputFormats,
-                                          TextureFormat::UNDEFINED,
-                                          renderPasses[1],
-                                          VK_NULL_HANDLE,
-                                          {},
-                                          "scene_color_output" ))
+    if (!m_scene_color_output[0].Initialize( &vulkan,
+                                             upscaler_configuration.display_size.x,
+                                             upscaler_configuration.display_size.y,
+                                             upscalePassOutputFormats,
+                                             TextureFormat::UNDEFINED,
+                                             Msaa::Samples1,
+                                             "scene_color_output0" ))
+    {
+        return false;
+    }
+    if (!m_scene_color_output[1].Initialize( &vulkan,
+                                             upscaler_configuration.display_size.x,
+                                             upscaler_configuration.display_size.y,
+                                             upscalePassOutputFormats,
+                                             TextureFormat::UNDEFINED,
+                                             Msaa::Samples1,
+                                             "scene_color_output1" ))
     {
         return false;
     }
 
     //
+    // Framebuffers
+    //
+    std::array< Framebuffer<Vulkan>, 3> framebuffers{};
+    //std::array<RenderPassClearData::Texture
+    framebuffers[0].Initialize( vulkan, renderPasses[0], {&m_motion_depth_clip_alpha_buffer.m_ColorAttachments[0],1}, nullptr/*depth*/, "convert_output" );
+    framebuffers[1].Initialize( vulkan, renderPasses[1], {&m_scene_color_output[0].m_ColorAttachments[0],1}, nullptr/*depth*/, "upscale_output_0" );
+    framebuffers[2].Initialize( vulkan, renderPasses[1], {&m_scene_color_output[1].m_ColorAttachments[0],1}, nullptr/*depth*/, "upscale_output_1" );
+
+    //
     // Fullscreen drawable
     //
     Mesh<Vulkan> quadMesh{};
-    if (!MeshHelper::CreateMesh<Vulkan>( vulkan.GetMemoryManager(), MeshObjectIntermediate::CreateScreenSpaceMesh(), 0, sgsr2_shader->m_shaderDescription->m_vertexFormats, &quadMesh))
+    if (!MeshHelper::CreateMesh<Vulkan>( vulkan.GetMemoryManager(), MeshObjectIntermediate::CreateScreenSpaceMesh(), 0, sgsr2_shader->m_shaderDescription->m_vertexFormats, &quadMesh ))
     {
         return false;
     }
 
     // Upscale material
     auto material = materialManager.CreateMaterial(
-        gfxApi, 
         *sgsr2_shader,
         vulkan.m_SwapchainImageCount * 2/*so we always have an even number of descriptors, which makes ping-ponging between history buffers work! */,
-        [&](const std::string& texName) -> MaterialPass::tPerFrameTexInfo 
+        [&](const std::string& texName) -> MaterialManager<Vulkan>::tPerFrameTexInfo
         {
             if (texName == "IN_Depth")
                 return {m_input_depth_ref.get()};
@@ -215,35 +231,45 @@ bool SGSR2_Frag::Context::Initialize(
                 return {m_input_color_ref.get()};
 
             else if (texName == "VAR_MotionDepthClipAlphaBuffer")
-                return {&m_motion_depth_clip_alpha_buffer[0].m_ColorAttachments[0]};
+                return {&m_motion_depth_clip_alpha_buffer.m_ColorAttachments[0]};
             else if (texName == "VAR_PrevOutput")
                 return {&m_scene_color_output[1].m_ColorAttachments[0], &m_scene_color_output[0].m_ColorAttachments[0]};
 
             assert(0);
             return {};
-        }, 
-        [&](const std::string& bufferName) -> tPerFrameVkBuffer
+        },
+        [&](const std::string& bufferName) -> PerFrameBuffer<Vulkan>
         {
             if (bufferName == "ShaderData")
             {
-                return {m_upscaler_uniform.vkBuffers.begin(), m_upscaler_uniform.vkBuffers.begin() + vulkan.m_SwapchainImageCount};
+                return {m_upscaler_uniform.bufferHandles.begin(), m_upscaler_uniform.bufferHandles.begin() + vulkan.m_SwapchainImageCount};
             }
             assert(0);
             return {};
-        });
+        } );
 
     //
     // Create the drawable to execute the fragment shader passes
     //
 
-    auto drawable = std::make_unique<Drawable>(vulkan, std::move(material));
+    auto drawable = std::make_unique<Drawable<Vulkan>>(vulkan, std::move(material));
 
-    static const char* const passNames[] {"CONVERT", "UPSCALE"};
-    if (!drawable->Init(renderPasses, passNames, 0x3, std::move(quadMesh)))
+    static const char* const passNames[]{"CONVERT", "UPSCALE"};
+    RenderContext<Vulkan> renderContexts[] {
+        RenderContext<Vulkan>(renderPasses[0].Copy(), {}, framebuffers[0], passNames[0]),
+        RenderContext<Vulkan>(renderPasses[1].Copy(), {}, framebuffers[1], passNames[1]),
+        RenderContext<Vulkan>(renderPasses[1].Copy(), {}, framebuffers[2], passNames[1])
+    };
+
+    if (!drawable->Init(renderContexts, 0x3, std::move(quadMesh)))
     {
-        LOGE("Error Creating SGSR computables...");
+        LOGE("Error Creating SGSR2 drawable...");
     }
     m_drawable = std::move(drawable);
+
+    m_convertRenderContext    = std::move(renderContexts[0]);
+    m_upscaleRenderContext[0] = std::move(renderContexts[1]);
+    m_upscaleRenderContext[1] = std::move(renderContexts[2]);
 
     return true;
 }
@@ -254,10 +280,16 @@ void SGSR2_Frag::Context::Release(GraphicsApiBase& gfxApi)
 
     m_drawable.reset();
 
-    m_scene_color_output.Release();
+    m_scene_color_output[0].Release();
+    m_scene_color_output[1].Release();
     m_motion_depth_clip_alpha_buffer.Release();
 
     ReleaseUniformBuffer(&vulkan, m_upscaler_uniform);
+}
+
+const TextureBase* const SGSR2_Frag::Context::GetSceneColorOutput() const
+{
+    return &m_scene_color_output[(m_buffer_index & 1) ^ 1].m_ColorAttachments[0];
 }
 
 void SGSR2_Frag::Context::UpdateUniforms(
@@ -319,12 +351,12 @@ void SGSR2_Frag::Context::Dispatch(
     Vulkan&                      vulkan,
     CommandListVulkan&           command_list) 
 {
-    command_list.BeginRenderPass( m_motion_depth_clip_alpha_buffer[0], m_motion_depth_clip_alpha_buffer.m_RenderPass, VK_SUBPASS_CONTENTS_INLINE );
-    m_drawable->DrawPass( command_list.m_VkCommandBuffer, m_drawable->GetDrawablePasses()[0], m_buffer_index );
+    command_list.BeginRenderPass( m_convertRenderContext, VK_SUBPASS_CONTENTS_INLINE );
+    m_drawable->DrawPass( command_list, m_drawable->GetDrawablePasses()[0], m_buffer_index );
     command_list.EndRenderPass();
 
-    command_list.BeginRenderPass( m_scene_color_output[m_buffer_index&1], m_scene_color_output.m_RenderPass, VK_SUBPASS_CONTENTS_INLINE );
-    m_drawable->DrawPass( command_list.m_VkCommandBuffer, m_drawable->GetDrawablePasses()[1], m_buffer_index );
+    command_list.BeginRenderPass( m_upscaleRenderContext[m_buffer_index&1], VK_SUBPASS_CONTENTS_INLINE );
+    m_drawable->DrawPass( command_list, m_drawable->GetDrawablePasses()[1], m_buffer_index );
     command_list.EndRenderPass();
 
     m_buffer_index = (m_buffer_index + 1) % (vulkan.m_SwapchainImageCount * 2);

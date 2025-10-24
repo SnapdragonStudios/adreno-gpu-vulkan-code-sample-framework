@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -11,7 +11,8 @@
 #include "vertexDescription.hpp"
 
 
-PipelineVertexInputState<Vulkan>::PipelineVertexInputState(const ShaderDescription& shaderDescription, const std::vector<uint32_t>& buffersToBind) noexcept : mVisci{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO }
+PipelineVertexInputState<Vulkan>::PipelineVertexInputState(const ShaderDescription& shaderDescription, const std::vector<uint32_t>& buffersToBind) noexcept
+    : mVisci{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO }
 {
     mBindings.reserve(buffersToBind.size());
     uint32_t location = 0;
@@ -43,4 +44,27 @@ PipelineVertexInputState<Vulkan>::PipelineVertexInputState(PipelineVertexInputSt
 {
     mVisci = other.mVisci;
     other.mVisci = {};
+}
+
+
+PipelineRasterizationState<Vulkan>::PipelineRasterizationState( const ShaderPassDescription& shaderPassDescription ) noexcept
+    : mPipelineRasterizationStateCreateInfo()
+{
+    const auto& fixedFunctionSettings = shaderPassDescription.m_fixedFunctionSettings;
+
+    //// State for rasterization, such as polygon fill mode is defined.
+    mPipelineRasterizationStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    mPipelineRasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
+    mPipelineRasterizationStateCreateInfo.cullMode = (fixedFunctionSettings.cullBackFace ? VK_CULL_MODE_BACK_BIT : 0) | (fixedFunctionSettings.cullFrontFace ? VK_CULL_MODE_FRONT_BIT : 0);
+    mPipelineRasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    mPipelineRasterizationStateCreateInfo.depthClampEnable = fixedFunctionSettings.depthClampEnable ? VK_TRUE : VK_FALSE;
+    mPipelineRasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
+    mPipelineRasterizationStateCreateInfo.depthBiasEnable = fixedFunctionSettings.depthBiasEnable ? VK_TRUE : VK_FALSE;
+    if (fixedFunctionSettings.depthBiasEnable)
+    {
+        mPipelineRasterizationStateCreateInfo.depthBiasConstantFactor = fixedFunctionSettings.depthBiasConstant;
+        mPipelineRasterizationStateCreateInfo.depthBiasClamp = fixedFunctionSettings.depthBiasClamp;
+        mPipelineRasterizationStateCreateInfo.depthBiasSlopeFactor = fixedFunctionSettings.depthBiasSlope;
+    }
+    mPipelineRasterizationStateCreateInfo.lineWidth = 1.0f;
 }

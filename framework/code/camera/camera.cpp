@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,6 +12,7 @@
 
 Camera::Camera()
     : m_Orthographic(false)
+    , m_Cut(false)
     , m_Aspect(1.0)
     , m_FOV(PI*0.25f)
     , m_NearClip(1.0f)
@@ -21,6 +22,7 @@ Camera::Camera()
     , m_Jitter()
     , m_ProjectionMatrix(1.0)
     , m_ViewMatrix()
+    , m_ViewMatrixPreTranslation()
     , m_InverseViewProjection()
 {
     UpdateMatrices();   // set sensible proj/view matrices
@@ -71,6 +73,13 @@ void Camera::SetJitter(const glm::vec2 jitter)
 }
 
 //-----------------------------------------------------------------------------
+void Camera::SetCut(bool cut)
+//-----------------------------------------------------------------------------
+{
+    m_Cut = cut;
+}
+
+//-----------------------------------------------------------------------------
 void Camera::UpdateMatrices()
 //-----------------------------------------------------------------------------
 {
@@ -91,6 +100,7 @@ void Camera::UpdateMatrices()
         //m_ViewMatrix = glm::translate(m_ViewMatrix, -m_CurrentCameraPos);
 
         auto translation = glm::mat4( 1.0f );
+        m_ViewMatrixPreTranslation = m_ViewMatrix;
         translation = glm::translate( translation, -m_CurrentCameraPos );
         m_ViewMatrix = m_ViewMatrix * translation;
 
@@ -103,10 +113,6 @@ void Camera::UpdateMatrices()
 glm::mat4 Camera::GetProjectionWithJitter(const glm::vec3 jitter) const
 //-----------------------------------------------------------------------------
 {
-    auto jitteredProj = m_ProjectionMatrixNoJitter;
-    jitteredProj[2][0] += jitter.x;
-    jitteredProj[2][1] += jitter.y;
-    jitteredProj[2][2] += jitter.z;
-    return jitteredProj;
+    glm::mat4 jm = glm::translate(jitter);
+    return jm * m_ProjectionMatrixNoJitter;
 }
-

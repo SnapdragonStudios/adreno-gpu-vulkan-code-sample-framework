@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -51,7 +51,7 @@ IndexBuffer<Vulkan> IndexBuffer<Vulkan>::Copy( VkCommandBuffer vkCommandBuffer, 
 
     // Create the buffer we are copying into.
     size_t size = GetIndexTypeBytes() * mNumIndices;
-    if (!copy.BufferT::Initialize( mManager, size, bufferUsage, memoryUsage ))
+    if (!copy.Buffer::Initialize( mManager, size, bufferUsage, memoryUsage ))
         return copy;
 
     // Use gpu copy commands to copy buffer data

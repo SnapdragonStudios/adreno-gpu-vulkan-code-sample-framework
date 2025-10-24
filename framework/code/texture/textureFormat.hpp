@@ -1,11 +1,11 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2022 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 #pragma once
+#include <cstddef>
 
 /// @brief Texture formats that may be valid for creating texture surfaces/resources.
 /// Availability wil depend on the graphics api and hardware/driver.
@@ -270,3 +270,17 @@ bool FormatHasDepth(TextureFormat);
 bool FormatIsCompressed(TextureFormat);
 /// @return true if the given format is sRGB, return false if linear
 bool FormatIsSrgb(TextureFormat);
+/// @return number of bytes per pixel for this format (or 0 for block/unsupported formats)
+size_t FormatBytesPerPixel(TextureFormat);
+
+
+/// Multi sampling flags
+enum class Msaa {
+    Samples1  = 1,
+    Samples2  = 2,
+    Samples4  = 4,
+    Samples8  = 8,
+    Samples16 = 16,
+    Samples32 = 32,
+    Samples64 = 64
+};

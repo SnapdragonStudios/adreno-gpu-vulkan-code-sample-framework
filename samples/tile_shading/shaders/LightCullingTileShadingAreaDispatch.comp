@@ -1,0 +1,174 @@
+#version 460
+//============================================================================================================
+//
+//
+//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
+//                              SPDX-License-Identifier: BSD-3-Clause
+//
+//============================================================================================================
+
+#define MAX_LIGHT_COUNT 2048
+#define TILE_SHADING_RATE 8 // up to 8 is guaranteed on Andreno HW
+
+#extension GL_QCOM_tile_shading : enable
+
+layout(shading_rate_xQCOM = TILE_SHADING_RATE, shading_rate_yQCOM = TILE_SHADING_RATE, shading_rate_zQCOM = 1) in;
+
+struct LightUB
+{
+    vec4 lightPosAndRadius; // xyz = pos | w = radius
+    vec4 lightColor;
+};
+
+struct SceneInfoUB
+{
+    mat4 projectionInv;
+    mat4 view;
+    mat4 viewInv;
+    mat4 viewProjection;
+    mat4 viewProjectionInv; // ViewInv * ProjectionInv
+    vec4 projectionInvW;    // w components of ProjectionInv
+    vec4 cameraPos;
+
+    vec4 skyLightDirection;
+    vec4 skyLightColor;
+
+    vec4 ambientColor;
+
+    uint viewportWidth;
+    uint viewportHeight;
+    uint binCountX;
+    uint binCountY;
+    uint globalClusterCountX;
+    uint globalClusterCountY;
+    uint binClusterCountX;
+    uint binClusterCountY;
+    uint clusterSizeX;
+    uint clusterSizeY;
+    int lightCount;
+    int debugShaders;
+    int ignoreLightTiles;
+    int tileMemoryEnabled;
+    int padding1;
+    int padding2;
+};
+
+layout(set = 0, binding = 0, tile_attachmentQCOM, rgba32f) uniform highp readonly image2D u_DepthTex;
+
+layout(std140, set = 0, binding = 1) uniform SceneInfo 
+{
+    SceneInfoUB sceneInfo;
+};
+
+layout(std140, set = 0, binding = 2) uniform Lights 
+{
+    LightUB lights[MAX_LIGHT_COUNT];
+};
+
+layout(std430, set = 0, binding = 3) buffer writeonly TileLightIndices
+{
+    uint lightIndices[];
+};
+
+layout(std430, set = 0, binding = 4) buffer writeonly TileLightCounts
+{
+    uint lightCounts[];
+};
+
+vec3 reconstructWorldPosition(highp vec2 uv, highp float depth)
+{
+    highp vec4 clipSpacePos = vec4(
+        uv.x * 2.0 - 1.0,
+        (1.0 - uv.y) * 2.0 - 1.0,
+        depth,
+        1.0
+    );
+
+    highp vec4 fragViewSpacePos = sceneInfo.projectionInv * clipSpacePos;
+    fragViewSpacePos /= fragViewSpacePos.w;
+    return (sceneInfo.viewInv * fragViewSpacePos).xyz;
+}
+
+ivec2 getBinIndex() 
+{
+    return ivec2(ceil(vec2(gl_TileOffsetQCOM) / vec2(gl_TileDimensionQCOM)));
+}
+
+void main()
+{
+    uvec2 clusterSize = uvec2(sceneInfo.clusterSizeX, sceneInfo.clusterSizeY);
+
+    uvec2 totalTileArea     = gl_TileDimensionQCOM.xy/* * uvec2(sceneInfo.binCountX, sceneInfo.binCountY)*/;
+    uvec2 totalInvocations  = totalTileArea / uvec2(TILE_SHADING_RATE, TILE_SHADING_RATE);
+    uvec2 currentInvocation = gl_GlobalInvocationID.xy;
+
+    uvec2 invocationClusterCount = max(uvec2(1, 1), totalInvocations / clusterSize);
+
+    uvec2 tileOffset = gl_TileOffsetQCOM.xy;
+
+    for (uint x = 0; x < invocationClusterCount.x; ++x) 
+    {
+        for (uint y = 0; y < invocationClusterCount.y; ++y) 
+        {
+            uvec2 clusterKey  = tileOffset / clusterSize + uvec2(x, y); 
+            uint clusterIndex = clusterKey.y * sceneInfo.globalClusterCountX + clusterKey.x;
+
+            // Tile bounds in pixels
+            uint clusterMinX = uint(float(clusterKey.x) * clusterSize.x);
+            uint clusterMinY = uint(float(clusterKey.y) * clusterSize.y);
+
+            // Early exit if fully out of bounds
+            if (clusterMinX >= sceneInfo.viewportWidth || clusterMinY >= sceneInfo.viewportHeight)
+            {
+                continue;
+            }
+
+            // Reconstruct tile frustum
+            highp vec3 clusterMin = vec3(1e8);
+            highp vec3 clusterMax = vec3(-1e8);
+
+            for (uint y = 0; y < clusterSize.y; ++y)
+            {
+                for (uint x = 0; x < clusterSize.x; ++x)
+                {
+                    ivec2 pixelLocation = ivec2(clusterMinX, clusterMinY) + ivec2(x, y);
+
+                    vec2 uv = vec2(float(pixelLocation.x) / float(sceneInfo.viewportWidth), 
+                                float(pixelLocation.y) / float(sceneInfo.viewportHeight));
+                    if(uv.x > 1.0 || uv.y > 1.0)
+                    {
+                        continue;
+                    }
+
+                    highp float depth = imageLoad(u_DepthTex, pixelLocation).r * 2.0 - 1.0;
+                    vec3 worldPos = reconstructWorldPosition(uv, depth);
+
+                    clusterMin = min(clusterMin, worldPos);
+                    clusterMax = max(clusterMax, worldPos);
+                }
+            }
+
+            if ((gl_LocalInvocationID.x == 0) && (gl_LocalInvocationID.y == 0))
+            {
+                uint tileLightCount = 0u;
+                for (int lightId = 0; lightId < int(sceneInfo.lightCount); ++lightId)
+                {
+                    vec3 lightPosition = lights[lightId].lightPosAndRadius.xyz;
+                    float lightRadius  = lights[lightId].lightPosAndRadius.w;
+
+                    // Test light against tile bounds (AABB vs Sphere)
+                    vec3 closestPoint = clamp(lightPosition, clusterMin, clusterMax);
+                    float distance = length(closestPoint - lightPosition);
+
+                    if (distance < lightRadius * 2.0)
+                    {
+                        lightIndices[clusterIndex * uint(MAX_LIGHT_COUNT) + tileLightCount] = uint(lightId);
+                        tileLightCount++;
+                    }
+                }
+
+                lightCounts[clusterIndex] = tileLightCount; 
+            }
+        }
+    }
+}

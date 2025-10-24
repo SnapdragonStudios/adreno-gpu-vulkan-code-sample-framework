@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -11,6 +11,7 @@
 #include <iterator>
 #include <algorithm>
 #include <cinttypes>
+#include <cstring>
 #include "system/os_common.h"
 
 SceneRTBase::SceneRTBase()
@@ -73,7 +74,7 @@ void SceneRT::RemoveAllInstances()
     m_pendingInstancesUpdate = !m_instances.empty();
 }
 
-bool SceneRT::CreateAccelerationStructure( UpdateMode updateMode, size_t minSize )
+bool SceneRT::CreateAccelerationStructure( UpdateMode updateMode, size_t minSize)
 {
     auto& memoryManager = m_vulkan.GetMemoryManager();
 
@@ -92,8 +93,7 @@ bool SceneRT::CreateAccelerationStructure( UpdateMode updateMode, size_t minSize
 
     m_accelerationBuildFlags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
     if (updateMode != UpdateMode::NotUpdatable)
-        m_accelerationBuildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-
+        m_accelerationBuildFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;    
 
     {
         // Populate the instance buffer data

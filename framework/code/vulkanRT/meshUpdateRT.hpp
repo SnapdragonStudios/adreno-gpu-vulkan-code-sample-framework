@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -47,11 +47,11 @@ private:
 
 protected:
     // Variables needed for Updates
-    BufferT<Vulkan> m_VertexBuffer;                        
-    std::optional<IndexBufferObject> m_IndexBuffer;     // optional, depending on meshObject having indices
-    AccelerationStructureScratch m_UpdateScratch;
-    VkDeviceAddress m_VertexBufferDeviceAddress = {};
-    VkDeviceAddress m_IndexBufferDeviceAddress = {};
-    uint32_t m_PrimitiveCount = 0;
-    uint32_t m_NumVertices = 0;
+    Buffer<Vulkan>                     m_VertexBuffer;                        
+    std::optional<IndexBuffer<Vulkan>>  m_IndexBuffer;     // optional, depending on meshObject having indices
+    AccelerationStructureScratch        m_UpdateScratch;
+    VkDeviceAddress                     m_VertexBufferDeviceAddress = {};
+    VkDeviceAddress                     m_IndexBufferDeviceAddress = {};
+    uint32_t                            m_PrimitiveCount = 0;
+    uint32_t                            m_NumVertices = 0;
 };

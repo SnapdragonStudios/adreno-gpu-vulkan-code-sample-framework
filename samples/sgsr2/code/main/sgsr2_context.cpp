@@ -7,9 +7,9 @@
 //============================================================================================================
 
 #include "sgsr2_context.hpp"
-#include "material/computable.hpp"
-#include "material/materialManager.hpp"
-#include "material/shaderManager.hpp"
+#include "material/vulkan/computable.hpp"
+#include "material/vulkan/materialManager.hpp"
+#include "material/vulkan/shaderManager.hpp"
 #include "vulkan/commandBuffer.hpp"
 #include "memory/vulkan/uniform.hpp"
 #include <cassert>
@@ -50,8 +50,8 @@ SGSR2::Context::Context()
 
 bool SGSR2::Context::Initialize(
     GraphicsApiBase& gfxApi, 
-    const ShaderManager& shaderManager, 
-    const MaterialManager& materialManager,
+    const ShaderManager<Vulkan>& shaderManager, 
+    const MaterialManager<Vulkan>& materialManager,
     const UpscalerConfiguration& upscaler_configuration,
     const InputImages& input_images )
 {
@@ -136,19 +136,13 @@ bool SGSR2::Context::Initialize(
         target_unique_ptr = std::make_unique<TextureVulkan>( std::move(CreateTextureObject(
             vulkan, 
             CreateTexObjectInfo{
-                uiWidth, 
-                uiHeight,
-                1,
-                1,
-                1,
-                Format, 
-                TEXTURE_TYPE::TT_COMPUTE_TARGET,
-                TEXTURE_FLAGS::None,
-                pName,
-                1,
-                samplerFilter,
-                samplerAddressMode,
-                false,
+                .uiWidth = uiWidth,
+                .uiHeight = uiHeight,
+                .Format = Format,
+                .TexType = TEXTURE_TYPE::TT_COMPUTE_TARGET,
+                .pName = pName,
+                .FilterMode = samplerFilter,
+                .SamplerMode = samplerAddressMode
             })));
     };
 
@@ -227,10 +221,9 @@ bool SGSR2::Context::Initialize(
     ///////////////////////
 
     auto material = materialManager.CreateMaterial(
-        gfxApi, 
         *sgsr2_shader,
         vulkan.m_SwapchainImageCount * 2/*so we always have an even number of descriptors, which makes ping-ponging between history buffers work! */,
-        [&](const std::string& texName) -> MaterialPass::tPerFrameTexInfo 
+        [&](const std::string& texName) -> MaterialManager<Vulkan>::tPerFrameTexInfo
         {
             // Inputs
             if (texName == "IN_OpaqueColor")
@@ -270,11 +263,11 @@ bool SGSR2::Context::Initialize(
             assert(0);
             return {};
         }, 
-        [&](const std::string& bufferName) -> tPerFrameVkBuffer
+        [&](const std::string& bufferName) -> PerFrameBuffer<Vulkan>
         {
             if (bufferName == "ShaderData")
             {
-                return {m_upscaler_uniform.vkBuffers.begin(), m_upscaler_uniform.vkBuffers.begin() + vulkan.m_SwapchainImageCount};
+                return {m_upscaler_uniform.bufferHandles.begin(), m_upscaler_uniform.bufferHandles.begin() + vulkan.m_SwapchainImageCount};
             }
             assert(0);
             return {};
@@ -285,7 +278,7 @@ bool SGSR2::Context::Initialize(
     ////////////////////////
 
     // Create the computable to execute the material
-    auto computable = std::make_unique<Computable>(vulkan, std::move(material));
+    auto computable = std::make_unique<Computable<Vulkan>>(vulkan, std::move(material));
     if (!computable->Init())
     {
         LOGE("Error Creating SGSR computables...");
@@ -326,6 +319,11 @@ void SGSR2::Context::Release(GraphicsApiBase& gfxApi)
 #undef ReleaseTexture
 
     ReleaseUniformBuffer(&static_cast<Vulkan&>(gfxApi), m_upscaler_uniform);
+}
+
+const TextureBase* const SGSR2::Context::GetSceneColorOutput() const
+{
+    return m_scene_color_output.get();
 }
 
 void SGSR2::Context::UpdateUniforms(
@@ -388,7 +386,7 @@ void SGSR2::Context::Dispatch(
 {
     for (const auto& computablePass : m_computable->GetPasses())
     {
-        m_computable->DispatchPass( command_list.m_VkCommandBuffer, computablePass, m_buffer_index );
+        m_computable->DispatchPass( command_list, computablePass, m_buffer_index );
     }
 
     m_buffer_index = (m_buffer_index + 1) % (vulkan.m_SwapchainImageCount * 2);

@@ -2,14 +2,14 @@
 // Put configuration in here for all projects.
 
 buildscript {
-    
     repositories {
         mavenCentral()
         google()
         jcenter()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.8.1'
+        //classpath 'com.android.tools.build:gradle:7.2.0'
+        classpath 'com.android.tools.build:gradle:8.2.0'
         // No application dependencies here; they belong in the individual module build.gradle files
     }
 }
@@ -22,13 +22,34 @@ allprojects {
     }
 
     // Default ndk version (should be picked up in app specific build.gradle files)
-//    project.ext.set("ndkVersionDefault", "25.0.8221429-beta2")  // "24.0.8215888")
-    project.ext.set("ndkVersionDefault", "24.0.8215888")
+    project.ext.set("ndkVersionDefault", "26.0.10792818")
 
     // Put all build related files into a single top level build dir.
     buildDir = file("${rootDir.absolutePath}/../../build/android/${project.name}")
+
+    dependencies {
+    }
 }
 
 task clean(type: Delete) {
     delete rootProject.buildDir
 }
+
+/*
+task lintCheck() {
+    getAllTasks(true).each {
+        def lintTasks = it.value.findAll { it.name.contains("lint") }
+        lintTasks.each {
+            it.enabled = false
+        }
+    }
+}
+
+afterEvaluate {
+  Set<Task> result = tasks.findAll { task -> task.name.contains(':lint') }
+  result.each { Task task ->
+    printLn("disabled task {task.name}")
+    task.enabled = false
+  }
+}
+*/

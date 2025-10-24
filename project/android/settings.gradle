@@ -1,3 +1,75 @@
-include ':empty', ':hello-gltf', ':hdrSwapchain', ':meshShaderKHR', ':SubPass', ':shaderResolveTonemap', ':rotatedCopy', ':BloomImageProcessing', ':rayPipelineGI', ':rayPipelineShadows', ':rayQueryShadows',':rayReflections',':sgsr', ':sgsr2', ':graph_pipelines'
+//=============================================================================
+//
+//                  Copyright (c) QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
+//
+//==============================================================================
 
-project(':graph_pipelines').projectDir = new File('../../samples/graph_pipelines')
+// Load local properties
+ext {
+	frameworkProps = new Properties()
+}
+file("../../ConfigLocal.properties").withInputStream { ext.frameworkProps.load(it) }
+
+// Assume the framework is always enabled!
+include ':framework'
+project(':framework').projectDir = new File('../../framework')
+
+if(false) {
+	include ':samplesExternals'
+	project(':samplesExternals').projectDir = new File('../../samples/cmake')
+}
+
+// Helper to add project for sample if it is enabled in settings
+def add_sample_subdirectory(baseName, projectName, folder) {
+
+	def value = ext.frameworkProps.getProperty("FRAMEWORK_" + baseName + "_" + projectName) ?: "true"
+	if (value == 'true')
+	{
+		logger.warn("Adding   " + baseName + ": " + projectName)
+		def gradleProjectName = ':' + projectName
+		include gradleProjectName
+		project(gradleProjectName).projectDir = new File(folder + '/build')
+	}
+	else {
+		logger.warn("Skipping " + baseName + ": " + projectName)
+	}
+}
+
+// Map of project-specific dependencies
+// Add here any dependency that should match with the project name
+def projectDependencies = [
+    dsp_offload: [
+        condition: { -> System.getenv('HEXAGON_SDK_ROOT') != null },
+        message: "NOTE: dsp_offload sample requires Hexagon SDK to be installed (and HEXAGON_SDK_ROOT environment variable)."
+    ],
+    sdp_cli: [
+        condition: { -> false },
+        message: "NOTE: dsdp_cli cannot be built for Android, it's a Windows-only app."
+    ]
+]
+
+// Dynamically scan samples and tests folders
+['samples', 'tests'].each { base ->
+    def baseDir = new File(rootDir, "../../" + base)
+    if (baseDir.exists() && baseDir.isDirectory()) {
+        baseDir.eachDir { subDir ->
+            def buildGradle = new File(subDir, 'build/build.gradle')
+            if (buildGradle.exists()) {
+                def projectName = subDir.name
+                def folderPath = "../../" + base + "/" + projectName
+
+                def depsInfo = projectDependencies[projectName]
+                if (depsInfo) {
+                    if (!depsInfo.condition()) {
+                        logger.warn("Skipping " + base + ": " + projectName + " — " + depsInfo.message)
+                        return
+                    }
+                    add_sample_subdirectory(base, projectName, folderPath)
+                } else {
+                    add_sample_subdirectory(base, projectName, folderPath)
+                }
+            }
+        }
+    }
+}

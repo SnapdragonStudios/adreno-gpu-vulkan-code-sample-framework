@@ -18,13 +18,13 @@
 #include <vector>
 #include <optional>
 
+template<typename T> class Computable;
+template<typename T> class MaterialManager;
+template<typename T> class ShaderManager;
+class TextureBase;
+
 class GraphicsApiBase;
-class Computable;
-class MaterialManager;
-class ShaderManager;
 class Shadow;
-class Texture;
-class CommandList;
 
 namespace SGSR2
 {
@@ -72,16 +72,13 @@ public:
 
     bool Initialize(
         GraphicsApiBase&, 
-        const ShaderManager&, 
-        const MaterialManager&, 
+        const ShaderManager<Vulkan>&, 
+        const MaterialManager<Vulkan>&,
         const UpscalerConfiguration&,
         const InputImages&);
     void Release(GraphicsApiBase&);
 
-    inline const Texture* const GetSceneColorOutput() const 
-    {
-        return m_scene_color_output.get();
-    }
+    const TextureBase* const GetSceneColorOutput() const;
 
     void UpdateUniforms(
         Vulkan&             vulkan,
@@ -96,7 +93,7 @@ public:
     glm::vec2 GetJitter() const;
 
 protected:
-    std::unique_ptr<Computable>         m_computable;
+    std::unique_ptr<Computable<Vulkan>> m_computable;
 
     UpscalerConfiguration               m_configuration;
 

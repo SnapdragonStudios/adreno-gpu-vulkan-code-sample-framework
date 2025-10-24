@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -28,16 +28,30 @@ public:
         public:
             enum class t {
                 Int32,
+                UInt32,
                 Float,
                 Boolean,
                 Vec2,
                 Vec3,
                 Vec4,
+                IVec2,
+                IVec3,
+                IVec4,
+                UVec2,
+                UVec3,
+                UVec4,
                 Int16,
+                UInt16,
                 Float16,
                 F16Vec2,
                 F16Vec3,
                 F16Vec4,
+                I16Vec2,
+                I16Vec3,
+                I16Vec4,
+                U16Vec2,
+                U16Vec3,
+                U16Vec4,
                 Null
             };
             constexpr ElementType( const ElementType& ) noexcept = default;
@@ -49,79 +63,123 @@ public:
             constexpr uint32_t elements() const noexcept {
                 switch (type) {
                 case t::Int32:
+                case t::UInt32:
                 case t::Float:
                 case t::Boolean:
                 case t::Int16:
+                case t::UInt16:
                 case t::Float16:
                     return 1;
                 case t::Vec2:
                 case t::F16Vec2:
+                case t::I16Vec2:
+                case t::U16Vec2:
+                case t::IVec2:
+                case t::UVec2:
                     return 2;
                 case t::Vec3:
                 case t::F16Vec3:
+                case t::I16Vec3:
+                case t::U16Vec3:
+                case t::IVec3:
+                case t::UVec3:
                     return 3;
                 case t::Vec4:
                 case t::F16Vec4:
+                case t::I16Vec4:
+                case t::U16Vec4:
+                case t::IVec4:
+                case t::UVec4:
                     return 4;
                 default:
+                    // Assert if runtime eval and arithmetic error if const (compiletime) evaluated
+                    do { if (std::is_constant_evaluated()) { int error = 1 / (int(type) - int(type)); } else { assert(0); } } while (0);    // constexpr friendly assert!
                 case t::Null:
                     return 0;
                 }
             }
             constexpr uint32_t size() const noexcept {
                 switch(type) {
-                    case t::Int32:
-                        return 4;
                     case t::Float:
+                    case t::Int32:
+                    case t::UInt32:
                         return 4;
                     case t::Boolean:
                         return 4;
                     case t::Vec2:
+                    case t::IVec2:
+                    case t::UVec2:
                         return 8;
                     case t::Vec3:
+                    case t::IVec3:
+                    case t::UVec3:
                         return 12;
                     case t::Vec4:
+                    case t::IVec4:
+                    case t::UVec4:
                         return 16;
-                    case t::Int16:
-                        return 2;
                     case t::Float16:
+                    case t::Int16:
+                    case t::UInt16:
                         return 2;
                     case t::F16Vec2:
+                    case t::I16Vec2:
+                    case t::U16Vec2:
                         return 4;
                     case t::F16Vec3:
+                    case t::I16Vec3:
+                    case t::U16Vec3:
                         return 6;
                     case t::F16Vec4:
+                    case t::I16Vec4:
+                    case t::U16Vec4:
                         return 8;
                     default:
+                        // Assert if runtime eval and arithmetic error if const (compiletime) evaluated
+                        do { if (std::is_constant_evaluated()) { int error = 1 / (int(type) - int(type)); } else { assert(0); } } while (0);    // constexpr friendly assert!
                     case t::Null:
                         return 0;
                 }
             }
             constexpr uint32_t alignment() const noexcept {
                 switch(type) {
-                    case t::Int32:
-                        return 4;
                     case t::Float:
+                    case t::Int32:
+                    case t::UInt32:
                         return 4;
                     case t::Boolean:
                         return 4;
                     case t::Vec2:
+                    case t::IVec2:
+                    case t::UVec2:
                         return 8;
                     case t::Vec3:
+                    case t::IVec3:
+                    case t::UVec3:
                         return 16;
                     case t::Vec4:
+                    case t::IVec4:
+                    case t::UVec4:
                         return 16;
-                    case t::Int16:
-                        return 2;
                     case t::Float16:
+                    case t::Int16:
+                    case t::UInt16:
                         return 2;
                     case t::F16Vec2:
+                    case t::I16Vec2:
+                    case t::U16Vec2:
                         return 4;
                     case t::F16Vec3:
+                    case t::I16Vec3:
+                    case t::U16Vec3:
                         return 8;
                     case t::F16Vec4:
+                    case t::I16Vec4:
+                    case t::U16Vec4:
                         return 8;
                     default:
+                        // Assert if runtime eval and arithmetic error if const (compiletime) evaluated
+                        do { if (std::is_constant_evaluated()) { int error = 1 / (int(type) - int(type)); } else { assert(0); } } while (0);    // constexpr friendly assert!
                     case t::Null:
                         return 0;
                 }

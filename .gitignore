@@ -9,12 +9,35 @@
 *.aar
 *.ap_
 *.aab
+*.exe
+*.lib
+*.dll
+*.a
 
 # ignore Media within samples
 samples/*/Media
+tests/*/Media
+
+# ignore external folders (contents pulled by cmake fetchcontent)
+samples/external
+framework/external/.fetchcontent
+
+# ignore loose image files (eg screenshots)
+*.bmp
+
+# ignore timestamp file
+project/buildtimestamp.h
+
+# Ignore local config files
+ConfigLocal.txt
+ConfigLocal.cmake
+ConfigLocal.properties
 
 # ignore generated (doxygen) documentation
 doc/html/
+
+# ignore generated timestamp file
+project/buildtimestamp.h
 
 # Files for the ART/Dalvik VM
 *.dex
@@ -32,10 +55,12 @@ out/
 # Gradle files
 .gradle/
 build/
+samples/*/assets_tmp
+tests/*/assets_tmp
 
 # Visual Studio files
 .vs/
-project/windows/solution/
+project/windows/solution*/
 *.user
 *.suo
 
@@ -50,6 +75,11 @@ proguard/
 
 # Log Files
 *.log
+
+# Generic editor backup files
+*.tmp
+*.temp
+*.bak
 
 # Android Studio Navigation editor temp files
 .navigation/
@@ -110,13 +140,10 @@ debug/
 
 # imgui config
 imgui.ini
-project/buildtimestamp.h
-samples/hdrSwapchain/assets_tmp/
-samples/hello-gltf/assets_tmp/
-samples/rotatedCopy/assets_tmp/
-samples/shaderResolveTonemap/assets_tmp/
-samples/SubPass/assets_tmp/
-samples/BloomImageProcessing/assets_tmp/
-project/tools/ktx.dll
-project/tools/ktxinfo.exe
-project/tools/toktx.exe
+
+# archives
+*.zip
+*.7z
+*.rar
+*.gz
+*.tar

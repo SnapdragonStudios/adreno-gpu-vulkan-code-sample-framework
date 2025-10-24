@@ -1,0 +1,43 @@
+tests\
+        empty; framework\base
+        vulkan; framework\vulkan
+                framework_test_vulkan
+                hello_gltf_vulkan
+samples\
+	vulkan; framework\vulkan
+		vk_extensions
+			graph_pipelines
+			image_processing
+			tile_shading
+			tile_memory
+		misc
+			sgsr
+			sgsr2
+		others
+			hdr_swapchain
+			rotated_copy
+			sub_pass
+	external\
+framework\
+	base; framework\external\GameSampleAssets, framework\external\glm, framework\external\tinyobjloader, framework\external\tinygltf, framework\external\json, framework\external\eigen
+	generic; framework\base, framework\external\imgui, framework\external\implot, framework\external\portable-file-dialogs, framework\external\KTX-Software, Tools
+	vulkan; framework\generic, framework\external\volk, framework\external\SPIRV-Cross, framework\external\glslang, framework\external\slang, framework\external\VulkanMemoryAllocator, framework\external\Vulkan-Headers
+	external\
+			VulkanMemoryAllocator @ https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.0.1.tar.gz MD5:8571f3def0ff86f228e2864c907ba0b3
+			tinyobjloader @ https://github.com/tinyobjloader/tinyobjloader/archive/e39c1737bc61c8dce28be7932cfe839d408e7838.zip
+			tinygltf @ https://github.com/syoyo/tinygltf/archive/925b83627a136d24411067031893dc8ea661444d.zip
+			imgui @ https://github.com/ocornut/imgui/archive/4f9ba19e520bea478f5cb654d37ef45e6404bd52.zip MD5:2d0aa43693cdada8abb9d49a44c1337b
+			implot @ https://github.com/epezent/implot/archive/f156599faefe316f7dd20fe6c783bf87c8bb6fd9.zip MD5:b95d158f69b1716da2cd7c17d63bdce4
+			portable-file-dialogs @ https://github.com/samhocevar/portable-file-dialogs/archive/7f852d88a480020d7f91957cbcefe514fc95000c.zip MD5:ec1fd9e86f260b99a50294b8f53f872f
+			Vulkan-Headers @ https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.328.zip
+			glm @ https://github.com/g-truc/glm/archive/6ad79aae3eb5bf809c30bf1168171e9e55857e45.zip
+			GameSampleAssets @ https://github.com/SnapdragonStudios/game-assets-for-adreno-gpu-code-samples/archive/0ef8e70049ffd9ee4f9138b43815b21f959497d0.zip
+			volk @ https://github.com/zeux/volk/archive/1e0ec168f1726e6389b8647435a3018f0cef9428.zip
+			SPIRV-Cross @ https://github.com/KhronosGroup/SPIRV-Cross/archive/7affe74d77f93a622bb5002789d5332d32e512ee.zip
+			glslang @ https://github.com/KhronosGroup/glslang/archive/3a7f78758f8faa9a6e059b09e25fc64ede7fbfb0.zip
+			slang @ https://github.com/shader-slang/slang/archive/9c2024a7509baae921083d49a56e1321c51f00ec.zip
+			json @ https://github.com/nlohmann/json/releases/download/v3.10.5/json.tar.xz MD5:4b67aba51ddf17c798e80361f527f50e
+			eigen @ https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz MD5:4c527a9171d71a72a9d4186e65bea559
+			KTX-Software @ https://github.com/KhronosGroup/KTX-Software/archive/refs/tags/v4.1.0.tar.gz MD5:b35fc412cdb3a00aa92aadcdd1e5f004 PATCH:..\cmake\KTX-Software.diff; Tools
+			D3D12MemoryAllocator @ https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator/archive/7597f717c7b32b74d263009ecc15985b517585c7.zip
+

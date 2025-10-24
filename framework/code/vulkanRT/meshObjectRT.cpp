@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -39,12 +39,12 @@ MeshObjectRT::~MeshObjectRT()
 {}
 
 
-bool MeshObjectRT::Create( Vulkan& vulkan, VulkanRT& vulkanRT, const MeshObjectIntermediate& meshObject, MeshObjectRT::UpdateMode updateMode )
+bool MeshObjectRT::Create( Vulkan& vulkan, VulkanRT& vulkanRT, const MeshObjectIntermediate& meshObject, bool allowDataAccess, MeshObjectRT::UpdateMode updateMode)
 {
     auto& memoryManager = vulkan.GetMemoryManager();
 
     // Convert the 'intermediate' mesh vertex data in to 'vertexFormat' and then copy in to a VertexBuffer (device memory)
-    BufferT<Vulkan> deviceVertexBuffer = CreateRtVertexBuffer(memoryManager, meshObject);
+    auto deviceVertexBuffer = CreateRtVertexBuffer(memoryManager, meshObject);
     if (deviceVertexBuffer.GetVkBuffer() == VK_NULL_HANDLE)
     {
         return false;
@@ -70,8 +70,8 @@ bool MeshObjectRT::Create( Vulkan& vulkan, VulkanRT& vulkanRT, const MeshObjectI
     //
     // If meshObject has an index buffer then copy the data in to a Vulkan buffer
     //
-    std::optional<IndexBufferObject> deviceIndexBuffer;
-    if (!MeshHelper::CreateIndexBuffer<Vulkan>(memoryManager, meshObject, deviceIndexBuffer, BufferUsageFlags::AccelerationStructureBuild|BufferUsageFlags::ShaderDeviceAddress))
+    std::optional<IndexBuffer<Vulkan>> deviceIndexBuffer;
+    if (!MeshHelper::CreateIndexBuffer(memoryManager, meshObject, deviceIndexBuffer, BufferUsageFlags::AccelerationStructureBuild|BufferUsageFlags::ShaderDeviceAddress))
     {
         return false;
     }
@@ -102,6 +102,9 @@ bool MeshObjectRT::Create( Vulkan& vulkan, VulkanRT& vulkanRT, const MeshObjectI
     VkBuildAccelerationStructureFlagsKHR asFlags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR /*| VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR*/;
     if (updateMode != UpdateMode::NotUpdatable)
         asFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+
+    if (allowDataAccess)
+        asFlags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DATA_ACCESS_KHR ;
 
     std::array<uint32_t, asGeometry.size()> asMaxPrimitiveCounts = { primitiveCount };
 
@@ -139,7 +142,7 @@ bool MeshObjectRT::Create( Vulkan& vulkan, VulkanRT& vulkanRT, const MeshObjectI
 
     // Acceleration structure is ready.  Grab its device address (for the top level structure to reference)
     assert(!m_DeviceAddress);
-    m_DeviceAddress = vulkanRT.vkGetAccelerationStructureDeviceAddressKHR( GetVkAccelerationStructure() );
+    m_DeviceAddress = vulkanRT.vkGetAccelerationStructureDeviceAddressKHR( GetAccelerationStructure().GetVkAccelerationStructure() );
 
     // Cleanup
     asBuildScratch.Destroy(vulkan);
@@ -155,11 +158,11 @@ void MeshObjectRT::Destroy(Vulkan& vulkan, VulkanRT& vulkanRT)
 }
 
 
-BufferT<Vulkan> MeshObjectRT::CreateRtVertexBuffer(MemoryManager<Vulkan>& memoryManager, const MeshObjectIntermediate& meshObject, BufferUsageFlags usageFlags)
+Buffer<Vulkan> MeshObjectRT::CreateRtVertexBuffer(MemoryManager<Vulkan>& memoryManager, const MeshObjectIntermediate& meshObject, BufferUsageFlags usageFlags)
 {
-    BufferT<Vulkan> deviceVertexBuffer;
+    Buffer<Vulkan> deviceVertexBuffer;
     {
-        const std::vector<uint32_t> vertexData = MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(meshObject.m_VertexBuffer, accelerationStructureVertexFormat);
+        const std::vector<uint32_t> vertexData = MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(meshObject.m_VertexBuffer, {}, accelerationStructureVertexFormat);
         if (!deviceVertexBuffer.Initialize(&memoryManager, vertexData.size() * sizeof(uint32_t), usageFlags, vertexData.data()))
         {
             return {};

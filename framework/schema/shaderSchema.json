@@ -45,6 +45,14 @@
             "RayMiss": {
               "type": "string",
               "description": "filename of the spir-v ray miss shader"
+            },
+            "Mesh": {
+              "type": "string",
+              "description": "filename of the spir-v mesh shader"
+            },
+            "Task": {
+              "type": "string",
+              "description": "filename of the spir-v task shader"
             }
           },
           "minProperties": 1,
@@ -57,6 +65,9 @@
             "type": "object",
             "description": "descriptor set",
             "properties": {
+              "Name": {
+                "type": "string"
+              },
               "Buffers": {
                 "type": "array",
                 "items": {
@@ -66,7 +77,7 @@
                     "Type": {
                       "type": "string",
                       "description": "Descriptor set(s) type",
-                      "enum": [ "ImageSampler", "UniformBuffer", "Texture", "Sampler", "StorageBuffer", "ImageStorage", "InputAttachment", "AccelerationStructure" ]
+                      "enum": [ "UniformBuffer", "ImageSampler", "ImageSampled", "Sampler", "StorageBuffer", "ImageStorage", "InputAttachment", "AccelerationStructure", "DescriptorTable", "Unused" ]
                     },
                     "Stages": {
                       "type": "array",
@@ -74,7 +85,7 @@
                       "items": {
                         "type": "string",
                         "description": "Stage name",
-                        "enum": [ "Vertex", "Fragment", "Compute", "RayGeneration", "RayClosestHit", "RayAnyHit", "RayMiss" ]
+                        "enum": [ "Vertex", "Fragment", "Compute", "RayGeneration", "RayClosestHit", "RayAnyHit", "RayMiss", "Mesh", "Task" ]
                       },
                       "uniqueItems": true,
                       "minItems": 1,
@@ -107,6 +118,43 @@
             "additionalProperties": false,
             "minItems": 1
           }
+        },
+        "RootSamplers": {
+          "type": "array",
+          "description": "Immutable Root signature Texture Samplers (DX12 only)",
+          "items": {
+            "type": "object",
+            "description": "root sampler",
+            "properties": {
+              "Mode": {
+                "type": "string",
+                "enum": [ "Undefined", "Repeat", "MirroredRepeat", "ClampEdge", "ClampBorder", "MirroredClampEdge" ]
+              },
+              "Filter": {
+                "type": "string",
+                "enum": [ "Undefined", "Nearest", "Linear" ]
+              },
+              "MipFilter": {
+                "type": "string",
+                "enum": [ "Undefined", "Nearest", "Linear" ]
+              },
+              "MipBias": {
+                "type": "number"
+              },
+              "Anisotropy": {
+                "type": "integer"
+              },
+              "MinLod": {
+                "type": "number"
+              },
+              "MaxLod": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          },
+          "additionalProperties": false,
+          "minItems": 0
         },
         "VertexBindings": {
           "type": "array",
@@ -190,38 +238,41 @@
           "additionalProperties": false
         },
         "Outputs": {
-            "type": "array",
-            "description": "Output(s) description (frag shader)",
-            "items": {
-                "type": "object",
-                "description": "fixedFunction settings",
-                "properties": {
-                    "BlendEnable": {
-                        "type": "boolean"
-                    },
-                    "SrcColorBlendFactor": {
-                        "type": "string",
-                        "enum": [ "Zero", "One", "SrcAlpha", "OneMinusSrcAlpha", "DstAlpha", "OneMinusDstAlpha" ]
-                    },
-                    "DstColorBlendFactor": {
-                        "type": "string",
-                        "enum": [ "Zero", "One", "SrcAlpha", "OneMinusSrcAlpha", "DstAlpha", "OneMinusDstAlpha" ]
-                    },
-                    "SrcAlphaBlendFactor": {
-                        "type": "string",
-                        "enum": [ "Zero", "One", "SrcAlpha", "OneMinusSrcAlpha", "DstAlpha", "OneMinusDstAlpha" ]
-                    },
-                    "DstAlphaBlendFactor": {
-                        "type": "string",
-                        "enum": [ "Zero", "One", "SrcAlpha", "OneMinusSrcAlpha", "DstAlpha", "OneMinusDstAlpha" ]
-                    },
-                    "ColorWriteMask": {
-                        "type": "integer",
-                        "minimum": 0
-                    }
-                },
-                "additionalProperties": false
-            }
+          "type": "array",
+          "description": "Output(s) description (frag shader)",
+          "items": {
+            "type": "object",
+            "description": "fixedFunction settings",
+            "properties": {
+              "BlendEnable": {
+                "type": "boolean"
+              },
+              "SrcColorBlendFactor": {
+                "type": "string",
+                "enum": [ "Zero", "One", "SrcAlpha", "OneMinusSrcAlpha", "DstAlpha", "OneMinusDstAlpha" ]
+              },
+              "DstColorBlendFactor": {
+                "type": "string",
+                "enum": [ "Zero", "One", "SrcAlpha", "OneMinusSrcAlpha", "DstAlpha", "OneMinusDstAlpha" ]
+              },
+              "SrcAlphaBlendFactor": {
+                "type": "string",
+                "enum": [ "Zero", "One", "SrcAlpha", "OneMinusSrcAlpha", "DstAlpha", "OneMinusDstAlpha" ]
+              },
+              "DstAlphaBlendFactor": {
+                "type": "string",
+                "enum": [ "Zero", "One", "SrcAlpha", "OneMinusSrcAlpha", "DstAlpha", "OneMinusDstAlpha" ]
+              },
+              "ColorWriteMask": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "Name": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
         },
         "WorkGroup": {
           "type": "object",
@@ -237,9 +288,16 @@
                 "default": 1
               },
               "description": "local workgroup size (x,y,z)"
+            },
+            "PerTileDispatch": {
+              "type": "boolean",
+              "description": "Enable per tile dispatch mode (threads dispatched = Number of pixels in tile x rate setting in shader')"
             }
           },
-          "required": [ "LocalSize" ],
+          "oneOf": [
+            { "required": [ "LocalSize" ] },
+            { "required": [ "PerTileDispatch" ] }
+          ],
           "additionalProperties": false
         },
         "RayTracing": {
@@ -298,7 +356,7 @@
               },
               "Type": {
                 "type": "string",
-                "enum": [ "Int32", "Float", "Vec2", "Vec3", "Vec4", "Int16", "Float16", "F16Vec2", "F16Vec3", "F16Vec4" ],
+                "enum": [ "Int32", "Float", "Vec2", "Vec3", "Vec4", "Int16", "UInt16", "Float16", "F16Vec2", "F16Vec3", "F16Vec4", "I16Vec2", "I16Vec3", "I16Vec4", "U16Vec2", "U16Vec3", "U16Vec4", "IVec2", "IVec3", "IVec4", "UVec2", "UVec3", "UVec4" ],
                 "description": "Element data type"
               }
             },
@@ -332,6 +390,9 @@
       },
       "minItems": 0,
       "additionalProperties": false
+    },
+    "TileShader": {
+
     },
     "$schema": {
       "type": "string"
