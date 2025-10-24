@@ -1,10 +1,9 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2022 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 #pragma once
 #include <memory>
 
@@ -31,7 +30,7 @@ enum class RenderPassOutputUsage {
 /// @brief Helpers to convert from base type to graphics api derived type
 /// Use ONLY if you are sure the base object ACTUALLY matches give graphics api.
 /// @tparam T_GFXAPI graphics api to cast to.
-/// @param rBase base object (eg Texture)
+/// @param rBase base object (eg TextureBase)
 template<class T_GFXAPI, class T>
 const auto& apiCast(const T& rBase) {
     using tDerived = typename T::template tApiDerived<T_GFXAPI>;
@@ -58,7 +57,7 @@ auto* apiCast(T* rBase) {
 template<class T_GFXAPI, typename T>
 auto apiCast(std::unique_ptr<T>&& rBase) {
     using tDerived = typename T::template tApiDerived<T_GFXAPI>;
-    return std::unique_ptr<tDerived>(static_cast<tDerived*>(rBase.release()));
+    return std::unique_ptr<tDerived>(static_cast<tDerived*>(rBase.get()));
 }
 
 

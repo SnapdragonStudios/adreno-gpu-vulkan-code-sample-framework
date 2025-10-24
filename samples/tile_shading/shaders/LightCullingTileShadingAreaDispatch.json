@@ -1,0 +1,47 @@
+{
+	"$schema": "../../../framework/schema/shaderSchema.json",
+	"Passes": [
+		{
+			"Name": "CP_LIGHT_CULLING_LIST",
+			"Shaders": {
+				"Compute": "Media/Shaders/LightCullingTileShadingAreaDispatch.comp.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "ImageSampled",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "SceneDepth" ]
+						},
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "SceneInfo" ]
+						},
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "LightInfo" ]
+						},
+						{
+							"Type": "StorageBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "LightIndices" ]
+						},
+						{
+							"Type": "StorageBuffer",
+							"Stages": [ "Compute" ],
+							"Count": 1,
+							"Names": [ "LightCounts" ]
+						}
+					]
+				}
+			]
+		}
+	]
+}

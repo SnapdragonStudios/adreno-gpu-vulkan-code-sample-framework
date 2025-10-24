@@ -1,79 +1,59 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2022 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 #pragma once
 
 #include "../texture.hpp"
+#include "sampler.hpp"
 #include "memory/vulkan/memoryMapped.hpp"
-#include <vulkan/vulkan.h>
+#include "vulkan/refHandle.hpp"
+#include <volk/volk.h>
 #include <vector>
 
 // Forward declarations
 class Vulkan;
 template<typename T_GFXAPI, typename T_BUFFER> class MemoryAllocatedBuffer;
-using TextureVulkan = TextureT<Vulkan>;
-using ImageVulkan = ImageT<Vulkan>;
-using ImageViewVulkan = ImageViewT<Vulkan>;
-using SamplerVulkan = SamplerT<Vulkan>;
+template<typename T_GFXAPI> class MemoryPool;
+using TextureVulkan = Texture<Vulkan>;
+using ImageVulkan = Image<Vulkan>;
+using ImageViewVulkan = ImageView<Vulkan>;
+using SamplerVulkan = Sampler<Vulkan>;
 
 /// @brief Convert from our TextureFormat to Vulkan's VkFormat
 extern VkFormat TextureFormatToVk(TextureFormat);
-/// @brief Convert from our Vulkan's VkFormat to our TextureFormat.
+/// @brief Convert from Vulkan's VkFormat to our TextureFormat.
 extern TextureFormat VkToTextureFormat(VkFormat);
+/// @brief Convert from our MSaa enum to Vulkan's VkSampleCountFlagBits
+extern VkSampleCountFlagBits EnumToVk(Msaa msaa);
 
 
-/// @brief Template specialization of sampler container for Vulkan graphics api.
+/// @brief Template specialization of imageview container for Vulkan graphics api.
 template<>
-class SamplerT<Vulkan> final : public Sampler
+class ImageView<Vulkan> final : public ImageViewBase
 {
 public:
-    SamplerT() noexcept;
-    ~SamplerT() noexcept;
-    SamplerT(VkSampler sampler) noexcept;
-    SamplerT(SamplerT<Vulkan>&& src) noexcept;
-    SamplerT& operator=(SamplerT<Vulkan>&& src) noexcept;
-    SamplerT<Vulkan> Copy() const noexcept
-    {
-        return {m_Sampler};
-    }
-
-    auto GetVkSampler() const { return m_Sampler; }
-    bool IsEmpty() const { return m_Sampler == VK_NULL_HANDLE; }
-
-private:
-    friend void ReleaseSampler<Vulkan>( Vulkan& vulkan, SamplerT<Vulkan>* pSampler );
-    VkSampler   m_Sampler;
-};
-
-
-/// @brief Template specialization of sampler container for Vulkan graphics api.
-template<>
-class ImageViewT<Vulkan> final : public ImageView
-{
-public:
-    ImageViewT() noexcept : m_ImageView( VK_NULL_HANDLE ), m_ImageViewType( ImageViewType::View1D ) {};
-    ImageViewT( VkImageView imageView, VkImageViewType viewType ) noexcept;
-    ImageViewT( ImageViewT<Vulkan>&& src ) noexcept {
+    ImageView() noexcept : m_ImageView( VK_NULL_HANDLE ), m_ImageViewType( ImageViewType::View1D ) {};
+    ImageView( VkImageView imageView, VkImageViewType viewType ) noexcept;
+    ImageView( ImageView<Vulkan>&& src ) noexcept {
         *this = std::move( src );
     }
-    ImageViewT& operator=( ImageViewT<Vulkan>&& src ) noexcept {
+    ImageView& operator=( ImageView<Vulkan>&& src ) noexcept {
         m_ImageView = src.m_ImageView;
         src.m_ImageView = VK_NULL_HANDLE;
         m_ImageViewType = src.m_ImageViewType;
         src.m_ImageViewType = ImageViewType::View1D;
         return *this;
     }
-    ~ImageViewT();
+    ~ImageView();
     auto GetImageViewType() const { return m_ImageViewType; }
     auto GetVkImageView() const { return m_ImageView; }
     bool IsEmpty() const { return m_ImageView == VK_NULL_HANDLE; }
 
 private:
-    friend void ReleaseImageView<Vulkan>( Vulkan& vulkan, ImageViewT<Vulkan>* pImageView );
+    friend void ReleaseImageView<Vulkan>( Vulkan& vulkan, ImageView<Vulkan>* pImageView );
     VkImageView     m_ImageView;
     ImageViewType   m_ImageViewType;
 };
@@ -81,71 +61,76 @@ private:
 
 /// @brief Template specialization of image container for Vulkan graphics api.
 template<>
-class ImageT<Vulkan> final : public Image
+class Image<Vulkan> final : public ImageBase
 {
 public:
-    ImageT() noexcept {};
+    Image() noexcept {};
 
-    /// @brief Construct ImageT from a pre-existing vmaImage.
-    /// @param vmaImage - ownership passed to this ImageT.
-    ImageT( MemoryAllocatedBuffer<Vulkan, VkImage> vmaImage ) noexcept;
+    /// @brief Construct Image from a pre-existing vmaImage.
+    /// @param vmaImage - ownership passed to this Image.
+    Image( MemoryAllocatedBuffer<Vulkan, VkImage> vmaImage ) noexcept;
 
-    /// @brief Construct ImageT from a pre-existing Vulkan image/memory handles.
-    /// @param image - ownership NOT passed in to this ImageT, beware of lifetime issues.
-    /// @param memory - ownership NOT passed to this ImageT, beware of lifetime issues.
-    ImageT( VkImage image, VkDeviceMemory memory ) noexcept;
+    /// @brief Construct Image from a pre-existing Vulkan image/memory handles.
+    /// @param image - ownership NOT passed in to this Image, beware of lifetime issues.
+    /// @param memory - ownership NOT passed to this Image, beware of lifetime issues.
+    Image( VkImage image, VkDeviceMemory memory ) noexcept;
 
-    ImageT( ImageT<Vulkan>&& src ) noexcept {
+    Image( Image<Vulkan>&& src ) noexcept {
         *this = std::move( src );
     }
-    ImageT& operator=( ImageT<Vulkan>&& src ) noexcept
+    Image& operator=( Image<Vulkan>&& src ) noexcept
     {
-        VmaImage = std::move(src.VmaImage);
-        Image = src.Image;
-        src.Image = VK_NULL_HANDLE;
-        Memory = src.Memory;
-        src.Memory = VK_NULL_HANDLE;
+        m_VmaImage = std::move(src.m_VmaImage );
+        m_Image = src.m_Image;
+        src.m_Image = VK_NULL_HANDLE;
+        m_Memory = src.m_Memory;
+        src.m_Memory = VK_NULL_HANDLE;
         return *this;
     }
-    ~ImageT();
-    VkImage	GetVkImage() const { return VmaImage ? VmaImage.GetVkBuffer() : Image; }
-    bool IsEmpty() const { return !VmaImage && Image == VK_NULL_HANDLE; }
+    ~Image();
+    VkImage	GetVkImage() const { return m_VmaImage ? m_VmaImage.GetVkBuffer() : m_Image; }
+    const auto& GetMemoryAllocation() const { return m_VmaImage.GetMemoryAllocation(); }
+    bool IsEmpty() const { return !m_VmaImage && m_Image == VK_NULL_HANDLE; }
+
+    //Image Copy();
 
 private:
-    friend void ReleaseImage<Vulkan>( Vulkan& vulkan, ImageT<Vulkan>* pImage );
+    friend void ReleaseImage<Vulkan>( Vulkan& vulkan, Image<Vulkan>* pImage );
 
     // Managed memory buffer allocation and VkImage
-    MemoryAllocatedBuffer<Vulkan, VkImage>  VmaImage;
+    MemoryAllocatedBuffer<Vulkan, VkImage>  m_VmaImage;
 
     // Needed for functions handling own memory (i.e. AndroidHardwareBuffers)
-    VkImage                                 Image = VK_NULL_HANDLE;
-    VkDeviceMemory                          Memory = VK_NULL_HANDLE;
+    VkImage                                 m_Image = VK_NULL_HANDLE;
+    VkDeviceMemory                          m_Memory = VK_NULL_HANDLE;
 };
 
 
 /// @brief Template specialization of texture container for Vulkan graphics api.
 template<>
-class TextureT<Vulkan> final : public Texture
+class Texture<Vulkan> final : public TextureBase
 {
 public:
-    TextureT() noexcept;
-    TextureT(const TextureT<Vulkan>&) = delete;
-    TextureT& operator=(const TextureT<Vulkan>&) = delete;
-    TextureT(TextureT<Vulkan>&&) noexcept;
-    TextureT& operator=(TextureT<Vulkan>&&) noexcept;
-    ~TextureT() noexcept;
+    Texture() noexcept;
+    Texture(const Texture<Vulkan>&) = delete;
+    Texture& operator=(const Texture<Vulkan>&) = delete;
+    Texture(Texture<Vulkan>&&) noexcept;
+    Texture& operator=(Texture<Vulkan>&&) noexcept;
+    ~Texture() noexcept;
 
-    /// @brief Construct TextureT from a pre-existing vmaImage.
-    /// @param vmaImage - ownership passed to this TextureT.
-    /// @param sampler - ownership passed to this TextureT.
-    /// @param imageView - ownership passed to this TextureT.
-    TextureT(uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevels, uint32_t firstMip, uint32_t faces, uint32_t firstFace, TextureFormat, VkImageLayout imageLayout, ImageT<Vulkan> image, SamplerT<Vulkan> sampler, ImageViewT<Vulkan> imageView) noexcept;
+    operator bool() const { return !IsEmpty(); }
 
-    /// @brief Construct TextureT from a pre-existing Vulkan image/memory handles.
-    /// @param image - ownership NOT passed in to this TextureT, beware of lifetime issues.
-    /// @param sampler - ownership passed to this TextureT.
-    /// @param imageView - ownership passed to this TextureT.
-    TextureT(uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevels, uint32_t firstMip, uint32_t faces, uint32_t firstFace, TextureFormat format, VkImageLayout imageLayout, VkImage image, VkDeviceMemory memory, SamplerT<Vulkan> sampler, ImageViewT<Vulkan> imageView) noexcept;
+    /// @brief Construct Texture from a pre-existing vmaImage.
+    /// @param vmaImage - ownership passed to this Texture.
+    /// @param sampler - ownership passed to this Texture.
+    /// @param imageView - ownership passed to this Texture.
+    Texture(uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevels, uint32_t firstMip, uint32_t faces, uint32_t firstFace, TextureFormat, VkImageLayout imageLayout, VkClearValue clearValue, ::Image<Vulkan> image, ::Sampler<Vulkan> sampler, ::ImageView<Vulkan> imageView) noexcept;
+
+    /// @brief Construct Texture from a pre-existing Vulkan image/memory handles.
+    /// @param image - ownership NOT passed in to this Texture, beware of lifetime issues.
+    /// @param sampler - ownership passed to this Texture.
+    /// @param imageView - ownership passed to this Texture.
+    Texture(uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevels, uint32_t firstMip, uint32_t faces, uint32_t firstFace, TextureFormat format, VkImageLayout imageLayout, VkClearValue clearValue, VkImage image, VkDeviceMemory memory, Sampler<Vulkan> sampler, ::ImageView<Vulkan> imageView) noexcept;
 
     void Release(GraphicsApiBase* pGraphicsApi) override;
 
@@ -154,6 +139,7 @@ public:
     VkImageLayout		  GetVkImageLayout() const { return ImageLayout; }
     VkSampler			  GetVkSampler() const { return Sampler.GetVkSampler(); }
     VkImageView			  GetVkImageView() const { return ImageView.GetVkImageView(); }
+    VkClearValue          GetVkClearValue() const { return ClearValue; }
     bool				  IsEmpty() const { return Image.IsEmpty() || Sampler.IsEmpty(); }
 
     uint32_t  Width = 0;
@@ -165,49 +151,47 @@ public:
     uint32_t  FirstFace = 0;
     TextureFormat  Format = TextureFormat::UNDEFINED;
     VkImageLayout ImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkClearValue  ClearValue {};
 
 public:
-    ImageT<Vulkan>                          Image;
-    SamplerT<Vulkan>                        Sampler;
-    ImageViewT<Vulkan>                      ImageView;
+    Image<Vulkan>                          Image;
+    Sampler<Vulkan>                        Sampler;
+    ImageView<Vulkan>                      ImageView;
 };
 
 
 /// Template specialization for Vulkan CreateTextureObject
 template<>
-TextureT<Vulkan> CreateTextureObject<Vulkan>( Vulkan&, const CreateTexObjectInfo& texInfo );
+Texture<Vulkan> CreateTextureObject<Vulkan>( Vulkan&, const CreateTexObjectInfo& texInfo, MemoryPool<Vulkan>* pPool);
 
 /// Template specialization for Vulkan CreateTextureFromBuffer
 template<>
-TextureT<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan&, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName );
+Texture<Vulkan> CreateTextureFromBuffer<Vulkan>( Vulkan&, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName );
 
 /// Create a texture that views (aliases) another texture but using a different texture format (must be 'related' formats, which formats are related is dependant on graphics api)
-TextureT<Vulkan> CreateTextureObjectView( Vulkan&, const TextureT<Vulkan>& original, TextureFormat viewFormat );
+template<>
+Texture<Vulkan> CreateTextureObjectView( Vulkan&, const Texture<Vulkan>& original, TextureFormat viewFormat );
 
 /// Template specialization for Vulkan ReleaseTexture
 template<>
-void ReleaseTexture<Vulkan>( Vulkan& vulkan, TextureT<Vulkan>* );
+void ReleaseTexture<Vulkan>( Vulkan& vulkan, Texture<Vulkan>* );
 
 /// Template specialization for Vulkan ReleaseImage
 template<>
-void ReleaseImage<Vulkan>( Vulkan& vulkan, ImageT<Vulkan>* );
+void ReleaseImage<Vulkan>( Vulkan& vulkan, Image<Vulkan>* );
 
 /// Template specialization for Vulkan CreateImageView
 template<>
-ImageViewT<Vulkan> CreateImageView( Vulkan&, const ImageT<Vulkan>& image, TextureFormat format, uint32_t numMipLevels, uint32_t baseMipLevel, uint32_t numFaces, uint32_t firstFace, ImageViewType viewType );
+ImageView<Vulkan> CreateImageView( Vulkan&, const Image<Vulkan>& image, TextureFormat format, uint32_t numMipLevels, uint32_t baseMipLevel, uint32_t numFaces, uint32_t firstFace, ImageViewType viewType );
 
 /// Template specialization for Vulkan ReleaseImageView
 template<>
-void ReleaseImageView<Vulkan>( Vulkan& vulkan, ImageViewT<Vulkan>* );
+void ReleaseImageView<Vulkan>( Vulkan& vulkan, ImageView<Vulkan>* );
 
 
 /// Template specialization for Vulkan CreateSampler
 template<>
-SamplerT<Vulkan> CreateSampler( Vulkan&, const CreateSamplerObjectInfo& );
-
-/// Template specialization for Vulkan ReleaseSampler
-template<>
-void ReleaseSampler<Vulkan>( Vulkan& vulkan, SamplerT<Vulkan>* );
+Sampler<Vulkan> CreateSampler( Vulkan&, const CreateSamplerObjectInfo& );
 
 /// Helper to take a sorce texture and make an array of textures where each one points to a single mip in the source
-std::vector<TextureT<Vulkan>> MakeTextureMipViews( Vulkan& vulkan, const TextureT<Vulkan>& source, uint32_t maxMips );
+std::vector<Texture<Vulkan>> MakeTextureMipViews( Vulkan& vulkan, const Texture<Vulkan>& source, uint32_t maxMips );

@@ -1,33 +1,34 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
 #include "buffer.hpp"
+#include <span>
 
 
 /// Templated (by graphics api) buffer containing vertex indices
 /// DO NOT specialize this template (use IndexBuffer for that)
 /// @ingroup Memory
 template<typename T_GFXAPI>
-class IndexBufferT: public BufferT<T_GFXAPI>
+class IndexBufferT: public Buffer<T_GFXAPI>
 {
     IndexBufferT(const IndexBufferT&) = delete;
     IndexBufferT& operator=(const IndexBufferT&) = delete;
 public:
     IndexBufferT(IndexType) noexcept;
-    //IndexBufferObject(VkIndexType) noexcept;
+    //IndexBuffer(VkIndexType) noexcept;
     IndexBufferT(IndexBufferT&&) noexcept;
     IndexBufferT& operator=(IndexBufferT&&) noexcept;
     ~IndexBufferT();
     using MemoryManager = MemoryManager<T_GFXAPI>;
 
     /// Initialization
-    template<typename T> bool Initialize( MemoryManager* pManager, size_t numIndices, const T* initialData, const bool dspUsable = false, const BufferUsageFlags usage = BufferUsageFlags::Index);
+    template<typename T> bool Initialize( MemoryManager* pManager, const std::span<const T> initialData, const bool dspUsable = false, const BufferUsageFlags usage = BufferUsageFlags::Index);
 
     /// Initialization
     bool Initialize( MemoryManager* pManager, size_t numIndices, const bool dspUsable = false, const BufferUsageFlags usage = BufferUsageFlags::Index );
@@ -70,7 +71,7 @@ class IndexBuffer : public IndexBufferT<T_GFXAPI>
 {
 public:
     IndexBuffer(IndexType i) noexcept : IndexBufferT<T_GFXAPI>(i) {}
-    //IndexBufferObject(VkIndexType) noexcept;
+    //IndexBuffer(VkIndexType) noexcept;
     IndexBuffer(IndexBuffer<T_GFXAPI>&& o) noexcept : IndexBufferT<T_GFXAPI>(std::move(o)) {}
     IndexBuffer<T_GFXAPI>& operator=(IndexBuffer<T_GFXAPI>&& o) noexcept { return IndexBufferT<T_GFXAPI>::operator=(o); };
     ~IndexBuffer() {}
@@ -80,14 +81,14 @@ public:
 
 
 template<typename T_GFXAPI>
-IndexBufferT<T_GFXAPI>::IndexBufferT(IndexType indexType) noexcept : BufferT<T_GFXAPI>(), mIndexType(indexType)
+IndexBufferT<T_GFXAPI>::IndexBufferT(IndexType indexType) noexcept : Buffer<T_GFXAPI>(), mIndexType(indexType)
 {}
 
 //template<typename T_GFXAPI>
 //IndexBufferT<T_GFXAPI>::IndexBufferT(VkIndexType) noexcept;
 
 template<typename T_GFXAPI>
-IndexBufferT<T_GFXAPI>::IndexBufferT(IndexBufferT<T_GFXAPI>&& other) noexcept : BufferT<T_GFXAPI>(std::move(other)), mIndexType(other.mIndexType)
+IndexBufferT<T_GFXAPI>::IndexBufferT(IndexBufferT<T_GFXAPI>&& other) noexcept : Buffer<T_GFXAPI>(std::move(other)), mIndexType(other.mIndexType)
 {
     assert(mIndexType == other.mIndexType);
     mNumIndices = other.mNumIndices;
@@ -98,7 +99,7 @@ IndexBufferT<T_GFXAPI>::IndexBufferT(IndexBufferT<T_GFXAPI>&& other) noexcept : 
 template<typename T_GFXAPI>
 IndexBufferT<T_GFXAPI>& IndexBufferT<T_GFXAPI>::operator=(IndexBufferT<T_GFXAPI>&& other) noexcept
 {
-    BufferT<T_GFXAPI>::operator=(std::move(other));
+    Buffer<T_GFXAPI>::operator=(std::move(other));
     if (&other != this)
     {
         assert(mIndexType == other.mIndexType);
@@ -113,10 +114,10 @@ template<typename T_GFXAPI>
 IndexBufferT<T_GFXAPI>::~IndexBufferT() {}
 
 template<typename T_GFXAPI> template<typename T>
-bool IndexBufferT<T_GFXAPI>::Initialize(MemoryManager* pManager, size_t numIndices, const T* initialData, const bool dspUsable, const BufferUsageFlags usage)
+bool IndexBufferT<T_GFXAPI>::Initialize(MemoryManager* pManager, const std::span<const T> initialData, const bool dspUsable, const BufferUsageFlags usage)
 {
     assert(sizeof(T) == GetIndexTypeBytes());
-    return Initialize(pManager, numIndices, (const void*)initialData, dspUsable, usage);
+    return Initialize(pManager, initialData.size(), initialData.data(), dspUsable, usage);
 }
 
 template<typename T_GFXAPI>
@@ -138,14 +139,14 @@ bool IndexBufferT<T_GFXAPI>::Initialize(MemoryManager* pManager, size_t numIndic
     }
     else
     {
-        return BufferT<T_GFXAPI>::Initialize(pManager, GetIndexTypeBytes() * mNumIndices, usage, initialData);
+        return Buffer<T_GFXAPI>::Initialize(pManager, GetIndexTypeBytes() * mNumIndices, usage, initialData);
     }
 }
 
 template<typename T_GFXAPI>
 void IndexBufferT<T_GFXAPI>::Destroy()
 {
-    BufferT<T_GFXAPI>::Destroy();
+    Buffer<T_GFXAPI>::Destroy();
 }
 
 template<typename T_GFXAPI>
@@ -153,11 +154,11 @@ template<typename T>
 MapGuard<T_GFXAPI, T> IndexBufferT<T_GFXAPI>::Map()
 {
     assert( sizeof(T) == GetIndexTypeBytes() );
-    return BufferT<T_GFXAPI>::template Map<T>();
+    return Buffer<T_GFXAPI>::template Map<T>();
 }
 
 template<typename T_GFXAPI>
 MapGuard<T_GFXAPI, void> IndexBufferT<T_GFXAPI>::MapVoid()
 {
-    return BufferT<T_GFXAPI>::template Map<void>();
+    return Buffer<T_GFXAPI>::template Map<void>();
 }

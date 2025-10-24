@@ -1,0 +1,94 @@
+{
+	"$schema": "../../../framework/schema/shaderSchema.json",
+	"Passes": [
+		{
+			"Name": "RP_SCENE",
+			"Shaders": {
+				"Vertex": "Media/Shaders/DeferredLight.vert.spv",
+				"Fragment": "Media/Shaders/DeferredLightTileShading.frag.spv"
+			},
+			"DescriptorSets": [
+				{
+					"Buffers": [
+						{
+							"Type": "InputAttachment",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "SceneColor" ]
+						},
+						{
+							"Type": "InputAttachment",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "SceneNormal" ]
+						},
+						{
+							"Type": "InputAttachment",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "SceneDepth" ]
+						},
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "SceneInfo" ]
+						},
+						{
+							"Type": "UniformBuffer",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "LightInfo" ]
+						},
+						{
+							"Type": "StorageBuffer",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "LightIndices" ]
+						},
+						{
+							"Type": "StorageBuffer",
+							"Stages": [ "Fragment" ],
+							"Count": 1,
+							"Names": [ "LightCounts" ]
+						}
+					]
+				}
+			],
+			"VertexBindings": [ "VB0" ]
+		}
+	],
+	"Vertex": [
+		{
+			"Span": 60,
+			"Name": "VB0",
+			"Elements": [
+				{
+					"Name": "Position",
+					"Offset": 0,
+					"Type": "Vec3"
+				},
+				{
+					"Name": "Normal",
+					"Offset": 12,
+					"Type": "Vec3"
+				},
+				{
+					"Name": "UV",
+					"Offset": 24,
+					"Type": "Vec2"
+				},
+				{
+					"Name": "Color",
+					"Offset": 32,
+					"Type": "Vec4"
+				},
+				{
+					"Name": "Tangent",
+					"Offset": 48,
+					"Type": "Vec3"
+				}
+			]
+		}
+	]
+}

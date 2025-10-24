@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -22,9 +22,9 @@ GuiImguiPlatform::~GuiImguiPlatform()
 {}
 
 
-bool GuiImguiPlatform::Initialize(uintptr_t windowHandle, uint32_t deviceWidth, uint32_t deviceHeight, uint32_t renderWidth, uint32_t renderHeight)
+bool GuiImguiPlatform::Initialize(uintptr_t windowHandle, TextureFormat renderFormat, uint32_t deviceWidth, uint32_t deviceHeight, uint32_t renderWidth, uint32_t renderHeight)
 {
-    if (!GuiImguiBase::Initialize(windowHandle, renderWidth, renderHeight))
+    if (!GuiImguiBase::Initialize(windowHandle, renderFormat, renderWidth, renderHeight))
     {
         return false;
     }

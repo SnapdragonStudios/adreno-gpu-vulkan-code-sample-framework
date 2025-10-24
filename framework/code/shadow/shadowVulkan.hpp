@@ -1,14 +1,15 @@
-//============================================================================================================
+//=============================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
+//                  Copyright (c) 2020 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//============================================================================================================
+//==============================================================================
 #pragma once
 
 #include "system/glm_common.hpp"
 #include "vulkan/vulkan_support.hpp"
+#include "vulkan/renderContext.hpp"
 #include "vulkan/renderTarget.hpp"
 #include "shadow.hpp"
 
@@ -31,45 +32,43 @@ public:
         return m_Scissor;
     }
 
-    auto GetRenderPass() const
+    const auto& GetRenderContext() const
     {
-        return m_ShadowMapRT.m_RenderPass;
+        return m_ShadowMapRC;
     }
-    auto GetFramebuffer(uint32_t idx = 0) const
+    VkFramebuffer GetFramebuffer(uint32_t idx = 0) const
     {
-        return m_ShadowMapRT[idx].m_FrameBuffer;
+        return m_ShadowMapRC.GetFramebuffer()->m_FrameBuffer;
     }
     void GetTargetSize(uint32_t& width, uint32_t& height) const
     {
-        width = m_ShadowMapRT[0].m_Width;
-        height = m_ShadowMapRT[0].m_Height;
+        width = m_ShadowDepthBuffer.Width;
+        height = m_ShadowDepthBuffer.Height;
     }
 
     auto GetDepthFormat(uint32_t frameBufferIndex = 0) const
     {
-        return m_ShadowMapRT[frameBufferIndex].m_DepthAttachment.Format;
+        return m_ShadowDepthBuffer.Format;
     }
-    const auto& GetDepthTexture(uint32_t frameBufferIndex = 0) const
+    const auto& GetDepthTexture() const
     {
-        return m_ShadowMapRT[frameBufferIndex].m_DepthAttachment;
+        return m_ShadowDepthBuffer;
     }
-    const TextureT<Vulkan>* GetColorTexture(uint32_t frameBufferIndex = 0) const
+    const Texture<Vulkan>* GetColorTexture() const
     {
-        if (frameBufferIndex < m_ShadowMapRT[frameBufferIndex].m_ColorAttachments.size())
-            return &m_ShadowMapRT[frameBufferIndex].m_ColorAttachments[frameBufferIndex];
-        return nullptr;
-    }
-    const auto& GetRenderTarget(uint32_t frameBufferIndex = 0) const
-    {
-        return m_ShadowMapRT[frameBufferIndex];
+        return &m_ShadowColorBuffer;
     }
 
 protected:
     VkViewport              m_Viewport = {};
     VkRect2D                m_Scissor = {};
 
-    // Render targets and renderpass
-    CRenderTargetArray<1>   m_ShadowMapRT;
+    // Render targets (images)
+    Texture<Vulkan>         m_ShadowDepthBuffer;
+    Texture<Vulkan>         m_ShadowColorBuffer;
+
+    // Render context (renderpass and framebuffer)
+    RenderContext<Vulkan>   m_ShadowMapRC;
 };
 
 using ShadowVulkan = ShadowT<Vulkan>;

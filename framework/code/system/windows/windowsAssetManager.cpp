@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -104,6 +104,7 @@ std::string AssetManager::PortableFilenameToDevicePath(const std::string& portab
 {
     std::string output;
     output.reserve(portableFileName.length());
+    // change forwardslash / to backslash \   .
     std::transform(portableFileName.begin(), portableFileName.end(), std::back_inserter(output), [](char c) { return c == '/' ? '\\' : c; });
     return output;
 }

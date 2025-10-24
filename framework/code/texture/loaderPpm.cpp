@@ -1,7 +1,6 @@
 //============================================================================================================
 //
-//
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -36,17 +35,17 @@ void TexturePpmFileWrapper::Release()
     //m_ppmTexture = nullptr;
 }
 
-TexturePpm::~TexturePpm() noexcept
+TexturePpmBase::~TexturePpmBase() noexcept
 {
     Release();
 }
 
-bool TexturePpm::Initialize()
+bool TexturePpmBase::Initialize()
 {
     return true;
 }
 
-TexturePpmFileWrapper TexturePpm::LoadFile( AssetManager& assetManager, const char* const pFileName ) const
+TexturePpmFileWrapper TexturePpmBase::LoadFile( AssetManager& assetManager, const char* const pFileName ) const
 {
     std::vector<uint8_t> fileData;
     if (!assetManager.LoadFileIntoMemory( pFileName, fileData ))

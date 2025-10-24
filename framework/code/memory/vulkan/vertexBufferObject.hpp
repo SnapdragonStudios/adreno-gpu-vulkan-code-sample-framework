@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -10,15 +10,15 @@
 #include "vulkan/vulkan.hpp"
 #include "bufferObject.hpp"
 #include "memory/vertexBuffer.hpp"
+#include <span>
 
 class Vulkan;
-using VertexBufferObject = VertexBuffer<Vulkan>;
 
 
 /// Buffer containing vertex data (specialized for Vulkan).
 /// @ingroup Memory
 template<>
-class VertexBuffer<Vulkan> : public BufferT<Vulkan>
+class VertexBuffer<Vulkan> : public Buffer<Vulkan>
 {
     VertexBuffer& operator=(const VertexBuffer<Vulkan>&) = delete;
     VertexBuffer(const VertexBuffer<Vulkan>&) = delete;
@@ -30,7 +30,13 @@ public:
 
     bool Initialize(MemoryManager* pManager, size_t span, size_t numVerts, const void* initialData, const bool dspUsable = false, const BufferUsageFlags usage = BufferUsageFlags::Vertex );
     template<typename T>
-    bool Initialize(MemoryManager* pManager, size_t numVerts, const T* initialData, const bool dspUsable = false, const BufferUsageFlags usage = BufferUsageFlags::Vertex);
+    bool Initialize(MemoryManager* pManager, const std::span<const T> initialData, const bool dspUsable = false, const BufferUsageFlags usage = BufferUsageFlags::Vertex);
+    template<typename T>
+    bool Initialize(MemoryManager* pManager, size_t numVerts, const bool dspUsable = false, const BufferUsageFlags usage = BufferUsageFlags::Vertex);
+
+    bool Update(MemoryManager* pManager, size_t dataSize, const void* newData);
+
+    bool GetMeshData(MemoryManager* pManager, size_t dataSize, void* outputData) const;
 
     /// destroy buffer and leave in a state where it could be re-initialized
     virtual void Destroy() override;
@@ -77,7 +83,13 @@ protected:
 };
 
 template<typename T>
-bool VertexBuffer<Vulkan>::Initialize(MemoryManager* pManager, size_t numVerts, const T* initialData, const bool dspUsable, const BufferUsageFlags usage )
+bool VertexBuffer<Vulkan>::Initialize(MemoryManager* pManager, const std::span<const T> initialData, const bool dspUsable, const BufferUsageFlags usage)
 {
-    return Initialize(pManager, sizeof(T), numVerts, initialData, dspUsable, usage);
+    return Initialize(pManager, sizeof(T), initialData.size(), initialData.data(), dspUsable, usage);
+}
+
+template<typename T>
+bool VertexBuffer<Vulkan>::Initialize(MemoryManager* pManager, size_t numVertices, const bool dspUsable, const BufferUsageFlags usage)
+{
+    return Initialize(pManager, sizeof(T), numVertices, nullptr, dspUsable, usage);
 }

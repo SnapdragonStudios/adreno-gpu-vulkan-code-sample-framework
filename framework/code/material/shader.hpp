@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -22,8 +22,10 @@
 // forward declarations
 class GraphicsApiBase;
 class ShaderDescription;
-template<typename T_GFXAPI> class ShaderT;
-template<typename T_GFXAPI> class ShaderModuleT;
+template<typename T_GFXAPI> class Shader;
+template<typename T_GFXAPI> class ShaderModule;
+template<typename T_GFXAPI> class ShaderPass;
+template<typename T_GFXAPI> class DescriptorSetLayout;
 class ShaderPassDescription;
 
 /// Reference to a 'normal' graphics pipeline pairing of a vertex and fragment shader
@@ -31,15 +33,15 @@ class ShaderPassDescription;
 template<typename T_GFXAPI>
 struct GraphicsShaderModules
 {
-    ShaderModuleT<T_GFXAPI>& vert;
-    ShaderModuleT<T_GFXAPI>& frag;
+    ShaderModule<T_GFXAPI>& vert;
+    ShaderModule<T_GFXAPI>& frag;
 };
 /// Reference to a 'vertex only' graphics pipeline pairing of a vertex shader (no fragment, typically used when laying down a depth buffer)
 /// @ingroup Material
 template<typename T_GFXAPI>
 struct GraphicsShaderModuleVertOnly
 {
-    ShaderModuleT<T_GFXAPI>& vert;
+    ShaderModule<T_GFXAPI>& vert;
     operator const auto& () const { return vert; }
 };
 /// Reference to a 'mesh' graphics pipeline pairing of a mesh and fragment shader
@@ -47,17 +49,17 @@ struct GraphicsShaderModuleVertOnly
 template<typename T_GFXAPI>
 struct GraphicsMeshShaderModules
 {
-    ShaderModuleT<T_GFXAPI>& mesh;
-    ShaderModuleT<T_GFXAPI>& frag;
+    ShaderModule<T_GFXAPI>& mesh;
+    ShaderModule<T_GFXAPI>& frag;
 };
 /// Reference to a 'task mesh' graphics pipeline pairing of a task, mesh and fragment shader
 /// @ingroup Material
 template<typename T_GFXAPI>
 struct GraphicsTaskMeshShaderModules
 {
-    ShaderModuleT<T_GFXAPI>& task;
-    ShaderModuleT<T_GFXAPI>& mesh;
-    ShaderModuleT<T_GFXAPI>& frag;
+    ShaderModule<T_GFXAPI>& task;
+    ShaderModule<T_GFXAPI>& mesh;
+    ShaderModule<T_GFXAPI>& frag;
 };
 
 /// Reference to a compute shader
@@ -65,18 +67,18 @@ struct GraphicsTaskMeshShaderModules
 template<typename T_GFXAPI>
 struct ComputeShaderModule
 {
-    ShaderModuleT<T_GFXAPI>& compute;
-    operator const ShaderModuleT<T_GFXAPI>& () const { return compute; }
+    ShaderModule<T_GFXAPI>& compute;
+    operator const ShaderModule<T_GFXAPI>& () const { return compute; }
 };
 /// Reference to a ray tracing pipeline with a ray-generation shader and some combination of ray-miss, ray-hit, ray-first-hit
 /// @ingroup Material
 template<typename T_GFXAPI>
 struct RayTracingShaderModules
 {
-    ShaderModuleT<T_GFXAPI>& rayGeneration;
-    const ShaderModuleT<T_GFXAPI>* rayClosestHit = nullptr;
-    const ShaderModuleT<T_GFXAPI>* rayAnyHit = nullptr;
-    const ShaderModuleT<T_GFXAPI>* rayMiss = nullptr;
+    ShaderModule<T_GFXAPI>& rayGeneration;
+    const ShaderModule<T_GFXAPI>* rayClosestHit = nullptr;
+    const ShaderModule<T_GFXAPI>* rayAnyHit = nullptr;
+    const ShaderModule<T_GFXAPI>* rayMiss = nullptr;
 };
 /// Container for a reference to one of the allowed shader module types.
 /// @ingroup Material
@@ -97,34 +99,55 @@ public:
 };
 
 
+class ShaderPassBase
+{
+    ShaderPassBase( const ShaderPassBase& ) = delete;
+    ShaderPassBase& operator=( const ShaderPassBase& ) = delete;
+    ShaderPassBase() = delete;
+protected:
+    ShaderPassBase( const ShaderPassDescription& shaderPassDescription ) noexcept : m_shaderPassDescription( shaderPassDescription )
+    {}
+    ShaderPassBase( ShaderPassBase&& other ) noexcept;///< @note currently implemented as an assert, so compiler does not complain (eg std::vector::push_back) but implementation expects this is never hit at runtime!
+public:
+    template<typename T_GFXAPI> using tApiDerived = ShaderPass<T_GFXAPI>; // make apiCast work!
+
+    const ShaderPassDescription& m_shaderPassDescription;
+};
+
+
 /// Container for the gpu objects needed for a shader pass (described by ShaderPassDescription).
 /// Typically used to create MaterialPass (s).
 /// @ingroup Material
 template<typename T_GFXAPI>
-class ShaderPass
+class ShaderPass final : public ShaderPassBase
 {
+    using DescriptorSetLayout = DescriptorSetLayout<T_GFXAPI>;
+    using PipelineLayout = PipelineLayout<T_GFXAPI>;
+    using PipelineVertexInputState = PipelineVertexInputState<T_GFXAPI>;
+    using ShaderModules = ShaderModules<T_GFXAPI>;
+    using SpecializationConstantsLayout = SpecializationConstantsLayout<T_GFXAPI>;
+
     ShaderPass(const ShaderPass<T_GFXAPI>& src) = delete;
     ShaderPass& operator=(const ShaderPass<T_GFXAPI>& src) = delete;
     ShaderPass() = delete;
 public:
-    ShaderPass(const ShaderPassDescription& shaderPassDescription, ShaderModules<T_GFXAPI> shaders, std::vector<DescriptorSetLayout> descriptorSetLayouts, PipelineLayout<T_GFXAPI>, PipelineVertexInputState<T_GFXAPI>, SpecializationConstantsLayout<T_GFXAPI>, uint32_t numOutputs) noexcept;
+
+    ShaderPass(const ShaderPassDescription& shaderPassDescription, ShaderModules shaders, std::vector<DescriptorSetLayout> descriptorSetLayouts, PipelineLayout, PipelineVertexInputState, SpecializationConstantsLayout, uint32_t numOutputs) noexcept;
     ShaderPass(ShaderPass<T_GFXAPI>&& other) noexcept;///< @note currently implemented as an assert, so compiler does not complain (eg std::vector::push_back) but implementation expects this is never hit at runtime!
 
     void Destroy(T_GFXAPI&);
 
-    ShaderModules<T_GFXAPI>                         m_shaders;
+    ShaderModules                                       m_shaders;
 
     const auto& GetPipelineLayout() const               { return m_pipelineLayout; }
     const auto& GetDescriptorSetLayouts() const         { return m_descriptorSetLayouts; }
     const auto& GetPipelineVertexInputState() const     { return m_pipelineVertexInputState; }
     const auto& GetSpecializationConstantsLayout()const { return m_specializationConstantsLayout; }
-
-    const ShaderPassDescription&                    m_shaderPassDescription;
 private:
     std::vector<DescriptorSetLayout>                m_descriptorSetLayouts;
-    PipelineLayout<T_GFXAPI>                        m_pipelineLayout;
-    PipelineVertexInputState<T_GFXAPI>              m_pipelineVertexInputState;
-    SpecializationConstantsLayout<T_GFXAPI>         m_specializationConstantsLayout;
+    PipelineLayout                                  m_pipelineLayout;
+    PipelineVertexInputState                        m_pipelineVertexInputState;
+    SpecializationConstantsLayout                   m_specializationConstantsLayout;
     uint32_t                                        m_numOutputs = 0;
 
     static_assert(sizeof(T_GFXAPI) > 1);
@@ -132,41 +155,45 @@ private:
 
 
 /// @brief Base class for shaders (graphics api agnostic, expected to have a derived API specific implementation)
-class Shader
+class ShaderBase
 {
-    Shader(const Shader&) = delete;
-    Shader& operator=(const Shader&) = delete;
+    ShaderBase(const ShaderBase&) = delete;
+    ShaderBase& operator=(const ShaderBase&) = delete;
 public:
-    template<typename T_GFXAPI> using tApiDerived = ShaderT<T_GFXAPI>; // make apiCast work!
-    Shader(const ShaderDescription* pShaderDescription) noexcept : m_shaderDescription(pShaderDescription) {}
-    virtual ~Shader() {}
+    template<typename T_GFXAPI> using tApiDerived = Shader<T_GFXAPI>; // make apiCast work!
+    ShaderBase(const ShaderDescription* pShaderDescription) noexcept : m_shaderDescription(pShaderDescription) {}
+    virtual ~ShaderBase() {}
     virtual void Destroy(GraphicsApiBase&) = 0;
 
+    const auto& GetShaderPassIndicesToNames() const { return m_passIndexToName; }
+
     const ShaderDescription* m_shaderDescription = nullptr;
+
+protected:
+    std::map<const std::string, uint32_t>   m_passNameToIndex;  // maps shader pass name to m_shaderPasses[x]
+    std::vector<std::reference_wrapper<const std::string>> m_passIndexToName;  // names in index order, eg reverse of m_passNameToIndex.  string referenced is m_passNameToIndex.key
 };
 
 
 /// Container for a vector of ShaderPass (with name lookup)
-/// Typically used to create Material (s).
+/// Typically used to create MaterialBase (s).
 /// @ingroup Material
 template<typename T_GFXAPI>
-class ShaderT : public Shader
+class Shader final : public ShaderBase
 {
-    ShaderT(const ShaderT<T_GFXAPI>&) = delete;
-    ShaderT& operator=(const ShaderT<T_GFXAPI>&) = delete;
+    Shader(const Shader<T_GFXAPI>&) = delete;
+    Shader& operator=(const Shader<T_GFXAPI>&) = delete;
+    using ShaderPass = ShaderPass<T_GFXAPI>;
 public:
-    ShaderT( const ShaderDescription* pShaderDescription, std::vector<ShaderPass<T_GFXAPI>> shaderPasses, const std::vector<std::string>& passNames) noexcept;
-    ~ShaderT() override { assert(m_shaderPasses.empty()); }
+    Shader( const ShaderDescription* pShaderDescription, std::vector<ShaderPass> shaderPasses, const std::vector<std::string>& passNames) noexcept;
+    ~Shader() override { assert(m_shaderPasses.empty()); }
     void Destroy(GraphicsApiBase&) override;
 
-    const ShaderPass<T_GFXAPI>* GetShaderPass(const std::string& passName) const;
-    const auto& GetShaderPasses() const { return m_shaderPasses; }
-    const auto& GetShaderPassIndicesToNames() const { return m_passIndexToName; }
+    const ShaderPass*const      GetShaderPass(const std::string& passName) const;
+    const auto&                 GetShaderPasses() const { return m_shaderPasses; }
 
 protected:
-    std::vector<ShaderPass<T_GFXAPI>>       m_shaderPasses;     // in order of calls to AddShaderPass, concievably we could have shaders who share passes (eg shadow) with other Shaders, not currently supported though!
-    std::map<const std::string, uint32_t>   m_passNameToIndex;  // maps shader pass name to m_shaderPasses[x]
-    std::vector<std::reference_wrapper<const std::string>> m_passIndexToName;  // names in index order, eg reverse of m_passNameToIndex.  string referenced is m_passNameToIndex.key
+    std::vector<ShaderPass>     m_shaderPasses;     // in order of calls to AddShaderPass, concievably we could have shaders who share passes (eg shadow) with other Shaders, not currently supported though!
 };
 
 //
@@ -174,9 +201,9 @@ protected:
 //
 
 template<typename T_GFXAPI>
-ShaderPass<T_GFXAPI>::ShaderPass(const ShaderPassDescription& shaderPassDescription, ShaderModules<T_GFXAPI> shaders, std::vector<DescriptorSetLayout> descriptorSetLayouts, PipelineLayout<T_GFXAPI> pipelineLayout, PipelineVertexInputState<T_GFXAPI> pipelineVertexInputState, SpecializationConstantsLayout<T_GFXAPI> specializationConstantsLayout, uint32_t numOutputs) noexcept
-    : m_shaders(std::move(shaders))
-    , m_shaderPassDescription(shaderPassDescription)
+ShaderPass<T_GFXAPI>::ShaderPass(const ShaderPassDescription& shaderPassDescription, ShaderModules shaders, std::vector<DescriptorSetLayout> descriptorSetLayouts, PipelineLayout pipelineLayout, PipelineVertexInputState pipelineVertexInputState, SpecializationConstantsLayout specializationConstantsLayout, uint32_t numOutputs) noexcept
+    : ShaderPassBase(shaderPassDescription)
+    , m_shaders(std::move(shaders))
     , m_descriptorSetLayouts(std::move(descriptorSetLayouts))
     , m_pipelineLayout(std::move(pipelineLayout))
     , m_pipelineVertexInputState(std::move(pipelineVertexInputState))
@@ -187,8 +214,8 @@ ShaderPass<T_GFXAPI>::ShaderPass(const ShaderPassDescription& shaderPassDescript
 
 template<typename T_GFXAPI>
 ShaderPass<T_GFXAPI>::ShaderPass(ShaderPass<T_GFXAPI>&& other) noexcept
-    : m_shaders(std::move(other.m_shaders))
-    , m_shaderPassDescription(other.m_shaderPassDescription)
+    : ShaderPassBase(other.m_shaderPassDescription)
+    , m_shaders(std::move(other.m_shaders))
     , m_pipelineVertexInputState(std::move(other.m_pipelineVertexInputState))
     , m_specializationConstantsLayout(std::move(other.m_specializationConstantsLayout))
 {
@@ -206,8 +233,8 @@ void ShaderPass<T_GFXAPI>::Destroy(T_GFXAPI& gfxapi)
 }
 
 template<typename T_GFXAPI>
-ShaderT<T_GFXAPI>::ShaderT(const ShaderDescription* pShaderDescription, std::vector<ShaderPass<T_GFXAPI>> shaderPasses, const std::vector<std::string>& passNames) noexcept
-    : Shader(pShaderDescription)
+Shader<T_GFXAPI>::Shader(const ShaderDescription* pShaderDescription, std::vector<ShaderPass> shaderPasses, const std::vector<std::string>& passNames) noexcept
+    : ShaderBase(pShaderDescription)
     , m_shaderPasses(std::move(shaderPasses))
 {
     uint32_t idx = 0;
@@ -221,7 +248,7 @@ ShaderT<T_GFXAPI>::ShaderT(const ShaderDescription* pShaderDescription, std::vec
 }
 
 template<typename T_GFXAPI>
-void ShaderT<T_GFXAPI>::Destroy(GraphicsApiBase& gfxapi)
+void Shader<T_GFXAPI>::Destroy(GraphicsApiBase& gfxapi)
 {
     for (auto& sp : m_shaderPasses)
         sp.Destroy(static_cast<T_GFXAPI&>(gfxapi));
@@ -229,7 +256,7 @@ void ShaderT<T_GFXAPI>::Destroy(GraphicsApiBase& gfxapi)
 }
 
 template<typename T_GFXAPI>
-const ShaderPass<T_GFXAPI>* ShaderT<T_GFXAPI>::GetShaderPass(const std::string& passName) const
+const ShaderPass<T_GFXAPI>* const Shader<T_GFXAPI>::GetShaderPass(const std::string& passName) const
 {
     auto it = m_passNameToIndex.find(passName);
     if (it != m_passNameToIndex.end())

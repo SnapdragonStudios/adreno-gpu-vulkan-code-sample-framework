@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -74,6 +74,13 @@ public:
         int   material;     ///< indexc in to m_Materials
     };
 
+    /// Data for a vertex weight, at least one per animated vertex.  4 joint influences per vert follows gltf capabilities
+    struct FatWeight
+    {
+        int joint[4];       // index into skeleton joints
+        float weight[4];    // weight (influence) of joint
+    };
+
     /// All the data that could be associuated with an object instance
     struct FatInstance
     {
@@ -86,8 +93,9 @@ public:
     };
 
     /// Creates a 'raw' array of data from a 'fat' MeshObjectIntermediate object, with the returned data being formatted in the way described by vertexFormat
+    /// fatWeightBuffer may be empty if not required/supported, if not empty must have the same number of vertices as fatVertexBuffer.
     /// @returns data in the requested vertexFormat
-    static std::vector<uint32_t> CopyFatVertexToFormattedBuffer(const std::span<const MeshObjectIntermediate::FatVertex>& fatVertexBuffer, const VertexFormat& vertexFormat);
+    static std::vector<uint32_t> CopyFatVertexToFormattedBuffer(const std::span<const MeshObjectIntermediate::FatVertex>& fatVertexBuffer, const std::span<const MeshObjectIntermediate::FatWeight>& fatWeightBuffer, const VertexFormat& vertexFormat);
 
     /// Creates a 'raw' array of data from a 'fat instance' MeshObjectIntermediate object, with the returned data being formatted in the way described by vertexFormat
     /// Same functionality as @CopyFatVertexToFormattedBuffer but for instance rate data.
@@ -116,6 +124,7 @@ public:
         std::string     specMapFilename;    // Texture version of roughnessFactor
         float           metallicFactor = 0.0f;
         float           roughnessFactor = 0.0f;
+        glm::vec3       emissiveFactor = glm::vec3(0.0f);
 
         bool            alphaCutout = false;
         bool            transparent = false;
@@ -124,12 +133,16 @@ public:
     };
 
 public:
-    typedef std::vector<FatVertex> tVertexBuffer;
-    typedef std::variant<std::monostate, std::vector<uint32_t>, std::vector<uint16_t>> tIndexBuffer;
+    using tVertexBuffer = std::vector<FatVertex>;
+    using tWeightBuffer = std::vector<FatWeight>;
+    using tIndexBuffer  = std::variant<std::monostate, std::vector<uint32_t>, std::vector<uint16_t>, std::vector<uint8_t>>;
 
     std::string                 m_MeshName;
 
+    std::string                 m_NodeName;
+
     tVertexBuffer               m_VertexBuffer;
+    tWeightBuffer               m_WeightBuffer;  //< vertex weights (or empty)
     /// Index buffer can be 16bit or 32bit (or not exist; in which case every 3 vertices in m_VertexBuffer are the verts of a triangle).
     tIndexBuffer                m_IndexBuffer;
     std::vector<MaterialDef>    m_Materials;
@@ -138,6 +151,8 @@ public:
     glm::mat4                   m_Transform = glm::identity<glm::mat4>();
     /// Node id (child node that this node is attached to) from gltf, can be used to lookup animations on this node (non skinned animation)
     int                         m_NodeId = -1;
+    /// Number of joint weights per vertex (or 0)
+    uint32_t                    m_WeightsPerVertex = 0;
 };
 
 

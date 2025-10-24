@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -27,7 +27,8 @@ public:
         ImageStorage,
         InputAttachment,
         DrawIndirectBuffer,
-        AccelerationStructure   ///< Ray Tracing
+        AccelerationStructure,  ///< Ray Tracing
+        DescriptorTable         ///< Dx12 descriptor table (set) reference
     };
     class StageFlag
     {
@@ -65,16 +66,19 @@ public:
         std::vector<std::string> names;
         uint32_t count;
         bool readOnly;
+        int descriptorIndex;
 
-        DescriptorTypeAndCount(DescriptorType _type, StageFlag _stages, std::vector<std::string> _names, int _count = -1 /* if un-set (-1), default to the number of names) */, bool _readOnly = false )
+        DescriptorTypeAndCount(DescriptorType _type, StageFlag _stages, std::vector<std::string> _names, int _count /*= -1*/ /* if un-set (-1), default to the number of names) */, bool _readOnly /*= false*/, int _descriptorIndex /*= -1*/)
             : type(_type)
             , stages(_stages)
             , names(_names)
             , count(_count)
             , readOnly(_readOnly)
+            , descriptorIndex(_descriptorIndex)
         {
         }
-
     };
+    std::string                         m_name;
+    uint32_t                            m_setIndex = 0;         ///< numbered from 0 (0 is the root descriptor on DX12)
     std::vector<DescriptorTypeAndCount> m_descriptorTypes;
 };

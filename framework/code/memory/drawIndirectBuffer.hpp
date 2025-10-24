@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,18 +12,25 @@
 /// Templated (by graphics api) buffer containing draw indirect commands
 /// @ingroup Memory
 template<typename T_GFXAPI>
-class DrawIndirectBuffer: public BufferT<T_GFXAPI>
+class DrawIndirectBuffer: public Buffer<T_GFXAPI>
 {
     DrawIndirectBuffer(const DrawIndirectBuffer&) = delete;
     DrawIndirectBuffer& operator=(const DrawIndirectBuffer&) = delete;
 public:
-    DrawIndirectBuffer(bool indexed) noexcept;
+    enum class eType {
+        Draw,
+        IndexedDraw,
+        MeshTasks
+    };
+
+    DrawIndirectBuffer(DrawIndirectBuffer::eType indirectBufferType) noexcept;
     DrawIndirectBuffer(DrawIndirectBuffer&&) noexcept;
     DrawIndirectBuffer& operator=(DrawIndirectBuffer&&) noexcept;
     ~DrawIndirectBuffer();
 
-    /// Initialization
+    /// Buffer initialization with a prequel block (and then a block of type T_DRAW data for each potential draw)
     template<typename T_DRAW, typename T_PREQUEL> bool Initialize(MemoryManager<T_GFXAPI>* pManager, size_t numDraws, const T_DRAW* initialData, const T_PREQUEL* initialPrequelData, const BufferUsageFlags usage = BufferUsageFlags::Indirect);
+    /// Buffer initialization with a block of type T_DRAW data for each potential draw
     template<typename T_DRAW> bool Initialize(MemoryManager<T_GFXAPI>* pManager, size_t numDraws, const T_DRAW* initialData, const BufferUsageFlags usage = BufferUsageFlags::Indirect);
 
     /// destroy buffer and leave in a state where it could be re-initialized
@@ -39,8 +46,9 @@ public:
     /// Map this buffer to the cpu and return a guard object (automatically unmaps when it goes out of scope)
     template<typename T> MapGuard<T_GFXAPI, T> Map();
 
-    bool IsIndexed() const { return mIndexed; }
-    uint32_t GetDrawCommandBytes() const;// { return (mIndexed ? sizeof(VkDrawIndexedIndirectCommand) : sizeof(VkDrawIndirectCommand)); }
+    //bool IsIndexed() const { return mIndexed; }
+    eType GetIndirectBufferType() const { return mIndirectBufferType; }
+    uint32_t GetDrawCommandBytes() const;
     auto GetNumDraws() const { return mNumDraws; }
     auto GetBufferOffset() const { return mPrequelBytes; }
 
@@ -49,18 +57,18 @@ protected:
     bool Initialize(MemoryManager<T_GFXAPI>* pManager, size_t numDraws, const void* initialData, const BufferUsageFlags usage, const void* prequelData, uint32_t prequelBytes);
 
 private:
-    size_t      mNumDraws = 0;
-    uint32_t    mPrequelBytes = 0;   // buffer bytes before the index data begins.
-    const bool  mIndexed;
+    size_t                      mNumDraws = 0;
+    uint32_t                    mPrequelBytes = 0;   // buffer bytes before the index data begins.
+    const eType                 mIndirectBufferType;
 };
 
 
 template<typename T_GFXAPI>
-DrawIndirectBuffer<T_GFXAPI>::DrawIndirectBuffer(bool indexed) noexcept : BufferT<T_GFXAPI>(), mIndexed(indexed)
+DrawIndirectBuffer<T_GFXAPI>::DrawIndirectBuffer(eType indirectBufferType) noexcept : Buffer<T_GFXAPI>(), mIndirectBufferType(indirectBufferType)
 {}
 
 template<typename T_GFXAPI>
-DrawIndirectBuffer<T_GFXAPI>::DrawIndirectBuffer(DrawIndirectBuffer&& other) noexcept : mIndexed(other.mIndexed)
+DrawIndirectBuffer<T_GFXAPI>::DrawIndirectBuffer(DrawIndirectBuffer&& other) noexcept : mIndirectBufferType(other.mIndirectBufferType )
 {
     *this = std::move(other);
 }
@@ -68,10 +76,10 @@ DrawIndirectBuffer<T_GFXAPI>::DrawIndirectBuffer(DrawIndirectBuffer&& other) noe
 template<typename T_GFXAPI>
 DrawIndirectBuffer<T_GFXAPI>& DrawIndirectBuffer<T_GFXAPI>::operator=(DrawIndirectBuffer&& other) noexcept
 {
-    BufferT<T_GFXAPI>::operator=(std::move(other));
+    Buffer<T_GFXAPI>::operator=(std::move(other));
     if (&other != this)
     {
-        assert(mIndexed == other.mIndexed);
+        assert(mIndirectBufferType == other.mIndirectBufferType);
         mNumDraws = other.mNumDraws;
         other.mNumDraws = 0;
         mPrequelBytes = other.mPrequelBytes;
@@ -97,16 +105,68 @@ bool DrawIndirectBuffer<T_GFXAPI>::Initialize(MemoryManager<T_GFXAPI>* pManager,
     return Initialize(pManager, numDraws, (const void*)initialData, usage, prequelData, sizeof(T_PREQUEL));
 }
 
+template<typename T_GFXAPI>
+bool DrawIndirectBuffer<T_GFXAPI>::Initialize(MemoryManager<T_GFXAPI>* pManager, size_t numDraws, const void* initialData, const BufferUsageFlags usage, const void* prequelData, uint32_t prequelBytes )
+{
+    mNumDraws = numDraws;
+    mPrequelBytes = prequelBytes;
+
+    MemoryUsage memoryUsage = initialData ? MemoryUsage::CpuToGpu : MemoryUsage::GpuExclusive;
+    if ((usage & BufferUsageFlags::TransferSrc) != 0)
+        memoryUsage = MemoryUsage::CpuToGpu;
+
+    if (!Buffer<T_GFXAPI>::Initialize( pManager, GetDrawCommandBytes() * mNumDraws + mPrequelBytes, usage, memoryUsage ))
+    {
+        return false;
+    }
+
+    if (initialData)
+    {
+        auto mappedGuard = Buffer<T_GFXAPI>::template Map<uint8_t>();
+        auto initialDataSize = GetDrawCommandBytes() * mNumDraws;
+        if (prequelBytes)
+            memcpy( mappedGuard.data(), prequelData, prequelBytes );
+        else
+            memset( mappedGuard.data(), 0, prequelBytes );
+        memcpy( mappedGuard.data() + prequelBytes, initialData, initialDataSize );
+    }
+    return true;
+}
+
+template<typename T_GFXAPI>
+void DrawIndirectBuffer<T_GFXAPI>::Destroy()
+{
+    mNumDraws = 0;
+    Buffer<T_GFXAPI>::Destroy();
+}
+
+template<typename T_GFXAPI>
+DrawIndirectBuffer<T_GFXAPI> DrawIndirectBuffer<T_GFXAPI>::Copy( BufferUsageFlags newUsageFlags )
+{
+    if (newUsageFlags == BufferUsageFlags::Unknown)
+        newUsageFlags = Buffer<T_GFXAPI>::template mBufferUsageFlags<>;
+    DrawIndirectBuffer copy( GetIndirectBufferType() );
+    auto data = MapVoid();
+    if (copy.Initialize( Buffer<T_GFXAPI>::template mManager<>, GetNumDraws(), static_cast<std::byte*>(data.data()) + mPrequelBytes, newUsageFlags, data.data(), mPrequelBytes ))
+    {
+        return copy;
+    }
+    else
+    {
+        return {GetIndirectBufferType()};
+    }
+}
+
 template<typename T_GFXAPI> template<typename T>
 MapGuard<T_GFXAPI, T> DrawIndirectBuffer<T_GFXAPI>::Map()
 {
-    assert(mPrequelBytes == 0);  // prequel bytes not yet supported in map
-    assert(sizeof(T) == GetDrawCommandBytes());
-    return BufferT<T_GFXAPI>::template Map<T>();
+    assert( mPrequelBytes == 0 );  // prequel bytes not yet supported in map
+    assert( sizeof( T ) == GetDrawCommandBytes() );
+    return Buffer<T_GFXAPI>::template Map<T>();
 }
 
 template<typename T_GFXAPI>
 MapGuard<T_GFXAPI, void> DrawIndirectBuffer<T_GFXAPI>::MapVoid()
 {
-    return BufferT<T_GFXAPI>::template Map<void>();
+    return Buffer<T_GFXAPI>::template Map<void>();
 }

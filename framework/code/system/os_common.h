@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -48,6 +48,12 @@ extern const char* gpAndroidAppShortName;
 #define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, gpAndroidAppShortName, __VA_ARGS__))
 
 #elif OS_WINDOWS
+
+void LOGI(const char* pszFormat, ...);
+void LOGW(const char* pszFormat, ...);
+void LOGE(const char* pszFormat, ...);
+
+#elif OS_LINUX
 
 void LOGI(const char* pszFormat, ...);
 void LOGW(const char* pszFormat, ...);

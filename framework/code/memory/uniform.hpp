@@ -1,10 +1,10 @@
-//============================================================================================================
+//=============================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
+//                  Copyright (c) 2022 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//============================================================================================================
+//==============================================================================
 #pragma once
 
 /// @file uniform.hpp
@@ -43,6 +43,8 @@ struct UniformArray
     UniformArray(const UniformArray<T_GFXAPI, T_NUM_BUFFERS> &) = delete;
     UniformArray& operator=(const UniformArray<T_GFXAPI, T_NUM_BUFFERS>&) = delete;
     UniformArray(UniformArray<T_GFXAPI, T_NUM_BUFFERS>&&) noexcept = delete;   // template class expected to be specialized
+
+    static_assert(sizeof( UniformArray<T_GFXAPI, T_NUM_BUFFERS> ) > 1);   // Ensure this class template is specialized (and not used as-is)
 };
 
 /// @brief UniformArray buffer helper template
@@ -55,77 +57,77 @@ struct UniformArrayT : public UniformArray<T_GFXAPI, T_NUM_BUFFERS>
 
 
 template<typename T_GFXAPI>
-bool CreateUniformBuffer(T_GFXAPI* pVulkan, Uniform<T_GFXAPI>* pNewUniform, size_t dataSize, const void* const pData = NULL, BufferUsageFlags usage = BufferUsageFlags::Uniform);
+bool CreateUniformBuffer( T_GFXAPI*, Uniform<T_GFXAPI>* pNewUniform, size_t dataSize, const void* const pData = NULL, BufferUsageFlags usage = BufferUsageFlags::Uniform )
+{
+    static_assert(sizeof( T_GFXAPI ) != sizeof( T_GFXAPI ), "Must use the specialized version of this function.  Your are likely missing #include \"memory/<GFXAPI>/uniform.hpp\"");
+}
 template<typename T_GFXAPI>
-void UpdateUniformBuffer(T_GFXAPI* pVulkan, Uniform<T_GFXAPI>* pUniform, size_t dataSize, const void* const pNewData);
+void UpdateUniformBuffer(T_GFXAPI* , Uniform<T_GFXAPI>* pUniform, size_t dataSize, const void* const pNewData)
+{
+    static_assert(sizeof( T_GFXAPI ) != sizeof( T_GFXAPI ), "Must use the specialized version of this function.  Your are likely missing #include \"memory/<GFXAPI>/uniform.hpp\"");
+}
 template<typename T_GFXAPI>
-void ReleaseUniformBuffer(T_GFXAPI* pVulkan, Uniform<T_GFXAPI>* pUniform);
+void ReleaseUniformBuffer(T_GFXAPI* , Uniform<T_GFXAPI>* pUniform)
+{
+    static_assert(sizeof( T_GFXAPI ) != sizeof( T_GFXAPI ), "Must use the specialized version of this function.  Your are likely missing #include \"memory/<GFXAPI>/uniform.hpp\"");
+}
 
 template<typename T_GFXAPI, typename T>
-bool CreateUniformBuffer(T_GFXAPI* pVulkan, UniformT<T_GFXAPI, T>& newUniform, const T* const pData = nullptr, BufferUsageFlags usage = BufferUsageFlags::Uniform)
+bool CreateUniformBuffer(T_GFXAPI* pGfxApi, UniformT<T_GFXAPI, T>& newUniform, const T* const pData = nullptr, BufferUsageFlags usage = BufferUsageFlags::Uniform)
 {
-    return CreateUniformBuffer(pVulkan, &newUniform, sizeof(T), pData, usage);
+    return CreateUniformBuffer(pGfxApi, &newUniform, sizeof(T), pData, usage);
 }
 template<typename T_GFXAPI, typename T>
-void UpdateUniformBuffer(T_GFXAPI* pVulkan, Uniform<T_GFXAPI>& uniform, const T& newData)
+void UpdateUniformBuffer(T_GFXAPI* pGfxApi, Uniform<T_GFXAPI>& uniform, const T& newData)
 {
-    return UpdateUniformBuffer(pVulkan, &uniform, sizeof(T), &newData);
+    return UpdateUniformBuffer(pGfxApi, &uniform, sizeof(T), &newData);
 }
 template<typename T_GFXAPI, typename T, typename TT>
-void UpdateUniformBuffer(T_GFXAPI* pVulkan, UniformT<T_GFXAPI, T>& uniform, const TT& newData)
+void UpdateUniformBuffer(T_GFXAPI* pGfxApi, UniformT<T_GFXAPI, T>& uniform, const TT& newData)
 {
     static_assert(std::is_same<T, TT>::value, "UpdateUniformBuffer, uniform is different type to newData");
-    return UpdateUniformBuffer(pVulkan, static_cast<Uniform<T_GFXAPI>&>(uniform), newData);
+    return UpdateUniformBuffer(pGfxApi, static_cast<Uniform<T_GFXAPI>&>(uniform), newData);
 }
 
-#if 0
-template<typename T_GFXAPI>
-bool CreateUniformBuffer(T_GFXAPI* pVulkan, MemoryAllocatedBuffer<T_GFXAPI, VkBuffer>& rNewUniformBuffer, size_t dataSize, const void* const pData, BufferUsageFlags usage) = delete/* expected to be specialized*/;
-template<typename T_GFXAPI>
-void UpdateUniformBuffer(T_GFXAPI* pVulkan, MemoryAllocatedBuffer<T_GFXAPI, VkBuffer>& rUniform, size_t dataSize, const void* const pNewData) = delete/* expected to be specialized*/;
-template<typename T_GFXAPI>
-void ReleaseUniformBuffer(T_GFXAPI* pVulkan, MemoryAllocatedBuffer<T_GFXAPI, VkBuffer>& rUniform) = delete/* expected to be specialized*/;
-#endif
-
 template<typename T_GFXAPI, size_t T_NUM_BUFFERS>
-bool CreateUniformBuffer(T_GFXAPI* pVulkan, UniformArray<T_GFXAPI, T_NUM_BUFFERS>& rNewUniform, size_t dataSize, const void* const pData = NULL, BufferUsageFlags usage = BufferUsageFlags::Uniform)
+bool CreateUniformBuffer(T_GFXAPI* pGfxApi, UniformArray<T_GFXAPI, T_NUM_BUFFERS>& rNewUniform, size_t dataSize, const void* const pData = NULL, BufferUsageFlags usage = BufferUsageFlags::Uniform)
 {
     for (size_t i = 0; i < T_NUM_BUFFERS; ++i)
     {
-        if (!CreateUniformBuffer(pVulkan, rNewUniform.buf[i], dataSize, pData, usage))
+        if (!CreateUniformBuffer(pGfxApi, rNewUniform.buf[i], dataSize, pData, usage))
             return false;
         //rNewUniform.vkBuffers[i] = rNewUniform.buf[i].GetVkBuffer();
     }
     return true;
 }
 template<typename T_GFXAPI, size_t T_NUM_BUFFERS>
-void UpdateUniformBuffer(T_GFXAPI* pVulkan, UniformArray<T_GFXAPI, T_NUM_BUFFERS>& rUniform, size_t dataSize, const void* const pNewData, uint32_t bufferIdx)
+void UpdateUniformBuffer(T_GFXAPI* pGfxApi, UniformArray<T_GFXAPI, T_NUM_BUFFERS>& rUniform, size_t dataSize, const void* const pNewData, uint32_t bufferIdx)
 {
-    UpdateUniformBuffer(pVulkan, rUniform.buf[bufferIdx], dataSize, pNewData);
+    UpdateUniformBuffer(pGfxApi, rUniform.buf[bufferIdx], dataSize, pNewData);
 }
 template<typename T_GFXAPI, size_t T_NUM_BUFFERS>
-void ReleaseUniformBuffer(T_GFXAPI* pVulkan, UniformArray<T_GFXAPI, T_NUM_BUFFERS>& rUniform)
+void ReleaseUniformBuffer(T_GFXAPI* pGfxApi, UniformArray<T_GFXAPI, T_NUM_BUFFERS>& rUniform)
 {
     for (size_t i = 0; i < T_NUM_BUFFERS; ++i)
     {
-        //rUniform.vkBuffers[i] = VK_NULL_HANDLE;
-        ReleaseUniformBuffer(pVulkan, rUniform.buf[i]);
+        rUniform.bufferHandles[i] = {};
+        ReleaseUniformBuffer(pGfxApi, rUniform.buf[i]);
     }
 }
 
 template<typename T_GFXAPI, typename T, size_t T_NUM_BUFFERS>
-bool CreateUniformBuffer(T_GFXAPI* pVulkan, UniformArrayT<T_GFXAPI, T, T_NUM_BUFFERS>& newUniform, const T* const pData = nullptr, BufferUsageFlags usage = BufferUsageFlags::Uniform)
+bool CreateUniformBuffer(T_GFXAPI* pGfxApi, UniformArrayT<T_GFXAPI, T, T_NUM_BUFFERS>& newUniform, const T* const pData = nullptr, BufferUsageFlags usage = BufferUsageFlags::Uniform)
 {
-    return CreateUniformBuffer(pVulkan, newUniform, sizeof(T), pData, usage);
+    return CreateUniformBuffer(pGfxApi, newUniform, sizeof(T), pData, usage);
 }
 template<typename T_GFXAPI, typename T, size_t T_NUM_BUFFERS>
-void UpdateUniformBuffer(T_GFXAPI* pVulkan, UniformArrayT<T_GFXAPI, T, T_NUM_BUFFERS>& uniform, const T& newData, uint32_t bufferIdx)
+void UpdateUniformBuffer(T_GFXAPI* pGfxApi, UniformArrayT<T_GFXAPI, T, T_NUM_BUFFERS>& uniform, const T& newData, uint32_t bufferIdx)
 {
-    return UpdateUniformBuffer(pVulkan, uniform, sizeof(T), &newData, bufferIdx);
+    return UpdateUniformBuffer(pGfxApi, uniform, sizeof(T), &newData, bufferIdx);
 }
 template<typename T_GFXAPI, typename T, typename TT, size_t T_NUM_BUFFERS>
-void UpdateUniformBuffer(T_GFXAPI* pVulkan, UniformArrayT<T_GFXAPI, T, T_NUM_BUFFERS>& uniform, const TT& newData, uint32_t bufferIdx)
+void UpdateUniformBuffer(T_GFXAPI* pGfxApi, UniformArrayT<T_GFXAPI, T, T_NUM_BUFFERS>& uniform, const TT& newData, uint32_t bufferIdx)
 {
     static_assert(std::is_same<T, TT>::value, "UpdateUniformBuffer, uniform is different type to newData");
-    return UpdateUniformBuffer(pVulkan, static_cast<UniformArray<T_GFXAPI, T_NUM_BUFFERS>&>(uniform), newData, bufferIdx);
+    return UpdateUniformBuffer(pGfxApi, static_cast<UniformArray<T_GFXAPI, T_NUM_BUFFERS>&>(uniform), newData, bufferIdx);
 }

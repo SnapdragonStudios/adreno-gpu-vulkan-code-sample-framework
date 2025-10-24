@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -384,7 +384,7 @@ struct SphereTest
 
 
 /// View frustum
-/// Builds the 
+/// Builds a view frustum form camera matrixes and implements frustum test queries
 /// @ingroup Mesh
 class ViewFrustum
 {

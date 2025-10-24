@@ -1,6 +1,12 @@
-cmake_minimum_required (VERSION 3.21)
+cmake_minimum_required (VERSION 3.25)
 
-project (vkSampleFramework)
+project (SampleFramework)
+
+# Include top level configuration
+if(NOT EXISTS ${PROJECT_SOURCE_DIR}/../../ConfigLocal.cmake)
+  message(FATAL_ERROR "\nConfigLocal.cmake does not exits - run \"python Configure.py\" in the top level directory to generate this file.")
+endif()
+include(../../ConfigLocal.cmake)
 
 # Turn exceptions off (msvc)
 # Done in this top-level class as it needs to apply to libraries and applications globally.
@@ -39,35 +45,15 @@ endif()
 message("FRAMEWORK_ENABLE_VULKAN - ${FRAMEWORK_ENABLE_VULKAN}") 
 message("FRAMEWORK_ENABLE_DX12   - ${FRAMEWORK_ENABLE_DX12}")
 
-# Generate build time stamp as 2 part process.  CMake file that exe depends upon and the header file that cmake writes the header to be included by code.  This way we only rebuild what is needed.
-file (WRITE ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "string(TIMESTAMP TIMEZ UTC)\n")
-file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(WRITE  ../../buildtimestamp.h \"#ifndef _BUILDTIMESTAMP_H_\\n\")\n")
-file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(APPEND ../../buildTimestamp.h \"#define _BUILDTIMESTAMP_H_\\n\\n\")\n")
-file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(APPEND ../../buildTimestamp.h \"// Automatically built by build process.  Do NOT check into version control.\\n\\n\")\n")
-file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(APPEND ../../buildTimestamp.h \"#define BUILD_TIMESTAMP \\\"\${TIMEZ}\\\"\\n\\n\")\n")
-file (APPEND ${CMAKE_BINARY_DIR}/buildTimestamp.cmake "file(APPEND ../../buildTimestamp.h \"#endif // _BUILDTIMESTAMP_H_\\n\")\n")
-add_custom_target (
-    buildTimestamp
-    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/buildTimestamp.cmake
-    ADD_DEPENDENCIES ${CMAKE_BINARY_DIR}/buildTimestamp.cmake)
-
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-# Add in all the child subdirectories
+# Add in all the framework subdirectory
 set(FRAMEWORK_DIR ../../framework)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${FRAMEWORK_DIR}/cmake")
 add_subdirectory( ${FRAMEWORK_DIR} framework )
-if(FRAMEWORK_ENABLE_VULKAN)
-  add_subdirectory(../../samples/empty/ samples/empty)
-  add_subdirectory(../../samples/hdrSwapchain/ samples/hdrSwapchain)
-  add_subdirectory(../../samples/rotatedCopy/ samples/rotatedCopy)
-  add_subdirectory(../../samples/shaderResolveTonemap/ samples/shaderResolveTonemap)
-  add_subdirectory(../../samples/hello-gltf/ samples/hello-gltf)
-  add_subdirectory(../../samples/SubPass/ samples/SubPass)
-  add_subdirectory(../../samples/BloomImageProcessing/ samples/BloomImageProcessing)
-  add_subdirectory(../../samples/rayQueryShadows/ samples/rayQueryShadows)
-  add_subdirectory(../../samples/rayReflections/ samples/rayReflections)
-  add_subdirectory(../../samples/sgsr/ samples/sgsr)
-  add_subdirectory(../../samples/sdp-cli/ samples/sdp-cli)
-  add_subdirectory(../../samples/sgsr2/ samples/sgsr2)
-    add_subdirectory(../../samples/graph_pipelines/ samples/graph_pipelines)
-endif()
+
+# Add the tests
+add_subdirectory( ../../tests tests)
+# Add the samples
+add_subdirectory( ../../samples samples)
+

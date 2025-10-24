@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -13,12 +13,12 @@
 
 // **********************************************
 // **********************************************
-// CWorker
+// ThreadWorker
 // **********************************************
 // **********************************************
 
 //-----------------------------------------------------------------------------
-void CWorker::WorkerThreadProc()
+void ThreadWorker::WorkerThreadProc()
 //-----------------------------------------------------------------------------
 {
     //
@@ -39,7 +39,7 @@ void CWorker::WorkerThreadProc()
         m_WorkAvailable.Wait();
 
         // Get the work (will wait until work is available).
-        Work work;
+        ThreadWork work;
         {
             std::lock_guard<std::mutex> lock( m_WaitingWorkQueueMutex );
             work = m_WaitingWorkQueue.front();
@@ -71,21 +71,21 @@ void CWorker::WorkerThreadProc()
 }
 
 //-----------------------------------------------------------------------------
-CWorker::CWorker() : m_WorkAvailable(0), m_WorkersRunning(0), m_WorkInFlight(0)
+ThreadWorker::ThreadWorker() : m_WorkAvailable(0), m_WorkersRunning(0), m_WorkInFlight(0)
 //-----------------------------------------------------------------------------
 {
     m_Name = "Worker";
 }
 
 //-----------------------------------------------------------------------------
-CWorker::~CWorker()
+ThreadWorker::~ThreadWorker()
 //-----------------------------------------------------------------------------
 {
     Terminate();
 }
 
 //-----------------------------------------------------------------------------
-uint32_t CWorker::Initialize(const char *pName, uint32_t uiDesiredThreads)
+uint32_t ThreadWorker::Initialize(const char *pName, uint32_t uiDesiredThreads)
 //-----------------------------------------------------------------------------
 {
     if (pName != nullptr)
@@ -134,24 +134,24 @@ uint32_t CWorker::Initialize(const char *pName, uint32_t uiDesiredThreads)
     // Create and startup the worker threads
     for(uint32_t uiIndx = 0; uiIndx < uiNumWorkers; uiIndx++)
     {
-        m_Workers.emplace_back( std::thread{ &CWorker::WorkerThreadProc, this } );
+        m_Workers.emplace_back( std::thread{ &ThreadWorker::WorkerThreadProc, this } );
     }
 
     return uiNumWorkers;
 }
 
 //-----------------------------------------------------------------------------
-void CWorker::Terminate()
+void ThreadWorker::Terminate()
 //-----------------------------------------------------------------------------
 {
     for( size_t i = 0; i < m_Workers.size(); ++i )
     {
         // Send an 'empty' job for each of the workers (signals to stop running).
-        DoWork( Work{}, 10 * 1000 );
+        DoWork( ThreadWork{}, 10 * 1000 );
     }
 
     // Potentially the threads pushed jobs on to the m_WaitingWorkQueue between us pushing the 'empty' jobs and them getting processed.
-    // What do we do with that?  We could either run the jobs here (single threaded) or just punt.  What happens if another CWorker is
+    // What do we do with that?  We could either run the jobs here (single threaded) or just punt.  What happens if another ThreadWorker is
     // processing jobs that push work on to our queue?
 
     // Wait for all the threads to be done.
@@ -167,7 +167,7 @@ void CWorker::Terminate()
 }
 
 //-----------------------------------------------------------------------------
-void CWorker::FinishAllWork()
+void ThreadWorker::FinishAllWork()
 //-----------------------------------------------------------------------------
 {
     if(m_Workers.empty())
@@ -183,7 +183,7 @@ void CWorker::FinishAllWork()
 }
 
 //-----------------------------------------------------------------------------
-bool CWorker::IsAllWorkDone()
+bool ThreadWorker::IsAllWorkDone()
 //-----------------------------------------------------------------------------
 {
     if (m_Workers.empty())
@@ -204,14 +204,14 @@ bool CWorker::IsAllWorkDone()
 
 
 //-----------------------------------------------------------------------------
-void CWorker::DoWork(void (*lpStartAddress) (void *), void *pParam, uint32_t WaitTimeMS)
+void ThreadWorker::DoWork(void (*lpStartAddress) (void *), void *pParam, uint32_t WaitTimeMS)
 //-----------------------------------------------------------------------------
 {
     DoWork({lpStartAddress, pParam}, WaitTimeMS);
 }
 
 //-----------------------------------------------------------------------------
-void CWorker::DoWork(Work&& work, uint32_t WaitTimeMS)
+void ThreadWorker::DoWork(ThreadWork&& work, uint32_t WaitTimeMS)
 //-----------------------------------------------------------------------------
 {
     if(m_Workers.empty())

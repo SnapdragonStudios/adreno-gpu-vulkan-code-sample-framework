@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,9 +12,12 @@
 // forward declarations
 class Vulkan;
 template<typename T_GFXAPI> struct Uniform;
-namespace ExtensionHelperRT
+namespace ExtensionLib
 {
     struct Ext_VK_KHR_buffer_device_address;
+};
+namespace ExtensionLibRT
+{
     struct Ext_VK_KHR_ray_tracing_pipeline;
 };
 
@@ -76,8 +79,8 @@ public:
 private:
     Vulkan& m_vulkan;
 
-    const ExtensionHelperRT::Ext_VK_KHR_buffer_device_address* m_pExtKhrBufferDeviceAddress = nullptr;  ///< owned by Vulkan
-    const ExtensionHelperRT::Ext_VK_KHR_ray_tracing_pipeline* m_pExtKhrRayTracingPipeline = nullptr;  ///< owned by Vulkan
+    const ExtensionLib::Ext_VK_KHR_buffer_device_address* m_pExtKhrBufferDeviceAddress = nullptr;  ///< owned by Vulkan
+    const ExtensionLibRT::Ext_VK_KHR_ray_tracing_pipeline* m_pExtKhrRayTracingPipeline = nullptr;  ///< owned by Vulkan
 
     PFN_vkGetAccelerationStructureBuildSizesKHR m_fpGetAccelerationStructureBuildSizesKHR = nullptr;
     PFN_vkCreateAccelerationStructureKHR m_fpCreateAccelerationStructureKHR = nullptr;

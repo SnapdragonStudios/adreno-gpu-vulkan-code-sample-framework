@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -15,13 +15,15 @@
 #include <memory>
 
 // Forward declarations
-class Drawable;
-class Shader;
-template<typename T_GFXAPI> class MaterialManagerT;
-template<typename T_GFXAPI> class TextureT;
+class ShaderBase;
+template<typename T_GFXAPI> class Drawable;
+template<typename T_GFXAPI> class MaterialManager;
+template<typename T_GFXAPI> class RenderPass;
+template<typename T_GFXAPI> class Shader;
+template<typename T_GFXAPI> class Texture;
 
 
-class PostProcessStandard : public PostProcess
+class PostProcessStandard : public PostProcess<Vulkan>
 {
     PostProcessStandard& operator=(const PostProcessStandard&) = delete;
     PostProcessStandard(const PostProcessStandard&) = delete;
@@ -29,7 +31,7 @@ public:
     PostProcessStandard(Vulkan& vulkan);
     ~PostProcessStandard();
 
-    bool Init(const Shader& shader, MaterialManagerT<Vulkan>& materialManager, VkRenderPass blitRenderPass, std::span<const TextureT<Vulkan>> diffuseRenderTargets, TextureT<Vulkan>* bloomRenderTarget, TextureT<Vulkan>* uiRenderTarget);
+    bool Init(const Shader<Vulkan>& shader, MaterialManager<Vulkan>& materialManager, const RenderPass<Vulkan>& blitRenderPass, std::span<const Texture<Vulkan>> diffuseRenderTargets, Texture<Vulkan>* bloomRenderTarget, Texture<Vulkan>* uiRenderTarget);
     bool UpdateUniforms(uint32_t WhichFrame, float ElapsedTime) override;
     void UpdateGui() override;
 
@@ -55,7 +57,7 @@ protected:
         int sRGB = 0;           // 1 - apply srgb conversion in output blit shader, 0 passthrough color
     } m_FragUniformData;
     UniformArrayT<Vulkan, BlitFragUB, NUM_VULKAN_BUFFERS> m_FragUniform;
-    std::vector<TextureT<Vulkan> const*> m_DiffuseRenderTargets;
+    std::vector<Texture<Vulkan> const*> m_DiffuseRenderTargets;
     size_t m_CurrentRenderTargetIdx = 0;
 
 private:

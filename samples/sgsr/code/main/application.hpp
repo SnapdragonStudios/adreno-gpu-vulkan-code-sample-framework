@@ -16,12 +16,6 @@
 #include "vulkan/commandBuffer.hpp"
 #include <unordered_map>
 
-#define NUM_SPOT_LIGHTS 4
-
-class ShaderManager;
-class MaterialManager;
-class Drawable;
-
 enum RENDER_PASS
 {
     RP_SGSR = 0,
@@ -54,21 +48,12 @@ struct PassSetupInfo
 struct PassData
 {
     // Pass internal data
-    PassSetupInfo PassSetup;
-    VkRenderPass  RenderPass = VK_NULL_HANDLE;
-
-    // Recorded objects that are set to be drawn on this pass
-    std::vector< CommandListVulkan> ObjectsCmdBuffer;
-
-    // Command buffer used to dispatch the render pass
-    std::vector< CommandListVulkan> PassCmdBuffer;
-
-    // Indicates the completing of the underlying render pass
-    VkSemaphore PassCompleteSemaphore = VK_NULL_HANDLE;
+    PassSetupInfo                       RenderPassSetup;
+    std::vector<RenderContext<Vulkan>>  RenderContext;  // context per framebuffer (some passes might all point to the same framebuffers)
 
     // Render targed used by the underlying render pass
-    // note: The blit pass uses the backbuffer directly instead this RT
-    CRenderTargetArray<1> RenderTarget;
+    // note: The blit pass uses the backbuffer targets directly instead this RT
+    RenderTarget<Vulkan>                RenderTarget;
 };
 
 // **********************
@@ -92,13 +77,12 @@ private:
     // Application - Initialization
     bool InitializeCamera();
     bool LoadShaders();
+    bool CreateRenderPasses();
     bool CreateRenderTargets();
     bool InitUniforms();
-    bool InitAllRenderPasses();
     bool InitGui(uintptr_t windowHandle);
     bool LoadMeshObjects();
     bool InitCommandBuffers();
-    bool InitLocalSemaphores();
     bool BuildCmdBuffers();
 
 private:
@@ -107,7 +91,6 @@ private:
     void BeginRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass, uint32_t WhichSwapchainImage);
     void AddPassCommandBuffer(uint32_t WhichBuffer, RENDER_PASS WhichPass);
     void EndRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass);
-    void SubmitRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass, const std::span<const VkSemaphore> WaitSemaphores, const std::span<const VkPipelineStageFlags> WaitDstStageMasks, std::span<VkSemaphore> SignalSemaphores, VkFence CompletionFence = (VkFence)nullptr);
     void UpdateGui();
     bool UpdateUniforms(uint32_t WhichBuffer);
 
@@ -115,6 +98,9 @@ private:
 
     // Render passes
     std::array< PassData, NUM_RENDER_PASSES> m_RenderPassData;
+
+    // Per Frame Command lists
+    std::array<CommandList, NUM_VULKAN_BUFFERS> m_CommandLists;
 
     // UBOs
     UniformT<SGSRFragUB> m_SGSRFragUniform;
@@ -125,7 +111,7 @@ private:
     float             m_sgsr_scale_factor    = 1.0f;
     bool              m_sgsr_active          = false;
     bool              m_sgsr_edge_dir_active = false;
-    SamplerT<tGfxApi> m_sgsr_sampler;
+    Sampler<tGfxApi>  m_sgsr_sampler;
 
     // Drawables
     std::unique_ptr<Drawable> m_SGSRQuadDrawable;

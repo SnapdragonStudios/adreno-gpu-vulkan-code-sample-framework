@@ -1,26 +1,28 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 #include "vulkan/vulkan.hpp"
 #include "memory/memoryMapped.hpp"
+#include "rayTracing/accelerationStructure.hpp"
 
 class VulkanRT;
 
 /// @brief Base class for anything using a Ray Tracing Acceleration structure.
 /// Contains the Acceleration structure and it's memory buffer
-class AccelerationStructure
+template<>
+class AccelerationStructure<Vulkan> final : public AccelerationStructureBase
 {
-    AccelerationStructure& operator=(const AccelerationStructure&) = delete;
-    AccelerationStructure(const AccelerationStructure&) = delete;
+    AccelerationStructure& operator=(const AccelerationStructure<Vulkan>&) = delete;
+    AccelerationStructure(const AccelerationStructure<Vulkan>&) = delete;
 
 public:
     AccelerationStructure() : m_accelerationStructure(VK_NULL_HANDLE) {}
-    AccelerationStructure(AccelerationStructure&& other) noexcept
+    AccelerationStructure( AccelerationStructure<Vulkan>&& other) noexcept
         : m_accelerationStructureBuffer(std::move(other.m_accelerationStructureBuffer))
     {
         m_accelerationStructure = other.m_accelerationStructure;
@@ -38,15 +40,15 @@ public:
 
     /// Add the GPU commands to clone the @src accleleration structure into this one.
     /// Requires/expects that the acceleration structure is Created and is sized appropriately.
-    void CloneCmd(VulkanRT& vulkanRT, VkCommandBuffer cmdBuffer, const AccelerationStructure& src) const;
+    void CloneCmd(VulkanRT& vulkanRT, VkCommandBuffer cmdBuffer, const AccelerationStructure<Vulkan>& src) const;
 
     /// @return Vulkan Acceletation Structure owned by this class
-    VkAccelerationStructureKHR GetVkAccelerationStructure()const { return m_accelerationStructure; }
+    const VkAccelerationStructureKHR& GetVkAccelerationStructure()const { return m_accelerationStructure; }
 
 private:
-    VkAccelerationStructureKHR          m_accelerationStructure;
-    MemoryAllocatedBuffer<Vulkan, VkBuffer>  m_accelerationStructureBuffer;
-};
+    VkAccelerationStructureKHR              m_accelerationStructure;
+    MemoryAllocatedBuffer<Vulkan, VkBuffer> m_accelerationStructureBuffer;
+};  
 
 
 class AccelerationStructureScratch
@@ -69,8 +71,8 @@ public:
     uint64_t GetDeviceAddress() const { return m_scratchBufferDeviceAddress; }
 
 private:
-    MemoryAllocatedBuffer<Vulkan, VkBuffer>  m_scratchBuffer;
-    uint64_t                            m_scratchBufferDeviceAddress;
+    MemoryAllocatedBuffer<Vulkan, VkBuffer> m_scratchBuffer;
+    uint64_t                                m_scratchBufferDeviceAddress;
 };
 
 
@@ -117,7 +119,7 @@ public:
     virtual void Destroy(Vulkan& vulkan, VulkanRT& vulkanRT);
 
     /// @return Vulkan Acceleration Structure for Ray Querying/Tracing
-    VkAccelerationStructureKHR GetVkAccelerationStructure()const { return m_target.GetVkAccelerationStructure(); }
+    const AccelerationStructure<Vulkan>& GetAccelerationStructure() const { return m_target; }
 
     VkDeviceSize GetBuildScratchSize() const { return m_buildScratchSize; }
     VkDeviceSize GetUpdateScratchSize() const { return m_updateScratchSize; }
@@ -137,6 +139,6 @@ private:
     UpdateMode m_updateMode = UpdateMode::NotUpdatable;
     size_t m_buildScratchSize = 0;
     size_t m_updateScratchSize = 0;
-    AccelerationStructure m_source;
-    AccelerationStructure m_target;
+    AccelerationStructure<Vulkan> m_source;
+    AccelerationStructure<Vulkan> m_target;
 };

@@ -14,13 +14,11 @@
 #include "main/applicationHelperBase.hpp"
 #include "memory/vulkan/uniform.hpp"
 #include "vulkan/commandBuffer.hpp"
+#include "vulkan/renderPass.hpp"
 #include <unordered_map>
 
 #define NUM_SPOT_LIGHTS 4
 
-class ShaderManager;
-class MaterialManager;
-class Drawable;
 namespace SGSR2
 {
     class Context;
@@ -99,21 +97,15 @@ struct RenderPassSetupInfo
 struct RenderPassData
 {
     // Pass internal data
-    RenderPassSetupInfo RenderPassSetup;
-    VkRenderPass        RenderPass = VK_NULL_HANDLE;
+    RenderPassSetupInfo                 RenderPassSetup;
+    std::vector<RenderContext<Vulkan>>  RenderContext;  // context per framebuffer (some passes might all point to the same framebuffers)
 
-    // Recorded objects that are set to be drawn on this pass
-    std::vector< CommandListVulkan> ObjectsCmdBuffer;
-
-    // Command buffer used to dispatch the render pass
-    std::vector< CommandListVulkan> PassCmdBuffer;
-
-    // Indicates the completing of the underlying render pass
-    VkSemaphore PassCompleteSemaphore = VK_NULL_HANDLE;
+    // Recorded objects that are set to be drawn on this pass (secondary)
+    std::vector<CommandListVulkan>      ObjectsCmdBuffer;
 
     // Render targed used by the underlying render pass
-    // note: The blit pass uses the backbuffer directly instead this RT
-    CRenderTargetArray<1> RenderTarget;
+    // note: The blit pass uses the backbuffer targets directly instead this RT
+    RenderTarget<Vulkan>                RenderTarget;
 };
 
 // **********************
@@ -172,7 +164,6 @@ private:
     bool InitGui(uintptr_t windowHandle);
     bool LoadMeshObjects();
     bool InitCommandBuffers();
-    bool InitLocalSemaphores();
     bool BuildCmdBuffers();
 
 
@@ -183,7 +174,7 @@ private:
     void BeginRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass, uint32_t WhichSwapchainImage);
     void AddPassCommandBuffer(uint32_t WhichBuffer, RENDER_PASS WhichPass);
     void EndRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass);
-    void SubmitRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass, const std::span<const VkSemaphore> WaitSemaphores, const std::span<const VkPipelineStageFlags> WaitDstStageMasks, std::span<VkSemaphore> SignalSemaphores, VkFence CompletionFence = (VkFence)nullptr);
+    void SubmitRenderPass(uint32_t WhichBuffer, RENDER_PASS WhichPass, VkSemaphore WaitSemaphores = VK_NULL_HANDLE, VkPipelineStageFlags WaitDstStageMasks = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VkSemaphore SignalSemaphores = VK_NULL_HANDLE, VkFence CompletionFence = (VkFence)nullptr);
     void UpdateGui();
     bool UpdateUniforms(uint32_t WhichBuffer);
 
@@ -193,6 +184,8 @@ private:
     std::unique_ptr<SGSR2_Frag::Context>                      m_sgsr2_context_frag;
 
     // Render passes
+    RenderPass                                                m_ObjectRenderPass;
+
     std::array<RenderPassData, NUM_RENDER_PASSES>             m_RenderPassData;
 
     // Command lists
@@ -206,12 +199,6 @@ private:
     std::unordered_map<std::size_t, ObjectMaterialParameters> m_ObjectFragUniforms;
 
     // Drawables
-    std::vector<Drawable> m_SceneDrawables;
-    std::unique_ptr<Drawable> m_BlitQuadDrawable;
-
-    // Shaders
-    std::unique_ptr<ShaderManager> m_ShaderManager;
-
-    // Materials
-    std::unique_ptr<MaterialManager> m_MaterialManager;
+    std::vector<Drawable>                                     m_SceneDrawables;
+    std::unique_ptr<Drawable>                                 m_BlitQuadDrawable;
 };

@@ -1,16 +1,18 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "postProcessSMAA.hpp"
 #include "imgui/imgui.h"
-#include "material/materialManager.hpp"
-#include "material/computable.hpp"
+#include "material/vulkan/computable.hpp"
+#include "material/vulkan/materialManager.hpp"
+#include "material/vulkan/shader.hpp"
 #include "system/os_common.h"
+#include "texture/vulkan/texture.hpp"
 #include "texture/vulkan/textureManager.hpp"
 
 
@@ -25,7 +27,7 @@ PostProcessSMAA::~PostProcessSMAA()
     ReleaseUniformBuffer(&m_Vulkan, m_Uniform);
 }
 
-bool PostProcessSMAA::Init(const Shader& shader, MaterialManagerT<Vulkan>& materialManager, TextureVulkan* diffuseRenderTarget, TextureVulkan* depthRenderTarget)
+bool PostProcessSMAA::Init(const Shader<Vulkan>& shader, MaterialManager<Vulkan>& materialManager, TextureVulkan* diffuseRenderTarget, TextureVulkan* depthRenderTarget)
 {
     assert(diffuseRenderTarget);
     assert(depthRenderTarget);
@@ -40,8 +42,8 @@ bool PostProcessSMAA::Init(const Shader& shader, MaterialManagerT<Vulkan>& mater
     if (!CreateUniformBuffer(&m_Vulkan, m_Uniform, &m_UniformData))
         return false;
 
-    auto blitShaderMaterial = materialManager.CreateMaterial(m_Vulkan, shader, (uint32_t) m_historyDiffuse.size(),
-        [&](const std::string& texName) -> const MaterialManagerT<Vulkan>::tPerFrameTexInfo {
+    auto blitShaderMaterial = materialManager.CreateMaterial(shader, (uint32_t) m_historyDiffuse.size(),
+        [&](const std::string& texName) -> const MaterialManager<Vulkan>::tPerFrameTexInfo {
             if (texName == "Diffuse") {
                 return { diffuseRenderTarget };
             }
@@ -57,17 +59,18 @@ bool PostProcessSMAA::Init(const Shader& shader, MaterialManagerT<Vulkan>& mater
             assert(0);
             return {};
         },
-        [this](const std::string& bufferName) -> tPerFrameVkBuffer {
-            return { m_Uniform.vkBuffers.begin(), m_Uniform.vkBuffers.end() };
+        [this](const std::string& bufferName) -> PerFrameBufferVulkan {
+            return { m_Uniform.bufferHandles };
         }
         );
 
-    m_Computable = std::make_unique<Computable>(m_Vulkan, std::move(blitShaderMaterial));
-    if (!m_Computable->Init())
+    auto computable = std::make_unique<Computable<Vulkan>>(m_Vulkan, std::move(blitShaderMaterial));
+    if (!computable->Init())
     {
         return false;
     }
-    m_Computable->SetDispatchGroupCount(0, { diffuseRenderTarget->Width/16, diffuseRenderTarget->Height/4, 1});
+    computable->SetDispatchGroupCount(0, { diffuseRenderTarget->Width/16, diffuseRenderTarget->Height/4, 1});
+    m_Computable = std::move(computable);
     return true;
 }
 
@@ -98,7 +101,7 @@ void PostProcessSMAA::UpdateGui()
 {
 }
 
-const Computable* const PostProcessSMAA::GetComputable() const
+const ComputableBase* const PostProcessSMAA::GetComputable() const
 {
     return m_Computable.get();
 }

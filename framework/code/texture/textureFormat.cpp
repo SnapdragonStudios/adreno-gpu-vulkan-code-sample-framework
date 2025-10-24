@@ -1,10 +1,9 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2023 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 
 #include "textureFormat.hpp"
 
@@ -170,5 +169,158 @@ bool FormatIsSrgb( TextureFormat format )
         return true;
     default:
         return false;
+    }
+}
+
+//-----------------------------------------------------------------------------
+size_t FormatBytesPerPixel( TextureFormat format )
+//-----------------------------------------------------------------------------
+{
+    switch (format)
+    {
+    case TextureFormat::R4G4_UNORM_PACK8:
+    case TextureFormat::R8_UNORM:
+    case TextureFormat::R8_SNORM:
+    case TextureFormat::R8_USCALED:
+    case TextureFormat::R8_SSCALED:
+    case TextureFormat::R8_UINT:
+    case TextureFormat::R8_SINT:
+    case TextureFormat::R8_SRGB:
+    case TextureFormat::S8_UINT:
+        return 1;
+    case TextureFormat::R8G8_UNORM:
+    case TextureFormat::R8G8_SNORM:
+    case TextureFormat::R8G8_USCALED:
+    case TextureFormat::R8G8_SSCALED:
+    case TextureFormat::R8G8_UINT:
+    case TextureFormat::R8G8_SINT:
+    case TextureFormat::R8G8_SRGB:
+    case TextureFormat::R4G4B4A4_UNORM_PACK16:
+    case TextureFormat::B4G4R4A4_UNORM_PACK16:
+    case TextureFormat::R5G6B5_UNORM_PACK16:
+    case TextureFormat::B5G6R5_UNORM_PACK16:
+    case TextureFormat::R5G5B5A1_UNORM_PACK16:
+    case TextureFormat::B5G5R5A1_UNORM_PACK16:
+    case TextureFormat::A1R5G5B5_UNORM_PACK16:
+    case TextureFormat::R16_UNORM:
+    case TextureFormat::R16_SNORM:
+    case TextureFormat::R16_USCALED:
+    case TextureFormat::R16_SSCALED:
+    case TextureFormat::R16_UINT:
+    case TextureFormat::R16_SINT:
+    case TextureFormat::R16_SFLOAT:
+    case TextureFormat::D16_UNORM:
+    case TextureFormat::R12X4_UNORM_PACK16:
+    case TextureFormat::A4R4G4B4_UNORM_PACK16:
+    case TextureFormat::A4B4G4R4_UNORM_PACK16:
+        return 2;
+    case TextureFormat::R8G8B8_UNORM:
+    case TextureFormat::R8G8B8_SNORM:
+    case TextureFormat::R8G8B8_USCALED:
+    case TextureFormat::R8G8B8_SSCALED:
+    case TextureFormat::R8G8B8_UINT:
+    case TextureFormat::R8G8B8_SINT:
+    case TextureFormat::R8G8B8_SRGB:
+    case TextureFormat::B8G8R8_UNORM:
+    case TextureFormat::B8G8R8_SNORM:
+    case TextureFormat::B8G8R8_USCALED:
+    case TextureFormat::B8G8R8_SSCALED:
+    case TextureFormat::B8G8R8_UINT:
+    case TextureFormat::B8G8R8_SINT:
+    case TextureFormat::B8G8R8_SRGB:
+        return 3;
+    case TextureFormat::R8G8B8A8_UNORM:
+    case TextureFormat::R8G8B8A8_SNORM:
+    case TextureFormat::R8G8B8A8_USCALED:
+    case TextureFormat::R8G8B8A8_SSCALED:
+    case TextureFormat::R8G8B8A8_UINT:
+    case TextureFormat::R8G8B8A8_SINT:
+    case TextureFormat::R8G8B8A8_SRGB:
+    case TextureFormat::B8G8R8A8_UNORM:
+    case TextureFormat::B8G8R8A8_SNORM:
+    case TextureFormat::B8G8R8A8_USCALED:
+    case TextureFormat::B8G8R8A8_SSCALED:
+    case TextureFormat::B8G8R8A8_UINT:
+    case TextureFormat::B8G8R8A8_SINT:
+    case TextureFormat::B8G8R8A8_SRGB:
+    case TextureFormat::A8B8G8R8_UNORM_PACK32:
+    case TextureFormat::A8B8G8R8_SNORM_PACK32:
+    case TextureFormat::A8B8G8R8_USCALED_PACK32:
+    case TextureFormat::A8B8G8R8_SSCALED_PACK32:
+    case TextureFormat::A8B8G8R8_UINT_PACK32:
+    case TextureFormat::A8B8G8R8_SINT_PACK32:
+    case TextureFormat::A8B8G8R8_SRGB_PACK32:
+    case TextureFormat::A2R10G10B10_UNORM_PACK32:
+    case TextureFormat::A2R10G10B10_SNORM_PACK32:
+    case TextureFormat::A2R10G10B10_USCALED_PACK32:
+    case TextureFormat::A2R10G10B10_SSCALED_PACK32:
+    case TextureFormat::A2R10G10B10_UINT_PACK32:
+    case TextureFormat::A2R10G10B10_SINT_PACK32:
+    case TextureFormat::A2B10G10R10_UNORM_PACK32:
+    case TextureFormat::A2B10G10R10_SNORM_PACK32:
+    case TextureFormat::A2B10G10R10_USCALED_PACK32:
+    case TextureFormat::A2B10G10R10_SSCALED_PACK32:
+    case TextureFormat::A2B10G10R10_UINT_PACK32:
+    case TextureFormat::A2B10G10R10_SINT_PACK32:
+    case TextureFormat::R16G16_UNORM:
+    case TextureFormat::R16G16_SNORM:
+    case TextureFormat::R16G16_USCALED:
+    case TextureFormat::R16G16_SSCALED:
+    case TextureFormat::R16G16_UINT:
+    case TextureFormat::R16G16_SINT:
+    case TextureFormat::R16G16_SFLOAT:
+    case TextureFormat::R32_UINT:
+    case TextureFormat::R32_SINT:
+    case TextureFormat::R32_SFLOAT:
+    case TextureFormat::B10G11R11_UFLOAT_PACK32:
+    case TextureFormat::E5B9G9R9_UFLOAT_PACK32:
+    case TextureFormat::X8_D24_UNORM_PACK32:
+    case TextureFormat::D32_SFLOAT:
+        return 4;
+    case TextureFormat::R16G16B16_UNORM:
+    case TextureFormat::R16G16B16_SNORM:
+    case TextureFormat::R16G16B16_USCALED:
+    case TextureFormat::R16G16B16_SSCALED:
+    case TextureFormat::R16G16B16_UINT:
+    case TextureFormat::R16G16B16_SINT:
+    case TextureFormat::R16G16B16_SFLOAT:
+        return 6;
+    case TextureFormat::R32G32B32_UINT:
+    case TextureFormat::R32G32B32_SINT:
+    case TextureFormat::R32G32B32_SFLOAT:
+        return 12;
+    case TextureFormat::R32G32B32A32_UINT:
+    case TextureFormat::R32G32B32A32_SINT:
+    case TextureFormat::R32G32B32A32_SFLOAT:
+        return 16;
+    case TextureFormat::R16G16B16A16_UNORM:
+    case TextureFormat::R16G16B16A16_SNORM:
+    case TextureFormat::R16G16B16A16_USCALED:
+    case TextureFormat::R16G16B16A16_SSCALED:
+    case TextureFormat::R16G16B16A16_UINT:
+    case TextureFormat::R16G16B16A16_SINT:
+    case TextureFormat::R16G16B16A16_SFLOAT:
+    case TextureFormat::R64_UINT:
+    case TextureFormat::R64_SINT:
+    case TextureFormat::R64_SFLOAT:
+    case TextureFormat::R32G32_UINT:
+    case TextureFormat::R32G32_SINT:
+    case TextureFormat::R32G32_SFLOAT:
+    case TextureFormat::R64G64_UINT:
+    case TextureFormat::R64G64_SINT:
+    case TextureFormat::R64G64_SFLOAT:
+        return 8;
+        return 32;
+    case TextureFormat::R64G64B64_UINT:
+    case TextureFormat::R64G64B64_SINT:
+    case TextureFormat::R64G64B64_SFLOAT:
+        return 48;
+    case TextureFormat::R64G64B64A64_UINT:
+    case TextureFormat::R64G64B64A64_SINT:
+    case TextureFormat::R64G64B64A64_SFLOAT:
+        return 64;
+    case TextureFormat::UNDEFINED:
+    default:
+        return 0;
     }
 }

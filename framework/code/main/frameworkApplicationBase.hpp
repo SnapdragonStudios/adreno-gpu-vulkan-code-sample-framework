@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -96,7 +96,10 @@ public:
     virtual void    Destroy();
 
     /// Called by framework whenever the screen (swap chain) size has changed.  This is the WINDOW size (not necissarily the buffer size etc), mouse/touch input is expected to be in this coordinate space)
-    virtual bool    SetWindowSize(uint32_t width, uint32_t height);
+    virtual bool    SetWindowSize( uint32_t width, uint32_t height );
+
+    /// Return the WINDOW size (not necissarily the buffer size etc), mouse/touch input is expected to be in this coordinate space)
+    std::pair<uint32_t, uint32_t> GetWindowSize() const { return {m_WindowWidth, m_WindowHeight}; };
 
     /// Application Main thread 'render' loop (eg ALooper_pollAll loop on Android)
     /// Called every frame.
@@ -125,9 +128,9 @@ public:
     bool            Render();
 
     // Accessors
-    GraphicsApiBase*GetGraphicsApi() const  { return m_gfxBase.get(); }
-    Gui*            GetGui() const          { return m_Gui.get(); }
-    uint32_t        GetFrameCount() const { return m_FrameCount; }
+    GraphicsApiBase*GetGraphicsApiBase() const  { return m_gfxBase.get(); }
+    Gui*            GetGui() const              { return m_Gui.get(); }
+    uint32_t        GetFrameCount() const       { return m_FrameCount; }
 
 public:
     // Frame timings

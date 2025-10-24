@@ -1,43 +1,41 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "shaderModule.hpp"
-#include <fstream>
 #include <vector>
-#include <iostream>
 #include "material/shaderDescription.hpp"
 #include "vertexDescription.hpp"
 #include "vulkan/vulkan.hpp"
 #include "system/assetManager.hpp"
 
 
-ShaderModuleT<Vulkan>::ShaderModuleT() noexcept : ShaderModule()
+ShaderModule<Vulkan>::ShaderModule() noexcept : ShaderModuleBase()
     , m_shader(VK_NULL_HANDLE)
 {
 }
 
 /// Destructor.  Will assert if a shader was loaded and the matching Destroy was not called.
-ShaderModuleT<Vulkan>::~ShaderModuleT()
+ShaderModule<Vulkan>::~ShaderModule()
 {
     assert(m_shader == VK_NULL_HANDLE);
 }
 
-void ShaderModuleT<Vulkan>::Destroy(Vulkan& vulkan)
+void ShaderModule<Vulkan>::Destroy(Vulkan& vulkan)
 {
     if (m_shader != VK_NULL_HANDLE)
     {
         vkDestroyShaderModule(vulkan.m_VulkanDevice, m_shader, nullptr);
         m_shader = VK_NULL_HANDLE;
     }
-    ShaderModule::Destroy();
+    ShaderModuleBase::Destroy();
 }
 
-bool ShaderModuleT<Vulkan>::Load(Vulkan& vulkan, AssetManager& assetManager, const std::string& filename)
+bool ShaderModule<Vulkan>::Load(Vulkan& vulkan, AssetManager& assetManager, const std::string& filename)
 {
     bool success = true;
     Destroy(vulkan);
@@ -74,7 +72,7 @@ bool ShaderModuleT<Vulkan>::Load(Vulkan& vulkan, AssetManager& assetManager, con
     return success;
 }
 
-bool ShaderModuleT<Vulkan>::Load(Vulkan& vulkan, AssetManager& assetManager, const ShaderPassDescription& shaderDescription, const ShaderType shaderType)
+bool ShaderModule<Vulkan>::Load(Vulkan& vulkan, AssetManager& assetManager, const ShaderPassDescription& shaderDescription, const ShaderType shaderType)
 {
     const std::string* shaderFileName = nullptr;
     switch (shaderType)

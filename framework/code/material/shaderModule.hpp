@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -15,20 +15,20 @@
 
 // Forward declarations
 class AssetManager;
-class DescriptorSetLayout;
+class DescriptorSetLayoutBase;
 class ShaderPassDescription;
 class VertexDescription;
 class VertexFormat;
-template<typename T_GFXAPI> class ShaderModuleT;
+template<typename T_GFXAPI> class ShaderModule;
 
-class ShaderModule
+class ShaderModuleBase
 {
-    ShaderModule(const ShaderModule&) = delete;
-    ShaderModule& operator=(const ShaderModule&) = delete;
+    ShaderModuleBase(const ShaderModuleBase&) = delete;
+    ShaderModuleBase& operator=(const ShaderModuleBase&) = delete;
 public:
-    template<typename T_GFXAPI> using tApiDerived = ShaderModuleT<T_GFXAPI>; // make apiCast work!
-    ShaderModule() noexcept {}
-    ~ShaderModule() {}
+    template<typename T_GFXAPI> using tApiDerived = ShaderModule<T_GFXAPI>; // make apiCast work!
+    ShaderModuleBase() noexcept {}
+    ~ShaderModuleBase() {}
 
     enum class ShaderType {
         Fragment, Vertex, Compute, RayGeneration, RayClosestHit, RayAnyHit, RayMiss, Task, Mesh
@@ -43,16 +43,16 @@ protected:
     std::string         m_filename;
 };
 
-/// Templated Shader module (container for shader code)
+/// Templated ShaderBase module (container for shader code)
 /// Expected to be specialized (by the graphics api)
 /// @ingroup Material
 template<typename T_GFXAPI>
-class ShaderModuleT : private ShaderModule
+class ShaderModule : private ShaderModuleBase
 {
-    ShaderModuleT(const ShaderModuleT<T_GFXAPI>&) = delete;
-    ShaderModuleT& operator=(const ShaderModuleT<T_GFXAPI>&) = delete;
+    ShaderModule(const ShaderModule<T_GFXAPI>&) = delete;
+    ShaderModule& operator=(const ShaderModule<T_GFXAPI>&) = delete;
 public:
-    ShaderModuleT() noexcept = delete;   // this template class must be specialized
+    ShaderModule() noexcept = delete;   // this template class must be specialized
 
     /// Free up the vkShaderModule resource.
     void Destroy(T_GFXAPI&) = delete;
@@ -65,5 +65,5 @@ public:
     /// @returns true on success
     bool Load(T_GFXAPI&, AssetManager&, const ShaderPassDescription&, const ShaderType);
 
-    static_assert(sizeof(ShaderModuleT<T_GFXAPI>) != sizeof(ShaderModule));   // Ensure this class template is specialized (and not used as-is)
+    static_assert(sizeof(ShaderModule<T_GFXAPI>) != sizeof(ShaderModuleBase));   // Ensure this class template is specialized (and not used as-is)
 };

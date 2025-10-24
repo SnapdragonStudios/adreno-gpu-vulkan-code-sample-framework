@@ -1,15 +1,16 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #include "vulkanRT.hpp"
-#include "extensionHelpersRT.hpp"
+#include "extensionLibRT.hpp"
 #include <algorithm>
 #include <array>
-#include "vulkan/extensionHelpers.hpp"
+#include <cstring>
+#include "vulkan/extensionLib.hpp"
 #include "memory/vulkan/uniform.hpp"
 #include "vulkan/vulkan_support.hpp"
 
@@ -65,16 +66,21 @@ void VulkanRT::RegisterRequiredVulkanLayerExtensions( Vulkan::AppConfiguration& 
 {
     assert( m_pExtKhrBufferDeviceAddress == nullptr );
     assert( m_pExtKhrRayTracingPipeline == nullptr );
-    m_pExtKhrBufferDeviceAddress = appConfig.RequiredExtension<ExtensionHelperRT::Ext_VK_KHR_buffer_device_address>();
-    appConfig.RequiredExtension<ExtensionHelperRT::Ext_VK_KHR_acceleration_structure>();
-    appConfig.RequiredExtension<ExtensionHelper::Ext_VK_EXT_descriptor_indexing>();
+    m_pExtKhrBufferDeviceAddress = appConfig.RequiredExtension<ExtensionLib::Ext_VK_KHR_buffer_device_address>();
+    appConfig.RequiredExtension<ExtensionLibRT::Ext_VK_KHR_acceleration_structure>();
+    appConfig.RequiredExtension<ExtensionLib::Ext_VK_EXT_descriptor_indexing>();
+    appConfig.RequiredExtension<ExtensionLib::Ext_VK_KHR_get_physical_device_properties2>();
     appConfig.RequiredExtension( "VK_KHR_deferred_host_operations" );
     appConfig.RequiredExtension( "VK_KHR_shader_float_controls" );
     appConfig.RequiredExtension( "VK_KHR_spirv_1_4" );
-    appConfig.RequiredExtension<ExtensionHelperRT::Ext_VK_KHR_ray_query>();
+    appConfig.RequiredExtension<ExtensionLibRT::Ext_VK_KHR_ray_query>();
     if (!rayQueryOnly)
     {
-        m_pExtKhrRayTracingPipeline = appConfig.OptionalExtension<ExtensionHelperRT::Ext_VK_KHR_ray_tracing_pipeline>();
+#if ANDROID
+        m_pExtKhrRayTracingPipeline = appConfig.OptionalExtension<ExtensionLibRT::Ext_VK_KHR_ray_tracing_pipeline>();
+#else  // ANDROID
+        m_pExtKhrRayTracingPipeline = appConfig.RequiredExtension<ExtensionLibRT::Ext_VK_KHR_ray_tracing_pipeline>();
+#endif // ANDROID
     }
 }
 
@@ -233,7 +239,7 @@ bool VulkanRT::CreateRTPipeline(VkPipelineCache  pipelineCache,
     const size_t shaderGroupBaseAlignment = rayTracingPipelineProperties.shaderGroupBaseAlignment;
 
     {
-        // Initialize the shader binding table strides and sizes (without the device address) to help us calulate the GPU Shader Binding Table buffer size.
+        // Initialize the shader binding table strides and sizes (without the device address) to help us calulate the GPU ShaderBase Binding Table buffer size.
 
         // Ray generation shader binding
         assert(rayGenerationCount == 1);    // must have one and only one raygen
@@ -324,8 +330,8 @@ bool VulkanRTStub::Init()
 void VulkanRTStub::RegisterRequiredVulkanLayerExtensions( Vulkan::AppConfiguration& appConfig, bool rayQueryOnly )
 {
     // Register a subset of what actual Ray Tracing or Ray Query needs.
-    appConfig.RequiredExtension<ExtensionHelperRT::Ext_VK_KHR_buffer_device_address>();
-    appConfig.RequiredExtension<ExtensionHelper::Ext_VK_EXT_descriptor_indexing>();
+    appConfig.RequiredExtension<ExtensionLib::Ext_VK_KHR_buffer_device_address>();
+    appConfig.RequiredExtension<ExtensionLib::Ext_VK_EXT_descriptor_indexing>();
     appConfig.RequiredExtension( "VK_KHR_shader_float_controls" );
     appConfig.RequiredExtension( "VK_KHR_spirv_1_4" );
 }

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -17,12 +17,12 @@
 #include <memory>
 
 // Forward declarations
-class Computable;
-class Shader;
-template<typename T_GFXAPI> class MaterialManagerT;
+template<typename T_GFXAPI> class Computable;
+template<typename T_GFXAPI> class MaterialManager;
+template<typename T_GFXAPI> class Shader;
 
 
-class PostProcessSMAA : public PostProcess
+class PostProcessSMAA : public PostProcess<Vulkan>
 {
     PostProcessSMAA& operator=(const PostProcessSMAA&) = delete;
     PostProcessSMAA(const PostProcessSMAA&) = delete;
@@ -30,18 +30,18 @@ public:
     PostProcessSMAA(Vulkan& vulkan);
     ~PostProcessSMAA();
 
-    bool Init(const Shader& shader, MaterialManagerT<Vulkan>& materialManager, TextureVulkan* diffuseRenderTarget, TextureVulkan* depthRenderTarget);
+    bool Init(const Shader<Vulkan>& shader, MaterialManager<Vulkan>& materialManager, TextureVulkan* diffuseRenderTarget, TextureVulkan* depthRenderTarget);
     bool UpdateUniforms(uint32_t WhichFrame, float ElapsedTime) override { return UpdateUniforms(WhichFrame, ElapsedTime, glm::mat4(1.0f)); }
     bool UpdateUniforms(uint32_t WhichFrame, float ElapsedTime, const glm::mat4& clipToPrevClip);
     void UpdateGui() override;
 
-    const Computable* const GetComputable() const override;
+    const ComputableBase* const GetComputable() const override;
     std::span<const TextureVulkan> GetOutput() const;
 
 protected:
     Vulkan&                         m_Vulkan;
 
-    std::unique_ptr<Computable>     m_Computable;
+    std::unique_ptr<ComputableBase> m_Computable;
     std::array<TextureVulkan, 2>    m_historyDiffuse;
 
     struct UniformData {

@@ -1,15 +1,15 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "imguiBase.hpp"
-#include "imgui.h"
+#include "imgui/imgui.h"
 
-bool GuiImguiBase::Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint32_t renderHeight)
+bool GuiImguiBase::Initialize(uintptr_t windowHandle, TextureFormat, uint32_t renderWidth, uint32_t renderHeight)
 {
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -29,7 +29,6 @@ bool GuiImguiBase::Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint
 void GuiImguiBase::Update()
 {
     ImGui::NewFrame();
-//    ImGui::ShowDemoWindow();
 }
 
 bool GuiImguiBase::WantCaptureMouse() const

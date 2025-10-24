@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -11,11 +11,13 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <queue>
 #include <cassert>
+#include <functional>
 
 #if !defined(MAX_CPU_CORES)
-    #define MAX_CPU_CORES       4
+    #define MAX_CPU_CORES       12
 #endif // !defined(MAX_CPU_CORES)
 
 /// Sempahore.  Post increases the counter, Wait allows a thread through if the counter is greater than zero and then decreases the counter.
@@ -128,7 +130,7 @@ private:
 
 
 // Some work that we want the worker to do
-struct Work
+struct ThreadWork
 {
     // Funtion pointer
     void (*lpStartAddress) (void *) = nullptr;
@@ -142,12 +144,12 @@ struct Work
 /// Creates a number of worker threads that can then be given work to do (via DoWork / DoWork2)
 /// Holds the threads, the work queue, and the associated syncronization primitives.
 /// @ingroup System
-class CWorker
+class ThreadWorker
 {
 public:
     // Constructor/Destructor
-    CWorker();
-    ~CWorker();
+    ThreadWorker();
+    ~ThreadWorker();
 
     /// Initialize this worker with the given number of threads
     uint32_t    Initialize(const char *pName, uint32_t uiDesiredThreads = 0);
@@ -197,10 +199,27 @@ public:
         DoWork( +lambdaWrap, pParams, 1000 );
     }
 
+    struct pWrapper {
+        std::function<void()> m_function;
+    };
+
+    using tWork3Fn = std::function<void()>;
+    void DoWork3( tWork3Fn&& work ) {
+
+        void* pWork = new tWork3Fn( std::forward<tWork3Fn>( work ) );
+
+        auto lambdaWrap = []( void* voidParams ) {
+            tWork3Fn* pWork = static_cast<tWork3Fn*>(voidParams);
+            pWork->operator()();
+            delete pWork;
+        };
+        DoWork( +lambdaWrap, pWork, 1000 );
+    }
+
     void        Terminate();
 
 protected:
-    void DoWork(Work&& work, uint32_t WaitTimeMS);
+    void DoWork(ThreadWork&& work, uint32_t WaitTimeMS);
 
     /// Function run by the WorkerInfo::m_Thread, loops.
     void WorkerThreadProc();
@@ -212,7 +231,7 @@ protected:
     std::vector<std::thread> m_Workers;
 
     /// Queue that holds the work we have been asked to do (protected by a mutex).
-    std::queue<Work>        m_WaitingWorkQueue;
+    std::queue<ThreadWork>        m_WaitingWorkQueue;
     std::mutex              m_WaitingWorkQueueMutex;
 
     /// Semaphore to control when work is available.

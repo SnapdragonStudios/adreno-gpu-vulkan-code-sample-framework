@@ -1,10 +1,11 @@
-//============================================================================================================
+//=============================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
+//                  Copyright (c) 2020 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//============================================================================================================
+//==============================================================================
+#include <cstring>
 #include <cstdint>
 #include "memory/memoryMapped.hpp"
 #include "vulkan/vulkan.hpp"

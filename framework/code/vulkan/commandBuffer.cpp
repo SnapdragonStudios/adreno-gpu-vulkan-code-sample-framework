@@ -1,47 +1,50 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "commandBuffer.hpp"
+#include "framebuffer.hpp"
+#include "renderContext.hpp"
 #include "renderTarget.hpp"
 #include "timerPool.hpp"
+#include "vulkan/extensionLib.hpp"
 #include "vulkan_support.hpp"
 
 //-----------------------------------------------------------------------------
-CommandListT<Vulkan>::CommandListT() noexcept
+CommandList<Vulkan>::CommandList() noexcept
 //-----------------------------------------------------------------------------
 {
 }
 
 //-----------------------------------------------------------------------------
-CommandListT<Vulkan>::~CommandListT()
+CommandList<Vulkan>::~CommandList()
 //-----------------------------------------------------------------------------
 {
     Release();
 }
 
 //-----------------------------------------------------------------------------
-CommandListT<Vulkan>::CommandListT(CommandListT<Vulkan>&& other) noexcept
+CommandList<Vulkan>::CommandList(CommandList<Vulkan>&& other) noexcept
 //---------------------------------------------------------------------------
 {
-    assert(0);  // Currently move is not implemented for this class, but std::vector will not compile if a move (or copy) is not provided, we currently expect that the move will not get called (ie vector of CommandListT<Vulkan> will not resize)
+    assert(0);  // Currently move is not implemented for this class, but std::vector will not compile if a move (or copy) is not provided, we currently expect that the move will not get called (ie vector of CommandList<Vulkan> will not resize)
 }
 
 //-----------------------------------------------------------------------------
-CommandListT<Vulkan>& CommandListT<Vulkan>::operator=(CommandListT<Vulkan> && other) noexcept
+CommandList<Vulkan>& CommandList<Vulkan>::operator=(CommandList<Vulkan> && other) noexcept
 //-----------------------------------------------------------------------------
 {
-    assert(0);  // Currently move is not implemented for this class, but std::vector will not compile if a move (or copy) is not provided, we currently expect that the move will not get called (ie vector of CommandListT<Vulkan> will not resize)
+    assert(0);  // Currently move is not implemented for this class, but std::vector will not compile if a move (or copy) is not provided, we currently expect that the move will not get called (ie vector of CommandList<Vulkan> will not resize)
     return *this;
 }
 
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::Initialize(Vulkan* pVulkan, const std::string& Name, VkCommandBufferLevel CmdBuffLevel, uint32_t QueueIndex, TimerPoolBase* pGpuTimerPool)
+bool CommandList<Vulkan>::Initialize(Vulkan* pVulkan, const std::string& Name, CommandListBase::Type CmdBuffType, uint32_t QueueIndex, TimerPoolBase* pGpuTimerPool)
 //-----------------------------------------------------------------------------
 {
     m_Name = Name;
@@ -58,17 +61,18 @@ bool CommandListT<Vulkan>::Initialize(Vulkan* pVulkan, const std::string& Name, 
     assert(m_GpuTimerQueries.empty());
 
     // What type of command buffer are we dealing with
-    if (CmdBuffLevel == VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-    {
-        m_IsPrimary = true;
-    }
-    else if (CmdBuffLevel == VK_COMMAND_BUFFER_LEVEL_SECONDARY)
-    {
-        m_IsPrimary = false;
-    }
-    else
-    {
-        LOGE("Command Buffer initialization with unknown level! (%d)", CmdBuffLevel);
+    VkCommandBufferLevel CmdBuffLevel = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    m_Type = Type::Primary;
+    switch (CmdBuffType) {
+        case Type::Primary:
+            break;
+        case Type::Secondary:
+            m_Type = Type::Secondary;
+            CmdBuffLevel = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+            break;
+        default:
+            LOGE( "Command Buffer initialization with unsupported type! (%d)", CmdBuffType );
+            break;
     }
 
     // Store which queue this command list is using (index in to Vulkan::m_VulkanQueues) so we can submit to the associated device queue.
@@ -80,7 +84,7 @@ bool CommandListT<Vulkan>::Initialize(Vulkan* pVulkan, const std::string& Name, 
 }
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::Reset()
+bool CommandList<Vulkan>::Reset()
 //-----------------------------------------------------------------------------
 {
     VkResult RetVal;
@@ -112,66 +116,80 @@ bool CommandListT<Vulkan>::Reset()
 }
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::Begin(VkCommandBufferUsageFlags CmdBuffUsage)
+bool CommandList<Vulkan>::Begin( VkCommandBufferUsageFlags CmdBuffUsage )
 //-----------------------------------------------------------------------------
 {
-    assert(m_IsPrimary);
-    if (!m_IsPrimary)
+    assert(m_Type == Type::Primary);
+    if (m_Type != Type::Primary)
     {
         LOGE("Error! Trying to begin secondary command buffer without Framebuffer or RenderPass: %s", m_Name.c_str());
         return false;
     }
 
-    return Begin(VK_NULL_HANDLE, VK_NULL_HANDLE, false, 0, CmdBuffUsage);
+    const VkCommandBufferBeginInfo CmdBeginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = CmdBuffUsage,
+    };
+    return Begin( CmdBeginInfo );
 }
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::Begin( VkFramebuffer FrameBuffer, VkRenderPass RenderPass, bool IsSwapChainRenderPass, uint32_t SubPass, VkCommandBufferUsageFlags CmdBuffUsage)
+bool CommandList<Vulkan>::Begin( VkFramebuffer FrameBuffer, VkRenderPass RenderPass, bool IsSwapChainRenderPass, uint32_t SubPass, VkCommandBufferUsageFlags CmdBuffUsage )
 //-----------------------------------------------------------------------------
 {
-    VkResult RetVal;
-
     if (m_VkCommandBuffer == VK_NULL_HANDLE)
     {
-        LOGE("Error! Trying to begin command buffer before it has been initialized: %s", m_Name.c_str());
+        LOGE( "Error! Trying to begin command buffer before it has been initialized: %s", m_Name.c_str() );
         return false;
     }
 
-    VkCommandBufferBeginInfo CmdBeginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    CmdBeginInfo.flags = CmdBuffUsage;
-
-    VkCommandBufferInheritanceInfo InheritanceInfo {VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO};
-    VkCommandBufferInheritanceRenderPassTransformInfoQCOM InheritanceInfoRenderPassTransform = {};
-
-    // If this is a secondary command buffer it has inheritance information.
-    // If primary, the inheritance stuff is ignored.
-    if (!m_IsPrimary)
+    assert( m_Type == Type::Secondary );
+    if (m_Type != Type::Secondary)
     {
-        InheritanceInfo.framebuffer = FrameBuffer;
-        InheritanceInfo.occlusionQueryEnable = VK_FALSE;
-        InheritanceInfo.queryFlags = 0;
-        InheritanceInfo.pipelineStatistics = 0;
-
-        // If this is a secondary command buffer it MAY BE inside another render pass (compute can be in a secondary buffer and not have/inherit a renderder pass)
-        if (RenderPass != VK_NULL_HANDLE)
-        {
-            CmdBeginInfo.flags |= VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
-
-            InheritanceInfo.renderPass = RenderPass;
-            InheritanceInfo.subpass = SubPass;
-
-            // We may also have to pass the inherited render pass transform down to the secondary buffer
-            if (IsSwapChainRenderPass && m_pVulkan->FillCommandBufferInheritanceRenderPassTransformInfoQCOM(InheritanceInfoRenderPassTransform))
-            {
-                LOGI("VkCommandBufferInheritanceRenderPassTransformInfoQCOM (%s): Extents = (%d x %d)", m_Name.c_str(), InheritanceInfoRenderPassTransform.renderArea.extent.width, InheritanceInfoRenderPassTransform.renderArea.extent.height);
-                InheritanceInfo.pNext = &InheritanceInfoRenderPassTransform;
-            }
-        }
-        CmdBeginInfo.pInheritanceInfo = &InheritanceInfo;
+        LOGE( "Error! Trying to begin primary command buffer with inheritance info (%s)", m_Name.c_str() );
+        return false;
     }
 
+    VkCommandBufferInheritanceInfo InheritanceInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+        .framebuffer = FrameBuffer,
+        .occlusionQueryEnable = VK_FALSE,
+        .queryFlags = 0,
+        .pipelineStatistics = 0,
+    };
+    VkCommandBufferBeginInfo CmdBeginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = CmdBuffUsage,
+        .pInheritanceInfo = &InheritanceInfo,
+    };
+
+    VkCommandBufferInheritanceRenderPassTransformInfoQCOM InheritanceInfoRenderPassTransform = {};
+
+    // Secondary command buffer MAY BE inside another render pass (compute can be in a secondary buffer and not have/inherit a renderder pass)
+    if (RenderPass != VK_NULL_HANDLE)
+    {
+        CmdBeginInfo.flags |= VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+
+        InheritanceInfo.renderPass = RenderPass;
+        InheritanceInfo.subpass = SubPass;
+
+        // We may also have to pass the inherited render pass transform down to the secondary buffer
+        if (IsSwapChainRenderPass && m_pVulkan->FillCommandBufferInheritanceRenderPassTransformInfoQCOM( InheritanceInfoRenderPassTransform ))
+        {
+            LOGI( "VkCommandBufferInheritanceRenderPassTransformInfoQCOM (%s): Extents = (%d x %d)", m_Name.c_str(), InheritanceInfoRenderPassTransform.renderArea.extent.width, InheritanceInfoRenderPassTransform.renderArea.extent.height );
+            InheritanceInfo.pNext = &InheritanceInfoRenderPassTransform;
+        }
+    }
+
+    return Begin( CmdBeginInfo );
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::Begin( const VkCommandBufferBeginInfo& CmdBeginInfo )
+//-----------------------------------------------------------------------------
+{
     // By calling vkBeginCommandBuffer, cmdBuffer is put into the recording state.
-    RetVal = vkBeginCommandBuffer(m_VkCommandBuffer, &CmdBeginInfo);
+    VkResult RetVal = vkBeginCommandBuffer(m_VkCommandBuffer, &CmdBeginInfo );
     if (!CheckVkError("vkBeginCommandBuffer()", RetVal))
     {
         LOGE("Unable to begin command buffer: %s", m_Name.c_str());
@@ -190,27 +208,101 @@ bool CommandListT<Vulkan>::Begin( VkFramebuffer FrameBuffer, VkRenderPass Render
 }
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::BeginRenderPass(VkRect2D RenderExtent, float MinDepth, float MaxDepth, const std::span<const VkClearColorValue> ClearColors, uint32_t NumColorBuffers, bool HasDepth, VkRenderPass RenderPass, bool IsSwapChainRenderPass, VkFramebuffer FrameBuffer, VkSubpassContents SubContents)
+bool CommandList<Vulkan>::Begin( VkFramebuffer FrameBuffer, const RenderPass<Vulkan>& RenderPass, bool IsSwapChainRenderPass, uint32_t SubPass, VkCommandBufferUsageFlags CmdBuffUsage )
+//-----------------------------------------------------------------------------
+{
+    return Begin( FrameBuffer, RenderPass.mRenderPass, IsSwapChainRenderPass, SubPass, CmdBuffUsage );
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::Begin( const Framebuffer<Vulkan>& FrameBuffer, const RenderPass<Vulkan>& RenderPass, bool IsSwapChainRenderPass, uint32_t SubPass, VkCommandBufferUsageFlags CmdBuffUsage )
+//-----------------------------------------------------------------------------
+{
+    return Begin( FrameBuffer.m_FrameBuffer, RenderPass.mRenderPass, IsSwapChainRenderPass, SubPass, CmdBuffUsage );
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::Begin(const VkCommandBufferInheritanceRenderingInfo& DynamicRenderingInheritanceInfo, VkCommandBufferUsageFlags CmdBuffUsage)
+//-----------------------------------------------------------------------------
+{
+    assert(m_Type == Type::Secondary);
+    if (m_Type != Type::Secondary)
+    {
+        LOGE("Error! Trying to begin primary command buffer with inheritance info (%s)", m_Name.c_str());
+        return false;
+    }
+
+    VkCommandBufferInheritanceInfo InheritanceInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+        .pNext = &DynamicRenderingInheritanceInfo
+    };
+    VkCommandBufferInheritanceRenderPassTransformInfoQCOM InheritanceInfoRenderPassTransform = {};
+
+    VkCommandBufferBeginInfo CmdBeginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = CmdBuffUsage,
+        .pInheritanceInfo = &InheritanceInfo,
+    };
+
+    return Begin(CmdBeginInfo);
+}
+
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::Begin(const RenderContext<Vulkan>& renderContext, VkCommandBufferUsageFlags cmdBuffUsage)
+//-----------------------------------------------------------------------------
+{
+    assert( m_Type == Type::Secondary );
+    if (m_Type != Type::Secondary)
+    {
+        LOGE( "Error! Trying to begin primary command buffer with inheritance info (%s)", m_Name.c_str() );
+        return false;
+    }
+
+    if (renderContext.IsDynamic())
+    {
+        // dynamic rendering
+        const auto& dynamicRenderContext = std::get<RenderContext<Vulkan>::DynamicRenderContextData>( renderContext.v );
+        VkCommandBufferInheritanceRenderingInfo dynamicRenderingInheritanceInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+            .flags = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT,
+            .colorAttachmentCount = (uint32_t)dynamicRenderContext.colorAttachmentFormats.size(),
+            .pColorAttachmentFormats = dynamicRenderContext.colorAttachmentFormats.data(),
+            .depthAttachmentFormat = dynamicRenderContext.depthAttachmentFormat,
+            .stencilAttachmentFormat = dynamicRenderContext.stencilAttachmentFormat,
+            .rasterizationSamples = EnumToVk( renderContext.msaa )
+        };
+        return Begin( dynamicRenderingInheritanceInfo, cmdBuffUsage );
+    }
+    else
+    {
+        const auto& renderPassContext = std::get<RenderContext<Vulkan>::RenderPassContextData>(renderContext.v);
+
+        return Begin( renderPassContext.framebuffer, renderPassContext.renderPass, false, renderContext.subPass, cmdBuffUsage );
+    }
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::BeginRenderPass(VkRect2D RenderExtent, float MinDepth, float MaxDepth, const std::span<const VkClearColorValue> ClearColors, uint32_t NumColorBuffers, bool HasDepth, VkRenderPass RenderPass, bool IsSwapChainRenderPass, VkFramebuffer FrameBuffer, VkSubpassContents SubContents)
 //-----------------------------------------------------------------------------
 {
     VkResult RetVal = VK_SUCCESS;
 
     // ... set Viewport and Scissor for this pass ...
-    VkViewport Viewport = {};
-    Viewport.x = (float)RenderExtent.offset.x;
-    Viewport.y = (float)RenderExtent.offset.y;
-    Viewport.width = (float)RenderExtent.extent.width;
-    Viewport.height = (float)RenderExtent.extent.height;
-    Viewport.minDepth = MinDepth;
-    Viewport.maxDepth = MaxDepth;
-
+    const VkViewport Viewport{
+        .width = (float)RenderExtent.extent.width,
+        .height = (float)RenderExtent.extent.height,
+        .minDepth = MinDepth,
+        .maxDepth = MaxDepth
+    };
     vkCmdSetViewport(m_VkCommandBuffer, 0, 1, &Viewport);
-    vkCmdSetScissor(m_VkCommandBuffer, 0, 1, &RenderExtent);
+    vkCmdSetScissor (m_VkCommandBuffer, 0, 1, &RenderExtent);
 
     // ... set clear values ...
     std::array<VkClearValue, 9> ClearValues;
     uint32_t ClearValuesCount = 0;
 
+    assert(NumColorBuffers <= (ClearValues.size() - (HasDepth?1:0)));
     for (uint32_t i=0; i< NumColorBuffers; ++i)
     {
         ClearValues[ClearValuesCount].color = ClearColors[ClearColors.size() > NumColorBuffers ? ClearValuesCount : 0];
@@ -224,42 +316,170 @@ bool CommandListT<Vulkan>::BeginRenderPass(VkRect2D RenderExtent, float MinDepth
     }
 
     // ... begin render pass ...
-    VkRenderPassBeginInfo RPBeginInfo = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    RPBeginInfo.renderPass = RenderPass;
-    RPBeginInfo.renderArea = RenderExtent;
-    RPBeginInfo.clearValueCount = ClearValuesCount;
-    RPBeginInfo.pClearValues = ClearValues.data();
-    VkRenderPassTransformBeginInfoQCOM RPTransformBeginInfoQCOM = {};
+    fvk::VkRenderPassBeginInfo RPBeginInfo{{
+        .renderPass = RenderPass,
+        .framebuffer = FrameBuffer,
+        .renderArea = RenderExtent,
+        .clearValueCount = ClearValuesCount,
+        .pClearValues = ClearValues.data()
+    }};
 
-    RPBeginInfo.framebuffer = FrameBuffer;
-
-    if (IsSwapChainRenderPass && m_pVulkan->FillRenderPassTransformBeginInfoQCOM(RPTransformBeginInfoQCOM))
+    fvk::VkRenderPassTransformBeginInfoQCOM RPTransformBeginInfoQCOM = {};
+    if (IsSwapChainRenderPass && m_pVulkan->FillRenderPassTransformBeginInfoQCOM(*RPTransformBeginInfoQCOM))
     {
         //LOGI("RPTransformBeginInfoQCOM(%s): Pre swap Extents = (%d x %d) transform = %d", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, RPTransformBeginInfoQCOM.transform);
-        RPBeginInfo.pNext = &RPTransformBeginInfoQCOM;
+        RPBeginInfo.Add( RPTransformBeginInfoQCOM );
     }
 
     //LOGI("BeginRenderPass(%s): Extents = (%d x %d) %s", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, (RPBeginInfo.pNext == &RPTransformBeginInfoQCOM) ? " (transformed)" : "");
 
-    vkCmdBeginRenderPass(m_VkCommandBuffer, &RPBeginInfo, SubContents);
-    return true;
+    return BeginRenderPass(*RPBeginInfo, SubContents);
+}
+
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::BeginRenderPass(VkRect2D RenderExtent, float MinDepth, float MaxDepth, const std::span<const VkClearColorValue> ClearColors, uint32_t NumColorBuffers, bool HasDepth, const RenderPass<Vulkan>& RenderPass, bool IsSwapChainRenderPass, VkFramebuffer FrameBuffer, VkSubpassContents SubContents)
+//-----------------------------------------------------------------------------
+{
+    return BeginRenderPass( RenderExtent, MinDepth, MaxDepth, ClearColors, NumColorBuffers, HasDepth, RenderPass.mRenderPass, IsSwapChainRenderPass, FrameBuffer, SubContents );
 }
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::BeginRenderPass(const CRenderTarget& renderTarget, VkRenderPass RenderPass, VkSubpassContents SubContents)
+bool CommandList<Vulkan>::BeginRenderPass(const RenderTarget<Vulkan>& RenderTarget, VkRenderPass RenderPass, VkSubpassContents SubContents)
 //-----------------------------------------------------------------------------
 {
     VkRect2D Scissor = {};
     Scissor.offset.x = 0;
     Scissor.offset.y = 0;
-    Scissor.extent.width = renderTarget.m_Width;
-    Scissor.extent.height = renderTarget.m_Height;
+    Scissor.extent.width = RenderTarget.m_Width;
+    Scissor.extent.height = RenderTarget.m_Height;
 
-    return BeginRenderPass(Scissor, 0.0f, 1.0f, { renderTarget.m_ClearColorValues.data(), renderTarget.m_ClearColorValues.size() }, renderTarget.GetNumColorLayers(), renderTarget.m_DepthFormat != TextureFormat::UNDEFINED, RenderPass, false, renderTarget.m_FrameBuffer, SubContents);
+    return BeginRenderPass(Scissor, 0.0f, 1.0f, { RenderTarget.m_ClearColorValues.data(), RenderTarget.m_ClearColorValues.size() }, RenderTarget.GetNumColorLayers(), RenderTarget.m_DepthFormat != TextureFormat::UNDEFINED, RenderPass, false, RenderTarget.m_FrameBuffer, SubContents);
 }
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::NextSubpass( VkSubpassContents SubContents )
+bool CommandList<Vulkan>::BeginRenderPass( const RenderTarget<Vulkan>& RenderTarget, const RenderPass<Vulkan>& RenderPass, VkSubpassContents SubContents )
+//-----------------------------------------------------------------------------
+{
+    return BeginRenderPass(RenderTarget, RenderPass.mRenderPass, SubContents);
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::BeginRenderPass( const Framebuffer<Vulkan>& Framebuffer, const RenderPass<Vulkan>& RenderPass, const RenderPassClearData& RenderPassClearData, VkSubpassContents SubContents )
+//-----------------------------------------------------------------------------
+{
+    VkResult RetVal = VK_SUCCESS;
+
+    vkCmdSetViewport( m_VkCommandBuffer, 0, 1, &RenderPassClearData.viewport );
+    vkCmdSetScissor( m_VkCommandBuffer, 0, 1, &RenderPassClearData.scissor);
+
+    // ... begin render pass ...
+    fvk::VkRenderPassBeginInfo RPBeginInfo{{
+        .renderPass = RenderPass.mRenderPass,
+        .framebuffer = Framebuffer.m_FrameBuffer,
+        .renderArea = RenderPassClearData.scissor,
+        .clearValueCount = (uint32_t)RenderPassClearData.clearValues.size(),
+        .pClearValues = RenderPassClearData.clearValues.data()
+    }};
+
+    //fvk::VkRenderPassTransformBeginInfoQCOM RPTransformBeginInfoQCOM = {};
+    //if (IsSwapChainRenderPass && m_pVulkan->FillRenderPassTransformBeginInfoQCOM( *RPTransformBeginInfoQCOM ))
+    //{
+    //    //LOGI("RPTransformBeginInfoQCOM(%s): Pre swap Extents = (%d x %d) transform = %d", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, RPTransformBeginInfoQCOM.transform);
+    //    RPBeginInfo.Add( RPTransformBeginInfoQCOM );
+    //}
+
+    //LOGI("BeginRenderPass(%s): Extents = (%d x %d) %s", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, (RPBeginInfo.pNext == &RPTransformBeginInfoQCOM) ? " (transformed)" : "");
+
+    return BeginRenderPass( *RPBeginInfo, SubContents );
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::BeginSwapchainRenderPass( uint32_t SwapchainImageIndex, const RenderPass<Vulkan>& RenderPass, const RenderPassClearData& RenderPassClearData, VkSubpassContents SubContents )
+//-----------------------------------------------------------------------------
+{
+    VkResult RetVal = VK_SUCCESS;
+
+    vkCmdSetViewport( m_VkCommandBuffer, 0, 1, &RenderPassClearData.viewport );
+    vkCmdSetScissor( m_VkCommandBuffer, 0, 1, &RenderPassClearData.scissor );
+
+    // ... begin render pass ...
+    fvk::VkRenderPassBeginInfo RPBeginInfo{{
+        .renderPass = RenderPass.mRenderPass,
+        .framebuffer = m_pVulkan->m_SwapchainBuffers[SwapchainImageIndex].framebuffer.m_FrameBuffer,
+        .renderArea = RenderPassClearData.scissor,
+        .clearValueCount = (uint32_t)RenderPassClearData.clearValues.size(),
+        .pClearValues = RenderPassClearData.clearValues.data()
+    }};
+
+    fvk::VkRenderPassTransformBeginInfoQCOM RPTransformBeginInfoQCOM = {};
+    if (m_pVulkan->FillRenderPassTransformBeginInfoQCOM( *RPTransformBeginInfoQCOM ))
+    {
+        //LOGI("RPTransformBeginInfoQCOM(%s): Pre swap Extents = (%d x %d) transform = %d", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, RPTransformBeginInfoQCOM.transform);
+        RPBeginInfo.Add( RPTransformBeginInfoQCOM );
+    }
+
+    //LOGI("BeginSwapchainRenderPass(%s): Extents = (%d x %d) %s", m_Name.c_str(), RPBeginInfo.renderArea.extent.width, RPBeginInfo.renderArea.extent.height, (RPBeginInfo.pNext == &RPTransformBeginInfoQCOM) ? " (transformed)" : "");
+
+    return BeginRenderPass( *RPBeginInfo, SubContents );
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::BeginRenderPass( const RenderContext<Vulkan>& renderContext, VkSubpassContents SubContents )
+//-----------------------------------------------------------------------------
+{
+    // ... begin render pass ...
+    fvk::VkRenderPassBeginInfo RPBeginInfo{ renderContext.GetRenderPassBeginInfo() };
+    return BeginRenderPass( *RPBeginInfo, SubContents );
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::BeginRenderPass( const VkRenderPassBeginInfo& RPBeginInfo, VkSubpassContents SubContents )
+//-----------------------------------------------------------------------------
+{
+    vkCmdBeginRenderPass(m_VkCommandBuffer, &RPBeginInfo, SubContents);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+void CommandList<Vulkan>::BeginRenderPass( const VkRenderingInfo& renderingInfo )
+//-----------------------------------------------------------------------------
+{
+    /*
+    const RenderTarget<Vulkan>& renderTarget;
+    std::array<VkRenderingAttachmentInfo, 8> colorAttachments;
+    VkRenderingAttachmentInfo depthAttachment;
+
+    for (auto i = 0; i < renderTarget.GetNumColorLayers(); ++i)
+    {
+        auto& image = renderTarget.m_ColorAttachments[i];
+        colorAttachments[i] = {
+            .imageView = image.GetVkImageView(),
+            .imageLayout = image.GetVkImageLayout(),
+            .resolveMode = VK_RESOLVE_MODE_NONE,
+            .loadOp = 
+            .clearValue = renderTarget.m_ClearColorValues[i],
+        }
+    }
+
+    VkRenderingInfo renderingInfo{
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
+        .renderArea = {0, 0, renderTarget.m_Width, renderTarget.m_Height},
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = colorAttachments.data(),
+        .pDepthAttachment = renderTarget.m_DepthAttachment ? &depthAttachment : nullptr,
+        .pStencilAttachment = VK_NULL_HANDLE,
+    };
+    */
+
+
+    auto* dynamicRenderingExt = m_pVulkan->GetExtension<ExtensionLib::Ext_VK_KHR_dynamic_rendering>();
+    dynamicRenderingExt->m_vkCmdBeginRenderingKHR( m_VkCommandBuffer, &renderingInfo );
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::NextSubpass( VkSubpassContents SubContents )
 //-----------------------------------------------------------------------------
 {
     vkCmdNextSubpass(m_VkCommandBuffer, SubContents);
@@ -267,7 +487,7 @@ bool CommandListT<Vulkan>::NextSubpass( VkSubpassContents SubContents )
 }
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::EndRenderPass()
+bool CommandList<Vulkan>::EndRenderPass()
 //-----------------------------------------------------------------------------
 {
     vkCmdEndRenderPass(m_VkCommandBuffer);
@@ -275,7 +495,7 @@ bool CommandListT<Vulkan>::EndRenderPass()
 }
 
 //-----------------------------------------------------------------------------
-int CommandListT<Vulkan>::StartGpuTimer(const std::string_view& timerName)
+int CommandList<Vulkan>::StartGpuTimer(const std::string_view& timerName)
 //-----------------------------------------------------------------------------
 {
     if (!m_GpuTimerPool)
@@ -289,7 +509,7 @@ int CommandListT<Vulkan>::StartGpuTimer(const std::string_view& timerName)
 }
 
 //-----------------------------------------------------------------------------
-void CommandListT<Vulkan>::StopGpuTimer(int timerId)
+void CommandList<Vulkan>::StopGpuTimer(int timerId)
 //-----------------------------------------------------------------------------
 {
     if (timerId < 0)
@@ -300,7 +520,21 @@ void CommandListT<Vulkan>::StopGpuTimer(int timerId)
 }
 
 //-----------------------------------------------------------------------------
-bool CommandListT<Vulkan>::End()
+void CommandList<Vulkan>::ExecuteCommands( const CommandList<Vulkan>& secondaryCommands )
+//-----------------------------------------------------------------------------
+{
+    vkCmdExecuteCommands( m_VkCommandBuffer, 1, &secondaryCommands.m_VkCommandBuffer );
+}
+
+//-----------------------------------------------------------------------------
+void CommandList<Vulkan>::ExecuteCommands( VkCommandBuffer vkCommandBuffer )
+//-----------------------------------------------------------------------------
+{
+    vkCmdExecuteCommands( m_VkCommandBuffer, 1, &vkCommandBuffer );
+}
+
+//-----------------------------------------------------------------------------
+bool CommandList<Vulkan>::End()
 //-----------------------------------------------------------------------------
 {
     VkResult RetVal;
@@ -323,7 +557,7 @@ bool CommandListT<Vulkan>::End()
 }
 
 //-----------------------------------------------------------------------------
-void CommandListT<Vulkan>::QueueSubmit( const std::span<const VkSemaphore> WaitSemaphores, const std::span<const VkPipelineStageFlags> WaitDstStageMasks, const std::span<const VkSemaphore> SignalSemaphores, VkFence CompletionFence ) const
+void CommandList<Vulkan>::QueueSubmit( const std::span<const VkSemaphore> WaitSemaphores, const std::span<const VkPipelineStageFlags> WaitDstStageMasks, const std::span<const VkSemaphore> SignalSemaphores, VkFence CompletionFence ) const
 //-----------------------------------------------------------------------------
 {
     assert( m_VkCommandBuffer != VK_NULL_HANDLE );
@@ -331,7 +565,7 @@ void CommandListT<Vulkan>::QueueSubmit( const std::span<const VkSemaphore> WaitS
 }
 
 //-----------------------------------------------------------------------------
-void CommandListT<Vulkan>::QueueSubmit(const std::span<const SemaphoreWait> WaitSemaphores, const std::span<const SemaphoreSignal> SignalSemaphores, VkFence CompletionFence) const
+void CommandList<Vulkan>::QueueSubmit(const std::span<const SemaphoreWait> WaitSemaphores, const std::span<const SemaphoreSignal> SignalSemaphores, VkFence CompletionFence) const
 //-----------------------------------------------------------------------------
 {
     constexpr uint32_t cMaxSemaphores = 8;
@@ -373,7 +607,7 @@ void CommandListT<Vulkan>::QueueSubmit(const std::span<const SemaphoreWait> Wait
 }
 
 //-----------------------------------------------------------------------------
-void CommandListT<Vulkan>::QueueSubmit( const Vulkan::BufferIndexAndFence& CurrentVulkanBuffer, VkSemaphore renderCompleteSemaphore ) const
+void CommandList<Vulkan>::QueueSubmit( const Vulkan::BufferIndexAndFence& CurrentVulkanBuffer, VkSemaphore renderCompleteSemaphore ) const
 //-----------------------------------------------------------------------------
 {
     assert( m_VkCommandBuffer != VK_NULL_HANDLE );
@@ -382,9 +616,11 @@ void CommandListT<Vulkan>::QueueSubmit( const Vulkan::BufferIndexAndFence& Curre
 
 
 //-----------------------------------------------------------------------------
-void CommandListT<Vulkan>::Release()
+void CommandList<Vulkan>::Release()
 //-----------------------------------------------------------------------------
 {
+    CommandListBase::Release();
+
     if (m_VkCommandBuffer != VK_NULL_HANDLE)
     {
         // Do not need to worry about the device or pool being NULL since we could 
@@ -393,10 +629,6 @@ void CommandListT<Vulkan>::Release()
         m_VkCommandBuffer = nullptr;
     }
 
-    m_Name.clear();
-    m_NumDrawCalls = 0;
-    m_NumTriangles = 0;
-    m_IsPrimary = true;
     m_QueueIndex = 0;
     m_GpuTimerPool = nullptr;
     m_GpuTimerQueries.clear();

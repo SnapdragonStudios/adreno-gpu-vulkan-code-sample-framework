@@ -14,10 +14,6 @@
 
 #define NUM_SPOT_LIGHTS 4
 
-class ShaderManager;
-class MaterialManager;
-class Drawable;
-
 enum RENDER_PASS
 {
     RP_SCENE = 0,
@@ -101,8 +97,8 @@ struct PassSetupInfo
 struct PassData
 {
     // Pass internal data
-    PassSetupInfo PassSetup;
-    VkRenderPass  RenderPass = VK_NULL_HANDLE;
+    PassSetupInfo RenderPassSetup;
+    std::vector<RenderContext<Vulkan>> RenderContext;  // context per framebuffer (some passes might all point to the same framebuffers)
 
     // Recorded objects that are set to be drawn on this pass
     std::vector< CommandListVulkan> ObjectsCmdBuffer;
@@ -115,7 +111,7 @@ struct PassData
 
     // Render targed used by the underlying render pass
     // note: The blit pass uses the backbuffer directly instead this RT
-    CRenderTargetArray<1> RenderTarget;
+    RenderTarget<Vulkan> RenderTarget;
 };
 
 // **********************
@@ -191,22 +187,22 @@ private:
 
     void CopyImageToTensor(
         CommandListVulkan&         cmdList,
-        TextureVulkan&             srcImage,
+        const TextureVulkan&       srcImage,
         VkImageLayout              currentLayout,
         const GraphPipelineTensor& tensorBinding);
 
     void CopyTensorToImage(
         CommandListVulkan&         cmdList,
-        TextureVulkan&             dstImage,
+        const TextureVulkan&       dstImage,
         VkImageLayout              currentLayout,
         const GraphPipelineTensor& tensorBinding);
 
     void CopyImageToImageBlit(
         CommandListVulkan& cmdList,
-        TextureVulkan&     srcImage,
-        VkImageLayout      srcLayout,
-        TextureVulkan&     dstImage,
-        VkImageLayout      dstFinalLayout);
+        const TextureVulkan& srcImage,
+        VkImageLayout        srcLayout,
+        const TextureVulkan& dstImage,
+        VkImageLayout        dstFinalLayout);
 
 private:
 

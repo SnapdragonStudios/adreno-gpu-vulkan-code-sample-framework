@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -49,6 +49,6 @@ protected:
 template<typename T_GFXAPI>
 class ShadowT : public Shadow
 {
-    ~ShadowT() noexcept = delete;    // Enforce specialization of this class
+    ~ShadowT() = delete;    // Enforce specialization of this class
     static_assert(sizeof(ShadowT<T_GFXAPI>) != sizeof(Shadow));   // Ensure this class template is specialized (and not used as-is)
 };

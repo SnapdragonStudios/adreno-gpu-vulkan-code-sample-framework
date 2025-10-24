@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,24 +9,25 @@
 #include "bufferObject.hpp"
 #include "memoryManager.hpp"
 #include <cassert>
+#include <cstring>
 
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BufferT<Vulkan>::BufferT()
+Buffer<Vulkan>::Buffer()
 {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BufferT<Vulkan>::BufferT(BufferT<Vulkan>&& other) noexcept
+Buffer<Vulkan>::Buffer(Buffer<Vulkan>&& other) noexcept
 {
     *this = std::move(other);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BufferT<Vulkan>& BufferT<Vulkan>::operator=(BufferT<Vulkan>&& other) noexcept
+Buffer<Vulkan>& Buffer<Vulkan>::operator=(Buffer<Vulkan>&& other) noexcept
 {
     if (this != &other)
     {
@@ -41,21 +42,21 @@ BufferT<Vulkan>& BufferT<Vulkan>::operator=(BufferT<Vulkan>&& other) noexcept
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BufferT<Vulkan>::~BufferT()
+Buffer<Vulkan>::~Buffer()
 {
     Destroy();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BufferT<Vulkan>::operator bool() const
+Buffer<Vulkan>::operator bool() const
 {
     return !!mAllocatedBuffer;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool BufferT<Vulkan>::Initialize(MemoryManager* pManager, size_t size, BufferUsageFlags bufferUsageFlags, const void* initialData)
+bool Buffer<Vulkan>::Initialize(MemoryManager* pManager, size_t size, BufferUsageFlags bufferUsageFlags, const void* initialData)
 {
     MemoryUsage memoryUsage = initialData ? MemoryUsage::CpuToGpu : MemoryUsage::GpuExclusive;
     if ((bufferUsageFlags & BufferUsageFlags::TransferSrc) != 0)
@@ -77,7 +78,7 @@ bool BufferT<Vulkan>::Initialize(MemoryManager* pManager, size_t size, BufferUsa
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool BufferT<Vulkan>::Initialize(MemoryManager* pManager, size_t size, BufferUsageFlags bufferUsageFlags, MemoryUsage memoryUsage)
+bool Buffer<Vulkan>::Initialize(MemoryManager* pManager, size_t size, BufferUsageFlags bufferUsageFlags, MemoryUsage memoryUsage)
 {
     assert(!mManager);
     if (!pManager)
@@ -94,7 +95,34 @@ bool BufferT<Vulkan>::Initialize(MemoryManager* pManager, size_t size, BufferUsa
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void BufferT<Vulkan>::Destroy()
+bool Buffer<Vulkan>::Update(MemoryManager* pManager, size_t dataSize, const void* newData)
+{
+    if (newData)
+    {
+        auto mappedGuard = Map<uint8_t>();
+        memcpy(mappedGuard.data(), newData, dataSize);
+    }
+
+    return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+bool Buffer<Vulkan>::GetMeshData(MemoryManager* pManager, size_t dataSize, void* outputData) const
+{
+    auto* pThisNonConst = const_cast<Buffer<Vulkan>*>(this);   // we remove the const-ness of 'this' so we can do the map/unmap.  Treating this as "no harm no foul" - our class on exit is identical to what it is on entry!
+    if (outputData)
+    {
+        auto mappedGuard = pThisNonConst->Map<uint8_t>();
+        memcpy(outputData, mappedGuard.data(), dataSize);
+    }
+
+    return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void Buffer<Vulkan>::Destroy()
 {
     if (!mManager)
     {
@@ -107,7 +135,7 @@ void BufferT<Vulkan>::Destroy()
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void BufferT<Vulkan>::Unmap(MemoryCpuMappedUntyped buffer)
+void Buffer<Vulkan>::Unmap(MemoryCpuMappedUntyped buffer)
 {
     mManager->Unmap(mAllocatedBuffer, std::move(buffer));
 }

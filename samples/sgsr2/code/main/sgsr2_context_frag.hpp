@@ -10,6 +10,7 @@
 #include "main/applicationHelperBase.hpp"
 #include "vulkan/vulkan.hpp"
 #include "vulkan/commandBuffer.hpp"
+#include "vulkan/renderTarget.hpp"
 #include "material/computable.hpp"
 #include "memory/vulkan/uniform.hpp"
 #include <glm/glm.hpp>
@@ -19,12 +20,13 @@
 #include <optional>
 
 class GraphicsApiBase;
-class Drawable;
-class MaterialManager;
-class ShaderManager;
+template<typename T_GFXAPI> class Drawable;
+template<typename T_GFXAPI> class MaterialManager;
+template<typename T_GFXAPI> class ShaderManager;
 class Shadow;
-class Texture;
-class CommandList;
+class TextureBase;
+template<typename T_GFXAPI> class Texture;
+template<typename T_GFXAPI> class CommandList;
 
 namespace SGSR2_Frag
 {
@@ -68,16 +70,13 @@ public:
 
     bool Initialize(
         GraphicsApiBase&, 
-        const ShaderManager&, 
-        const MaterialManager&, 
+        const ShaderManager<Vulkan>&, 
+        const MaterialManager<Vulkan>&,
         const UpscalerConfiguration&,
         const InputImages&);
     void Release(GraphicsApiBase&);
 
-    inline const Texture* const GetSceneColorOutput() const 
-    {
-        return &m_scene_color_output[(m_buffer_index & 1)^1].m_ColorAttachments[0];
-    }
+    const TextureBase* const GetSceneColorOutput() const;
 
     void UpdateUniforms(
         Vulkan&             vulkan,
@@ -93,7 +92,7 @@ public:
 
 protected:
 
-    std::unique_ptr<Drawable>           m_drawable;
+    std::unique_ptr<Drawable<Vulkan>>   m_drawable;
     UpscalerConfiguration               m_configuration{};
 
     UniformArrayT<Vulkan, UpscalerShaderData, NUM_VULKAN_BUFFERS> m_upscaler_uniform;
@@ -105,9 +104,12 @@ protected:
     std::unique_ptr<TextureVulkan>      m_input_velocity_ref;
 
     // Convert output render target
-    CRenderTargetArray<1>               m_motion_depth_clip_alpha_buffer;
+    RenderTarget<Vulkan>                m_motion_depth_clip_alpha_buffer;
     // Upscale Render target (and history color)
-    CRenderTargetArray<2>               m_scene_color_output;
+    std::array<RenderTarget<Vulkan>,2>  m_scene_color_output;
+    // RenderContext
+    RenderContext<Vulkan>               m_convertRenderContext;
+    RenderContext<Vulkan>               m_upscaleRenderContext[2];
 
     int                                 m_jitter_index             = 0;
     int                                 m_buffer_index             = 0;

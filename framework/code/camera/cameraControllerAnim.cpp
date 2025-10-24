@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,6 +9,7 @@
 #include "cameraControllerAnim.hpp"
 #include "animation/animation.hpp"
 #include <glm/gtx/quaternion.hpp>
+#include <cmath>
 #include <limits>
 
 static const float cMouseRotSpeed = 0.1f;
@@ -47,10 +48,16 @@ void CameraControllerAnim::SetPathAnimation(const Animation * pAnimation, int no
 /// @param frameTime time in seconds since last Update.
 /// @param position in - current camera position, out - camera position after applying controller
 /// @param rot in - current camera rotation, out - camera rotation after applying controller
-void CameraControllerAnim::Update(float frameTime, glm::vec3& position, glm::quat& rot)
+/// @param cut in - current camera cut, out - camera cut after applying controller
+void CameraControllerAnim::Update(float frameTime, glm::vec3& position, glm::quat& rot, bool& cut)
 {
-    m_CameraAnimationTime += frameTime * m_CameraAnimationSpeed;
-    m_CameraAnimationTime = std::fmodf(m_CameraAnimationTime, m_Animation->GetEndTime());
+    cut = false;
+    const float cameraTimeStep = frameTime * m_CameraAnimationSpeed;
+    m_CameraAnimationTime += cameraTimeStep;
+    if ((m_CameraAnimationTime > m_Animation->GetEndTime() && cameraTimeStep > 0.0f) ||
+        (m_CameraAnimationTime < 0.0f && cameraTimeStep < 0.0f))
+        cut = true;
+    m_CameraAnimationTime = ::fmodf(m_CameraAnimationTime, m_Animation->GetEndTime());
     if (m_CameraAnimationTime < 0.0f)
         m_CameraAnimationTime += m_Animation->GetEndTime();
 
@@ -133,8 +140,9 @@ void CameraControllerAnimControllable::TouchUpEvent( int iPointerID, float xPos,
 /// @param frameTime time in seconds since last Update.
 /// @param position in - current camera position, out - camera position after applying controller
 /// @param rot in - current camera rotation, out - camera rotation after applying controller
-void CameraControllerAnimControllable::Update( float frameTime, glm::vec3& position, glm::quat& rot )
+void CameraControllerAnimControllable::Update( float frameTime, glm::vec3& position, glm::quat& rot, bool& cut )
 {
+    cut = false;
     if (m_LookaroundTouchId != -1)
     {
         auto mouseDiff = m_LastLookaroundTouchPosition - m_CurrentLookaroundTouchPosition;
@@ -152,9 +160,9 @@ void CameraControllerAnimControllable::Update( float frameTime, glm::vec3& posit
 
     m_CameraZoom += m_CameraZoomVelocity;
     if (m_CameraZoom > m_CameraZoomMax)
-        m_CameraZoom *= std::expf( 0.1f * (m_CameraZoomMax - m_CameraZoom) );
+        m_CameraZoom *= ::expf( 0.1f * (m_CameraZoomMax - m_CameraZoom) );
     else if (m_CameraZoom < m_CameraZoomMin)
-        m_CameraZoom *= std::expf( 0.1f * (m_CameraZoom - m_CameraZoomMin) );
+        m_CameraZoom *= ::expf( 0.1f * (m_CameraZoom - m_CameraZoomMin) );
 
     if (m_MovementTouchId != -1)
     {
@@ -174,9 +182,9 @@ void CameraControllerAnimControllable::Update( float frameTime, glm::vec3& posit
 
     m_CameraElevationRotation += m_directionVelocity.y;
     if (m_CameraElevationRotation > m_CameraElevationRotationMax)
-        m_CameraElevationRotation *= std::expf( 0.1f * (m_CameraElevationRotationMax - m_CameraElevationRotation) );
+        m_CameraElevationRotation *= ::expf( 0.1f * (m_CameraElevationRotationMax - m_CameraElevationRotation) );
     else if (m_CameraElevationRotation < m_CameraElevationRotationMin)
-        m_CameraElevationRotation *= std::expf( 0.1f * (m_CameraElevationRotation - m_CameraElevationRotationMin) );
+        m_CameraElevationRotation *= ::expf( 0.1f * (m_CameraElevationRotation - m_CameraElevationRotationMin) );
 
     // Countdown the timer until the camera automatically moves
     m_AnimationRestartTimer -= frameTime;
@@ -194,8 +202,12 @@ void CameraControllerAnimControllable::Update( float frameTime, glm::vec3& posit
     else
         animationSpeedLerp = 0.0f;
 
-    m_CameraAnimationTime += frameTime * m_CameraAnimationSpeed * animationSpeedLerp * m_animationLastRotationDirection;
-    m_CameraAnimationTime = std::fmodf( m_CameraAnimationTime, m_Animation->GetEndTime() );
+    const float cameraTimeStep = frameTime * m_CameraAnimationSpeed * animationSpeedLerp * m_animationLastRotationDirection;
+    m_CameraAnimationTime += cameraTimeStep;
+    if ((m_CameraAnimationTime > m_Animation->GetEndTime() && cameraTimeStep > 0.0f) ||
+        (m_CameraAnimationTime < 0.0f && cameraTimeStep < 0.0f))
+        cut = true;
+    m_CameraAnimationTime = ::fmodf( m_CameraAnimationTime, m_Animation->GetEndTime() );
     if (m_CameraAnimationTime < 0.0f)
         m_CameraAnimationTime += m_Animation->GetEndTime();
 
