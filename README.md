@@ -81,7 +81,6 @@ See the [Samples](samples) folder for instructions on building assets and runnin
 
 Most samples also support a configuration file (`app_config.txt`) placed in the base of the sample's directory (Windows) or pushed loose to the sample's install folder (Android). 
 
-
 ### Android
 
 Android apk are written to `build\android\<samplename>\outputs\apk\debug\` .
