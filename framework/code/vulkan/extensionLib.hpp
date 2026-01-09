@@ -239,6 +239,7 @@ namespace ExtensionLib
 
 #endif // VK_KHR_create_renderpass2
 
+
 #if VK_KHR_draw_indirect_count
 
     struct Ext_VK_KHR_draw_indirect_count : public VulkanFunctionPointerExtensionHelper<VulkanExtensionType::eDevice>
@@ -252,6 +253,36 @@ namespace ExtensionLib
     };
 
 #endif // VK_KHR_draw_indirect_count
+
+#if VK_KHR_cooperative_matrix
+
+    struct Ext_VK_KHR_cooperative_matrix : public VulkanFeaturesPropertiesAndFunctionPointerExtensionHelper<
+        VkPhysicalDeviceCooperativeMatrixFeaturesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+        VkPhysicalDeviceCooperativeMatrixPropertiesKHR, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_KHR>
+    {
+        static constexpr auto Name = VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME;
+        explicit Ext_VK_KHR_cooperative_matrix(VulkanExtensionStatus status = VulkanExtensionStatus::eRequired) : VulkanFeaturesPropertiesAndFunctionPointerExtensionHelper(Name, status)
+        {
+        }
+
+        void PopulateRequestedFeatures() override
+        {
+            RequestedFeatures.sType = AvailableFeatures.sType;
+            RequestedFeatures.cooperativeMatrix = AvailableFeatures.cooperativeMatrix;
+            RequestedFeatures.cooperativeMatrixRobustBufferAccess = AvailableFeatures.cooperativeMatrixRobustBufferAccess;
+        }
+        void LookupFunctionPointers(VkInstance vkInstance) override
+        {
+            m_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR)vkGetInstanceProcAddr(vkInstance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
+        }
+        void LookupFunctionPointers(VkDevice, PFN_vkGetDeviceProcAddr) override {}
+        void PrintFeatures() const override;
+        void PrintProperties() const override;
+
+        PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR m_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR = nullptr;
+    };
+
+#endif // VK_KHR_cooperative_matrix
 
 #if VK_KHR_depth_stencil_resolve
 

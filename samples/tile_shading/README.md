@@ -1,37 +1,11 @@
-/*
-============================================================================================================
-* TILE SHADING SAMPLE
-============================================================================================================
-*
-* This sample demonstrates a light clustering algorithm using Vulkan, with specific support for the
-* VK_QCOM_tile_shading extension. This extension allows the application to leverage tile-based deferred rendering
-* (TBDR) for efficient memory management and rendering performance.
-*
-* Reference points:
-*
-* 1. PreInitializeSetVulkanConfiguration
-*    - Sets up the Vulkan configuration, including required and optional extensions.
-*    - config.OptionalExtension<ExtensionHelper::Ext_VK_QCOM_tile_shading>();
-*    - The application checks for the VK_QCOM_tile_shading extension and sets up the Vulkan configuration accordingly.
-*    - If supported, tile shading is enabled at startup.
-* 
-* 2. Initialize
-*    - Initializes various components of the application, including camera, lights, shaders, buffers, render targets, GUI, and mesh objects.
-*    - m_IsTileShadingSupported &= GetVulkan()->HasLoadedVulkanDeviceExtension(VK_QCOM_TILE_SHADING_EXTENSION_NAME);
-*    - m_IsTileShadingActive = m_IsTileShadingSupported;
-* 
-* 3. CreateComputables
-*    - Creates computable objects for light culling, including tile shading variants.
-*    - m_TileShadingPassData.passComputable->DispatchPass(...);
-* 
-* 4. Render
-*    - The main rendering function binds the tile shading extension to the command buffer if tile shading is enabled.
-*    - The rendering process includes multiple passes:
-*      - Scene Pass: Outputs albedo, normal, and depth.
-*      - Light Culling Pass: Divides point lights into clusters and performs light culling.
-*      - Deferred Light Pass: Applies the corresponding pixel light cluster to a screen quad.
-*    - vkCmdBeginPerTileExecutionQCOM and vkCmdEndPerTileExecutionQCOM are used for the compute dispatch.
-*
-* SPEC: https://registry.khronos.org/vulkan/specs/latest/man/html/VK_QCOM_tile_shading.html
-============================================================================================================
-*/
+# Tile Shading Sample
+
+This sample demonstrates a tile-based shading technique using Vulkan, with support for the *VK_QCOM_tile_memory_heap* extension.
+
+The extension enables the application to allocate and manage tile-local memory, which is scoped to the duration of a command buffer submission and optimized for high-bandwidth, low-latency access within a tile.
+
+The sample implements a forward rendering pipeline where shading computations are performed per tile, rather than per pixel or per fragment. This approach leverages the tiling architecture of Adreno™ GPUs to reduce memory traffic and improve cache efficiency.
+
+By using tile memory, the sample avoids costly round-trips to global memory for intermediate shading data. Instead, lighting calculations and material evaluations are performed directly in tile-local memory, which is faster and more power-efficient.
+
+The technique is particularly well-suited for mobile GPUs, where bandwidth and power are constrained. It demonstrates how Vulkan applications can take advantage of Qualcomm™-specific extensions to optimize rendering workloads and achieve better performance on Snapdragon™ platforms.
