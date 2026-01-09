@@ -261,6 +261,20 @@ namespace ExtensionLib
     }
 #endif // VK_KHR_fragment_shading_rate
 
+#if VK_KHR_cooperative_matrix
+    void Ext_VK_KHR_cooperative_matrix::PrintFeatures() const
+    {
+        LOGI("VK_KHR_fragment_shading_rate (VkPhysicalDeviceCooperativeMatrixFeaturesKHR): ");
+        LOGI("    pipelineFragmentShadingRate: %s", this->AvailableFeatures.cooperativeMatrix ? "True" : "False");
+        LOGI("    primitiveFragmentShadingRate: %s", this->AvailableFeatures.cooperativeMatrixRobustBufferAccess ? "True" : "False");
+    }
+    void Ext_VK_KHR_cooperative_matrix::PrintProperties() const
+    {
+        LOGI("VK_KHR_fragment_shading_rate (VkPhysicalDeviceFragmentShadingRatePropertiesKHR): ");
+        LOGI("    cooperativeMatrixSupportedStages: %d", this->Properties.cooperativeMatrixSupportedStages);
+    }
+#endif // VK_KHR_cooperative_matrix
+
 #if VK_KHR_create_renderpass2
     void Ext_VK_KHR_create_renderpass2::LookupFunctionPointers( VkInstance vkInstance )
     {
