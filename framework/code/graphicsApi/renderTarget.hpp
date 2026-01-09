@@ -13,12 +13,15 @@
 class GraphicsApiBase;
 template<typename T_GFXAPI> class RenderTarget;
 
+class RenderTargetBase;
+
 struct RenderTargetInitializeInfo
 {
     uint32_t                                Width = 0;
     uint32_t                                Height = 0;
     std::span<const TextureFormat>          LayerFormats = {};
     TextureFormat                           DepthFormat = TextureFormat::UNDEFINED;
+    RenderTargetBase*                       InheritedDepthAttachment = nullptr;
     const std::span<const TEXTURE_TYPE>     TextureTypes = {};
     const std::optional<const TEXTURE_TYPE> DepthTextureType = std::nullopt;
     std::span<const Msaa>                   Msaa = {};
