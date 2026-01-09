@@ -519,12 +519,22 @@ if(FRAMEWORK_ENABLE_VULKAN AND FRAMEWORK_framework_vulkan)
   endif()
 
   # Add vulkan framework dependency libraries
+  set(ENABLE_OPT OFF CACHE BOOL "Disable SPIRV-Tools optimizer" FORCE)
+  set(ENABLE_C_INTERFACE ON CACHE BOOL "" FORCE)
   add_subdirectory(external/volk)
-  #add_subdirectory(external/SPIRV-Cross)
-  #add_subdirectory(external/glslang)
+  add_subdirectory(external/SPIRV-Cross)
+  add_subdirectory(external/glslang)
   #add_subdirectory(external/slang)
 
   add_library(framework_vulkan STATIC ${CPP_VULKAN_SRC} ${EXTERNAL_VULKAN_SRC})
+
+  # Make sure framework_vulkan builds after glslang libs
+  add_dependencies(framework_vulkan
+    glslang
+    glslang-default-resource-limits
+    SPIRV
+  )
+
   target_include_directories(framework_vulkan   PUBLIC code)
   target_include_directories(framework_vulkan   PUBLIC external)
   target_include_directories(framework_vulkan   PUBLIC external/glm)  # so code can do #include "glm/mat3x3.hpp" etc
@@ -532,7 +542,7 @@ if(FRAMEWORK_ENABLE_VULKAN AND FRAMEWORK_framework_vulkan)
   target_include_directories(framework_vulkan   PUBLIC external/imgui)
   target_include_directories(framework_vulkan   PUBLIC external/implot)
 
-  target_link_libraries(framework_vulkan framework)
+  target_link_libraries(framework_vulkan PUBLIC framework)
 
   get_target_property(VulkanHeaders_INCLUDE_DIRS Vulkan::Headers INTERFACE_INCLUDE_DIRECTORIES)
   target_include_directories(framework_vulkan PUBLIC "${VulkanHeaders_INCLUDE_DIRS}")
@@ -545,18 +555,20 @@ if(FRAMEWORK_ENABLE_VULKAN AND FRAMEWORK_framework_vulkan)
   target_include_directories(framework_vulkan   PUBLIC external/slang/include)
 
   # Link vulkan framework library dependencies
-  target_link_libraries(framework_vulkan volk)
-  #target_link_libraries(framework_vulkan spirv-cross-core)
-  #target_link_libraries(framework_vulkan spirv-cross-cpp)
-  #target_link_libraries(framework_vulkan spirv-cross-glsl)
-  #target_link_libraries(framework_vulkan spirv-cross-hlsl)
-  #target_link_libraries(framework_vulkan spirv-cross-msl)
-  #target_link_libraries(framework_vulkan spirv-cross-reflect)
-  #target_link_libraries(framework_vulkan spirv-cross-util)
-  #target_link_libraries(framework_vulkan SPIRV)
-  #target_link_libraries(framework_vulkan glslang)
-  #target_link_libraries(framework_vulkan glslang-default-resource-limits)
-  #target_link_libraries(framework_vulkan slang)
+  target_link_libraries(
+    framework_vulkan
+    PUBLIC
+    glslang
+    glslang-default-resource-limits
+    spirv-cross-core
+    spirv-cross-cpp
+    spirv-cross-glsl
+    spirv-cross-hlsl
+    spirv-cross-msl
+    spirv-cross-reflect
+    spirv-cross-util
+    SPIRV
+  )
   
   target_compile_definitions(framework_vulkan PUBLIC VK_ENABLE_BETA_EXTENSIONS)
 
@@ -659,6 +671,21 @@ if(FRAMEWORK_LIB_OUTPUT)
 	    add_library(framework_dx12_shared SHARED code/main/framework_static_empty.cpp)
 	    target_link_libraries(framework_dx12_shared PUBLIC framework_dx12)
     endif()
+
+
+  # Copy external libraries using a local target's post-build step
+  add_custom_command(TARGET framework_vulkan POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:glslang>
+            ${FRAMEWORK_LIB_OUTPUT}/${CMAKE_BUILD_TYPE}/$<TARGET_FILE_NAME:glslang>)
+  add_custom_command(TARGET framework_vulkan POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:glslang-default-resource-limits>
+            ${FRAMEWORK_LIB_OUTPUT}/${CMAKE_BUILD_TYPE}/$<TARGET_FILE_NAME:glslang-default-resource-limits>)
+  add_custom_command(TARGET framework_vulkan POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:SPIRV>
+            ${FRAMEWORK_LIB_OUTPUT}/${CMAKE_BUILD_TYPE}/$<TARGET_FILE_NAME:SPIRV>)
 
 endif()
 

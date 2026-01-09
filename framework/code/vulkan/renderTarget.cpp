@@ -53,6 +53,8 @@ RenderTarget<Vulkan>& RenderTarget<Vulkan>::operator=( RenderTarget<Vulkan>&& sr
         m_ClearColorValues = std::move( src.m_ClearColorValues );
         m_ResolveAttachments = std::move( src.m_ResolveAttachments );
         m_DepthAttachment = std::move( src.m_DepthAttachment );
+        m_InheritedDepthAttachment = std::move( src.m_InheritedDepthAttachment);
+        src.m_InheritedDepthAttachment = nullptr;
         m_FrameBuffer = std::move( src.m_FrameBuffer );
         m_FrameBufferDepthOnly = std::move( src.m_FrameBufferDepthOnly );
 
@@ -107,15 +109,30 @@ bool RenderTarget<Vulkan>::Initialize( Vulkan* pVulkan, const RenderTargetInitia
 
     m_pLayerFormats.assign( info.LayerFormats.begin(), info.LayerFormats.end() );
 
-    if (!InitializeDepth(depthTextureType))
-        return false;
+    if (info.InheritedDepthAttachment)
+    {
+        auto* inheritedDepthAttachment = apiCast<Vulkan>(info.InheritedDepthAttachment);
+        if (!inheritedDepthAttachment->m_DepthAttachment)
+        {
+            return false;
+        }
+
+        m_InheritedDepthAttachment = &inheritedDepthAttachment->m_DepthAttachment;
+        m_DepthFormat = m_InheritedDepthAttachment->Format;
+    }
+    else
+    {
+        if (!InitializeDepth(depthTextureType))
+            return false;
+    }
+
     if (!InitializeColor(colorTextureTypes))
         return false;
     if (!InitializeResolve( info.ResolveTextureFormats ))
         return false;
-    if (renderPass && *renderPass && !CreateFrameBuffer( *renderPass, m_ColorAttachments, &m_DepthAttachment, m_ResolveAttachments, nullptr/*pVRSAttachment*/, &m_FrameBuffer ))
+    if (renderPass && *renderPass && !CreateFrameBuffer( *renderPass, m_ColorAttachments, m_InheritedDepthAttachment ? m_InheritedDepthAttachment : &m_DepthAttachment, m_ResolveAttachments, nullptr/*pVRSAttachment*/, &m_FrameBuffer ))
         return false;
-    if (renderPassDepthOnly && *renderPassDepthOnly && m_DepthAttachment && !CreateFrameBuffer( *renderPassDepthOnly, {}, &m_DepthAttachment, m_ResolveAttachments, nullptr/*pVRSAttachment*/, &m_FrameBufferDepthOnly ))
+    if (renderPassDepthOnly && *renderPassDepthOnly && (m_InheritedDepthAttachment || m_DepthAttachment) && !CreateFrameBuffer( *renderPassDepthOnly, {}, m_InheritedDepthAttachment ? m_InheritedDepthAttachment : &m_DepthAttachment, m_ResolveAttachments, nullptr/*pVRSAttachment*/, &m_FrameBufferDepthOnly ))
         return false;
 
     return true;
@@ -154,7 +171,7 @@ bool RenderTarget<Vulkan>::Initialize(Vulkan* pVulkan, uint32_t uiWidth, uint32_
 bool RenderTarget<Vulkan>::InitializeFrameBuffer( Vulkan* pVulkan, const RenderPass<Vulkan>& renderPass )
 //-----------------------------------------------------------------------------
 {
-    bool success = CreateFrameBuffer( renderPass, m_ColorAttachments, &m_DepthAttachment, m_ResolveAttachments, nullptr, &m_FrameBuffer );
+    bool success = CreateFrameBuffer( renderPass, m_ColorAttachments, m_InheritedDepthAttachment ? m_InheritedDepthAttachment : &m_DepthAttachment, m_ResolveAttachments, nullptr, &m_FrameBuffer );
     return success;
 }
 
@@ -162,7 +179,7 @@ bool RenderTarget<Vulkan>::InitializeFrameBuffer( Vulkan* pVulkan, const RenderP
 bool RenderTarget<Vulkan>::InitializeFrameBufferDepthOnly( Vulkan* pVulkan, const RenderPass<Vulkan>& renderPassDepthOnly )
 //-----------------------------------------------------------------------------
 {
-    bool success = CreateFrameBuffer( renderPassDepthOnly, {}, &m_DepthAttachment, {}, nullptr, &m_FrameBufferDepthOnly );
+    bool success = CreateFrameBuffer( renderPassDepthOnly, {}, m_InheritedDepthAttachment ? m_InheritedDepthAttachment : &m_DepthAttachment, {}, nullptr, &m_FrameBufferDepthOnly );
     return success;
 }
 
@@ -321,6 +338,7 @@ void RenderTarget<Vulkan>::Release()
     m_Msaa.clear();
 
     m_DepthAttachment.Release(m_pVulkan);
+    m_InheritedDepthAttachment = nullptr;
     m_DepthFormat = TextureFormat::UNDEFINED;
 
     m_FrameBufferDepthOnly = {};
