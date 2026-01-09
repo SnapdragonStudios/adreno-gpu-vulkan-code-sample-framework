@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -80,8 +80,29 @@ AssetHandle* AssetManager::OpenFile(const std::string& portableFilename, Mode mo
             // Asset name needs to have / seperators and no ./ preamble!
             std::string aAssetFilename;
             const auto skipPreambleOffset = std::max(portableFilename.find_first_not_of("./\\"), (size_t)0);
-            std::transform(portableFilename.begin() + skipPreambleOffset, portableFilename.end(), std::back_inserter(aAssetFilename), [](char c) { return c == '\\' ? '/' : c; });
 
+            // Convert to backslashes and remove double backslashes
+            aAssetFilename.resize(portableFilename.length() - skipPreambleOffset, ' ');
+            size_t outputIdx = 0, slashCount = 0;
+            for (size_t inputIdx = skipPreambleOffset; inputIdx < portableFilename.length(); ++inputIdx)
+            {
+                char c = portableFilename[inputIdx];
+                c = c=='\\' ? '/' : c;
+                if (c == '/')
+                {
+                    ++slashCount;
+                    if (slashCount > 1)
+                        continue;
+                }
+                else
+                {
+                    slashCount = 0;
+                }
+                aAssetFilename[outputIdx++] = c;
+            }
+            aAssetFilename.resize(outputIdx);
+
+            // Open the file
             AAsset* pAAsset = AAssetManager_open(m_AAssetManager, aAssetFilename.c_str(), AASSET_MODE_STREAMING);
             if (pAAsset != nullptr)
             {

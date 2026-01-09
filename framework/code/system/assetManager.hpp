@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -34,7 +34,7 @@ class AssetMemStream : public std::basic_istream<CharT, TraitsT> {
     AssetMemStream& operator=(const AssetMemStream&) = delete;
 public:
     AssetMemStream()
-        : std::istream(&mBuffer)
+        : std::basic_istream<CharT, TraitsT>(&mBuffer)
         , mBuffer()
     {
         this->set_rdbuf(&mBuffer);

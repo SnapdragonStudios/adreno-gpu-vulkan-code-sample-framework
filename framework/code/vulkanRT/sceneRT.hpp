@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -76,7 +76,7 @@ protected:
     typedef std::unordered_map<uint64_t, MeshObjectRT> tMeshObjectUnorderedMap;
 
     // Build the initial acceleration (and scratch) buffer.
-    bool CreateAccelerationStructure( UpdateMode updateMode, size_t minSize );
+    bool CreateAccelerationStructure( UpdateMode updateMode, size_t minSize);
 
 protected:
     Vulkan&                             m_vulkan;
@@ -146,7 +146,7 @@ public:
     void Update(const SceneRTCullable& scene/*scene we will generate a RT Acceleration Structure from*/, const T_TEST& cullTest);
 
     // Build the initial acceleration (and scratch) buffer. (makes base class function public)
-    bool CreateAccelerationStructure(UpdateMode updateMode, size_t minSize) { return SceneRT::CreateAccelerationStructure( updateMode, minSize );  }
+    bool CreateAccelerationStructure(UpdateMode updateMode, size_t minSize) { return SceneRT::CreateAccelerationStructure( updateMode, minSize);  }
 
 protected:
     void PostQueryUpdate(const SceneRTCullable& scene, bool regenerateInstances);

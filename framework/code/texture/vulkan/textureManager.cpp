@@ -1,13 +1,11 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2022 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 #include "textureManager.hpp"
 #include "texture.hpp"
-#include "imageWrapper.hpp"
 #include "loaderKtx.hpp"
 #include "../loaderPpm.hpp"
 #include "vulkan/vulkan.hpp"
@@ -15,37 +13,41 @@
 
 
 //-----------------------------------------------------------------------------
-TextureManagerT<Vulkan>::TextureManagerT( tGfxApi& rGfxApi ) noexcept : TextureManager(), m_GfxApi( rGfxApi )
+TextureManager<Vulkan>::TextureManager( Vulkan& rGfxApi, AssetManager& rAssetManager ) noexcept
+    : TextureManagerBase(rAssetManager)
+    , m_GfxApi( rGfxApi )
 //-----------------------------------------------------------------------------
 {
 }
 
 //-----------------------------------------------------------------------------
-TextureManagerT<Vulkan>::~TextureManagerT()
+TextureManager<Vulkan>::~TextureManager()
 //-----------------------------------------------------------------------------
 {
     Release();
 }
 
 //-----------------------------------------------------------------------------
-bool TextureManagerT<Vulkan>::Initialize()
+bool TextureManager<Vulkan>::Initialize()
 //-----------------------------------------------------------------------------
 {
-    m_Loader = std::make_unique<TextureKtxT<tGfxApi>>( static_cast<tGfxApi&>(m_GfxApi) );
+    m_Loader = std::make_unique<TextureKtx<Vulkan>>( static_cast<Vulkan&>(m_GfxApi) );
 
-    m_DefaultSamplers.resize( size_t(SamplerAddressMode::End), {} );
+    m_DefaultSamplers.reserve( size_t(SamplerAddressMode::End) );
     for (size_t i = (size_t)SamplerAddressMode::Repeat; i < (size_t)SamplerAddressMode::End; ++i)
     {
         SamplerAddressMode samplerMode = (SamplerAddressMode)i;
         if (samplerMode != SamplerAddressMode::MirroredClampEdge || m_MirrorClampToEdgeSupported)
-            m_DefaultSamplers[i] = CreateSampler( m_GfxApi, samplerMode, SamplerFilter::Linear, SamplerBorderColor::TransparentBlackFloat, 0.0f );
+            m_DefaultSamplers.push_back( CreateSampler( m_GfxApi, samplerMode, SamplerFilter::Linear, SamplerBorderColor::TransparentBlackFloat, 0.0f ) );
+        else
+            m_DefaultSamplers.push_back( {} );
     }
 
-    return TextureManager::Initialize();
+    return TextureManagerBase::Initialize(0/*as many threads as cores*/);
 }
 
 //-----------------------------------------------------------------------------
-void TextureManagerT<Vulkan>::Release()
+void TextureManager<Vulkan>::Release()
 //-----------------------------------------------------------------------------
 {
     for (auto& [key, texture] : m_LoadedTextures)
@@ -54,11 +56,11 @@ void TextureManagerT<Vulkan>::Release()
     }
     m_LoadedTextures.clear();
     m_Loader->Release();
-    TextureManager::Release();
+    TextureManagerBase::Release();
 }
 
 //-----------------------------------------------------------------------------
-const Texture* TextureManagerT<Vulkan>::GetTexture(const std::string& textureSlotName) const
+const TextureBase* TextureManager<Vulkan>::GetTexture(const std::string& textureSlotName) const
 //-----------------------------------------------------------------------------
 {
     auto iter = m_LoadedTextures.find(textureSlotName);
@@ -68,21 +70,21 @@ const Texture* TextureManagerT<Vulkan>::GetTexture(const std::string& textureSlo
 }
 
 //-----------------------------------------------------------------------------
-const Sampler* const TextureManagerT<Vulkan>::GetSampler( SamplerAddressMode sam ) const
+const SamplerBase* const TextureManager<Vulkan>::GetSampler( SamplerAddressMode sam ) const
 //-----------------------------------------------------------------------------
 {
     return &m_DefaultSamplers[size_t(sam)];
 }
 
 //-----------------------------------------------------------------------------
-const Texture* TextureManagerT<Vulkan>::GetOrLoadTexture_(const std::string& textureSlotName, AssetManager& rAssetManager, const std::string& filename, const Sampler& sampler)
+const TextureBase* TextureManager<Vulkan>::GetOrLoadTexture_(const std::string& textureSlotName, const std::string& filename, const SamplerBase& sampler)
 //-----------------------------------------------------------------------------
 {
-    const Texture* pTexture = GetTexture(textureSlotName);
+    const TextureBase* pTexture = GetTexture(textureSlotName);
     if (!pTexture)
     {
         const SamplerVulkan& samplerVulkan = static_cast<const SamplerVulkan&>(sampler);
-        auto loadedTexture = GetLoader()->LoadKtx(m_GfxApi, rAssetManager, filename.c_str(), samplerVulkan);
+        auto loadedTexture = GetLoader()->LoadKtx(m_GfxApi, m_AssetManager, filename.c_str(), std::move(samplerVulkan.Copy()));
         if (!loadedTexture.IsEmpty())
         {
             auto insertedIt = m_LoadedTextures.insert({ textureSlotName, std::move(loadedTexture) });
@@ -104,7 +106,7 @@ struct BatchLoadThreadParams {
 };
 
 //-----------------------------------------------------------------------------
-void TextureManagerT<Vulkan>::BatchLoad(AssetManager& rAssetManager, const std::span<std::pair<std::string/*textureSlotName*/, std::string/*filename*/>> slotAndFileNames, const Sampler& defaultSampler)
+void TextureManager<Vulkan>::BatchLoad(const std::span<std::pair<std::string/*textureSlotName*/, std::string/*filename*/>> slotAndFileNames, const SamplerBase& defaultSampler)
 //-----------------------------------------------------------------------------
 {
     std::mutex loadedFileQueueMutex;
@@ -113,7 +115,7 @@ void TextureManagerT<Vulkan>::BatchLoad(AssetManager& rAssetManager, const std::
     Semaphore finishedSema{ 0 };
 
     // Setup the output textures
-    std::vector<TextureT<Vulkan>> vulkanTextures;
+    std::vector<Texture> vulkanTextures;
     vulkanTextures.resize(slotAndFileNames.size());
 
     // We have one worker job just grabbing loaded textures and transfering them to vulkan (gpu memory).
@@ -123,7 +125,7 @@ void TextureManagerT<Vulkan>::BatchLoad(AssetManager& rAssetManager, const std::
         Semaphore& dataReadySema;
         Semaphore& finishedSema;
         const SamplerVulkan& defaultSampler;
-        std::vector<TextureT<Vulkan>>& vulkanTextures;
+        std::vector<Texture>& vulkanTextures;
     } transferWorkerParams{ loadedFileQueueMutex, loadedFileQueue, dataReadySema, finishedSema, apiCast<Vulkan>(defaultSampler), vulkanTextures };
 
     m_LoadingThreadWorker.DoWork2([](TextureManagerVulkan* pThis, TransferWorkerParams params)
@@ -142,7 +144,7 @@ void TextureManagerT<Vulkan>::BatchLoad(AssetManager& rAssetManager, const std::
                 params.loadedFileQueue.pop();
             }
             if (ktxData)
-                params.vulkanTextures[slotIndex] = pThis->GetLoader()->LoadKtx(pThis->m_GfxApi, ktxData, params.defaultSampler);
+                params.vulkanTextures[slotIndex] = pThis->GetLoader()->LoadKtx(pThis->m_GfxApi, ktxData, std::move(params.defaultSampler.Copy()) );
             --texturesRemaining;
         }
         params.finishedSema.Post();
@@ -155,12 +157,12 @@ void TextureManagerT<Vulkan>::BatchLoad(AssetManager& rAssetManager, const std::
         auto iter = m_LoadedTextures.find(textureSlotName);
         if (iter == m_LoadedTextures.end())
         {
-            BatchLoadThreadParams params{ rAssetManager, loadedFileQueueMutex, loadedFileQueue, dataReadySema, filename, currentSlotIndex };
+            BatchLoadThreadParams params{ m_AssetManager, loadedFileQueueMutex, loadedFileQueue, dataReadySema, filename, currentSlotIndex };
 
             m_LoadingThreadWorker.DoWork2([](TextureManagerVulkan* pThis, BatchLoadThreadParams params)
             {
                 auto ktxData = pThis->m_Loader->LoadFile(params.assetManager, params.filename.c_str());
-                auto* pKtxLoader = static_cast<TextureKtxT<Vulkan>*>(pThis->GetLoader());
+                auto* pKtxLoader = static_cast<TextureKtx<Vulkan>*>(pThis->GetLoader());
                 ktxData = pKtxLoader->Transcode(std::move(ktxData));
                 {
                     std::lock_guard<std::mutex> lock(params.loadedFileQueueMutex);
@@ -185,34 +187,58 @@ void TextureManagerT<Vulkan>::BatchLoad(AssetManager& rAssetManager, const std::
     {
         if (!vulkanTextures[i].IsEmpty())
         {
-            m_LoadedTextures.emplace(std::pair<std::string, TextureT<Vulkan>>{ slotAndFileNames[i].first/*slot*/, std::move(vulkanTextures[i])});
+            m_LoadedTextures.emplace(std::pair<std::string, Texture>{ slotAndFileNames[i].first/*slot*/, std::move(vulkanTextures[i])});
         }
     }
 }
 
 //-----------------------------------------------------------------------------
-std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureObject(GraphicsApiBase& gfxApi, const CreateTexObjectInfo& texInfo) /*override*/
+const TextureBase* TextureManager<Vulkan>::CreateTextureObject( const CreateTexObjectInfo& texInfo) /*override*/
 //-----------------------------------------------------------------------------
 {
-    auto pTexture = std::make_unique<TextureT<Vulkan>>();
-    *pTexture = ::CreateTextureObject(static_cast<Vulkan&>(gfxApi), texInfo);
-    return pTexture;
+    auto texture = ::CreateTextureObject( m_GfxApi, texInfo);
+
+    assert( texInfo.pName!=nullptr && texInfo.pName[0] != '\0' ); // must have a valid name
+    auto it = m_LoadedTextures.try_emplace( texInfo.pName, std::move( texture ) );
+    if (!it.second)
+    {
+        assert( 0 && "CreateTextureObjectView duplicate texture name, must be unique (or use ::CreateTextureObject)" );
+        return nullptr;
+    }
+    else
+        return &it.first->second;
 }
 
 //-----------------------------------------------------------------------------
-std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureFromBuffer( GraphicsApiBase& gfxApi, const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, const char* pName, uint32_t extraFlags)
+const TextureBase* TextureManager<Vulkan>::CreateTextureFromBuffer( const void* pData, size_t DataSize, uint32_t Width, uint32_t Height, uint32_t Depth, TextureFormat Format, SamplerAddressMode SamplerMode, SamplerFilter Filter, std::string name )
 //-----------------------------------------------------------------------------
 {
-    auto pTexture = std::make_unique<TextureT<Vulkan>>();
-    *pTexture = ::CreateTextureFromBuffer( static_cast<Vulkan&>( gfxApi ), pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, pName, extraFlags);
-    return pTexture;
+    auto texture = ::CreateTextureFromBuffer( m_GfxApi, pData, DataSize, Width, Height, Depth, Format, SamplerMode, Filter, name.c_str() );
+
+    assert( name.empty() ); // must have a valid name
+    auto it = m_LoadedTextures.try_emplace( name, std::move(texture) );
+    if (!it.second)
+    {
+        assert( 0 && "CreateTextureFromBuffer duplicate texture name, must be unique (or use ::CreateTextureFromBuffer)" );
+        return nullptr;
+    }
+    else
+        return &it.first->second;
 }
 
 //-----------------------------------------------------------------------------
-std::unique_ptr<Texture> TextureManagerT<Vulkan>::CreateTextureObjectView( GraphicsApiBase& gfxApi, const Texture& original, TextureFormat viewFormat )
+const TextureBase* TextureManager<Vulkan>::CreateTextureObjectView( const TextureBase& original, TextureFormat viewFormat, std::string name )
 //-----------------------------------------------------------------------------
 {
-    auto pTexture = std::make_unique<TextureT<Vulkan>>();
-    *pTexture = ::CreateTextureObjectView( static_cast<Vulkan&>( gfxApi ), apiCast<Vulkan>(original), viewFormat );
-    return pTexture;
+    auto texture = ::CreateTextureObjectView( m_GfxApi, apiCast<Vulkan>(original), viewFormat );
+
+    assert( name.empty() ); // must have a valid name
+    auto it = m_LoadedTextures.try_emplace( name, std::move( texture ) );
+    if (!it.second)
+    {
+        assert( 0 && "CreateTextureObjectView duplicate texture name, must be unique (or use ::CreateTextureObjectView)" );
+        return nullptr;
+    }
+    else
+        return &it.first->second;
 }

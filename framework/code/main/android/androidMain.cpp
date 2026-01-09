@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -77,11 +77,23 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd)
 
             // InitializeVulkan
             assert(engine->application);
-            assert(engine->application->GetGraphicsApi());
+            assert(engine->application->GetGraphicsApiBase());
             assert(engine->app->window);
 
             if (engine->application)
-                engine->application->SetWindowSize(ANativeWindow_getWidth(engine->app->window), ANativeWindow_getHeight(engine->app->window));
+            {
+                // Tell the application the Window Size (likely the screen resolution, but may not be!)
+                engine->application->SetWindowSize( ANativeWindow_getWidth( engine->app->window ), ANativeWindow_getHeight( engine->app->window ) );
+
+                // If the surface sizes havent been set in app_config then set them to the wind size (so surface is at native device resolution)
+                const auto applicationWindowSize = engine->application->GetWindowSize();
+                const auto* var = GetVariable( "gSurfaceWidth" );
+                if ((nullptr == var || 0 == (var->GetFlags() & kVariableModified)) && applicationWindowSize.first > 0)
+                    gSurfaceWidth = applicationWindowSize.first;
+                var = GetVariable( "gSurfaceHeight" );
+                if ((nullptr == var || 0 == (var->GetFlags() & kVariableModified)) && applicationWindowSize.second > 0)
+                    gSurfaceHeight = applicationWindowSize.second;
+            }
 
             if (engine->initialized)
             {

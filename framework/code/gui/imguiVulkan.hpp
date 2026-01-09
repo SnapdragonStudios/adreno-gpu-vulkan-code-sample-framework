@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,6 +12,7 @@
 #include "imguiPlatform.hpp"
 #include "vulkan/vulkan.hpp"
 #include "vulkan/commandBuffer.hpp"
+#include "vulkan/renderPass.hpp"
 
 ///
 /// @brief Vulkan specialized implementation of imgui rendering.
@@ -22,20 +23,20 @@ template<>
 class GuiImguiGfx<Vulkan> : public GuiImguiPlatform
 {
 public:
-    GuiImguiGfx(Vulkan&, VkRenderPass renderPass);
+    GuiImguiGfx(Vulkan&, RenderPass<Vulkan> renderPass = {});
     ~GuiImguiGfx();
 
-    bool Initialize(uintptr_t windowHandle, uint32_t renderWidth, uint32_t renderHeight) override;
+    bool Initialize(uintptr_t windowHandle, TextureFormat renderFormat, uint32_t renderWidth, uint32_t renderHeight) override;
     void Update() override;
 
     VkCommandBuffer Render(uint32_t frameIdx, VkFramebuffer frameBuffer);
     void Render(VkCommandBuffer cmdBuffer);
 
 private:
-    const VkRenderPass                  m_RenderPass;
+    const RenderPass<Vulkan>            m_RenderPass {};  // if null, use dynamic rendering
     VkDescriptorPool                    m_DescriptorPool = VK_NULL_HANDLE;
-    Wrap_VkCommandBuffer                m_UploadCommandBuffer;
-    std::vector<Wrap_VkCommandBuffer>   m_CommandBuffer;
+    CommandListVulkan                   m_UploadCommandBuffer;
+    std::vector<CommandListVulkan>      m_CommandBuffer;
     Vulkan&                             m_GfxApi;      
 };
 

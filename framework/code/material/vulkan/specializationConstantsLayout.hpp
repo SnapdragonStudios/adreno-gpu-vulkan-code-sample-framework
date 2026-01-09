@@ -1,15 +1,15 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
 #include <vector>
-#include <vulkan/vulkan.h>
-#include "material/specializationConstantsLayout.hpp"
+#include <volk/volk.h>
+#include "../specializationConstantsLayout.hpp"
 #include <span>
 
 // Forward declarations
@@ -18,7 +18,7 @@ class Vulkan;
 /// Simple wrapper around collection of VkSpecializationMapEntry (for VkSpecializationInfo::pMapEntries).
 /// @ingroup Material
 template<>
-class SpecializationConstantsLayout<Vulkan>
+class SpecializationConstantsLayout<Vulkan> final
 {
     SpecializationConstantsLayout( const SpecializationConstantsLayout<Vulkan>& ) = delete;
     SpecializationConstantsLayout& operator=( const SpecializationConstantsLayout<Vulkan>& ) = delete;

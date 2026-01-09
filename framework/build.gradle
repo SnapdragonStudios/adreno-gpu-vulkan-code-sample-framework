@@ -1,50 +1,95 @@
 apply plugin: 'com.android.library'
 
 android {
-    compileSdkVersion 26
+    compileSdkVersion 33
+	namespace "com.qualcomm.sgs.framework"
 
     defaultConfig {
         minSdkVersion 26
-        targetSdkVersion 26
-        versionCode 1
-        versionName "1.0"
+        targetSdkVersion 33
+        ndkVersion "${project.ndkVersionDefault}"
         ndk {
             abiFilters 'arm64-v8a'
         }
+        externalNativeBuild {
+            cmake {
+                arguments "-DFRAMEWORK_DOWNLOAD_EXTERNALS=On", "-DFRAMEWORK_LIB_OUTPUT=${rootDir}/../../build/android/${project.name}", "-DANDROID_ALLOW_UNDEFINED_SYMBOLS=On"
+                version "3.25.0+"
+            }
+        }
+    }
+
+    lintOptions {
+        tasks.lint.enabled = false
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-			// signingConfig signingConfigs.unsigned
+            packagingOptions {
+                //doNotStrip '**/*.so'
+            }
         }
         debug {
             debuggable = true
             jniDebuggable = true
+            packagingOptions {
+                //doNotStrip '**/*.so'
+            }
         }
     }
 
     sourceSets {
         main {
-            // jni.srcDirs = []
-            manifest.srcFile 'project/android/AndroidManifest.xml'
-            // //java.srcDirs = ['src']
-            // res.srcDirs = ['project/android/res']
-            // assets.srcDirs = ['assets']
-
-            // Uncomment this to enable validation
-            //jniLibs {
-            //     srcDir "${android.ndkDirectory}/sources/third_party/vulkan/src/build-android/jniLibs"
-            //}
+            manifest.srcFile 'android/AndroidManifest.xml'
         }
     }
 
     externalNativeBuild {
         cmake {
-            version "3.10.2+"
+            version "3.25.0+"
             path 'CMakeLists.txt'
+            buildStagingDirectory "../build/cxx/${project.name}"
         }
     }
 
+    task extractFrameworkAarDebug(type: Copy) {
+        def aarPath = file("${project.buildDir}/outputs/aar/framework-debug.aar")
+
+        from zipTree("${aarPath}")
+        into "${project.buildDir}/extracted/Debug"
+        include "**/*.so"
+
+        eachFile {
+            def segments = it.getRelativePath().getSegments() as List
+            println segments
+            it.setPath(segments.tail().join("/"))
+            return it
+        }
+        includeEmptyDirs = false
+    }
+
+    task extractFrameworkAarRelease(type: Copy) {
+        def aarPath = file("${project.buildDir}/outputs/aar/framework-release.aar")
+        doLast {
+            project.logger.lifecycle("Extracted ${aarPath} file(s).... into ${project.buildDir}/extracted/RelWithDebInfo/")
+        }
+        from zipTree("${aarPath}")
+        into "${project.buildDir}/extracted/RelWithDebInfo/"
+        include "**/*.so"
+
+        eachFile {
+            def segments = it.getRelativePath().getSegments() as List
+            println segments
+            it.setPath(segments.tail().join("/"))
+            return it
+        }
+        includeEmptyDirs = false
+    }
+
+    afterEvaluate {
+        //assembleDebug.finalizedBy extractFrameworkAarDebug
+        //assembleRelease.finalizedBy extractFrameworkAarRelease
+    }
 }

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -10,6 +10,7 @@
 #include "vertexFormat.hpp"
 #include "descriptorSetDescription.hpp"
 #include "specializationConstantDescription.hpp"
+#include "texture/sampler.hpp"
 #include <string>
 #include <map>
 #include <vector>
@@ -18,6 +19,7 @@
 
 // Forward declarations
 class AssetManager;
+class CreateSamplerObjectInfo;
 
 /// Describes a 'ShaderPass'.
 /// Is platform agnostic.
@@ -82,40 +84,42 @@ public:
         BlendFactor         srcAlphaBlendFactor = BlendFactor::One;
         BlendFactor         dstAlphaBlendFactor = BlendFactor::Zero;
         uint32_t            colorWriteMask = 0x7fffffff;
-        //VkBlendOp                colorBlendOp;
-        //VkBlendOp                alphaBlendOp;
     };
     struct WorkGroupSettings
     {
         std::array<uint32_t, 3> localSize = {};
+        bool                    perTileDispatch = false;
     };
     struct RayTracingSettings
     {
         uint32_t maxRayRecursionDepth = 1;
     };
 
-    ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, std::string rayGenerationName, std::string rayClosestHitName, std::string rayAnyHitName, std::string rayMissName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, WorkGroupSettings workGroupSettings, RayTracingSettings rayTracingSettings, std::vector<uint32_t> vertexFormatBindings, std::vector<SpecializationConstantDescription> specializationConstants);
+    ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string computeName, std::string vertexName, std::string fragmentName, std::string rayGenerationName, std::string rayClosestHitName, std::string rayAnyHitName, std::string rayMissName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, WorkGroupSettings workGroupSettings, RayTracingSettings rayTracingSettings, std::vector<uint32_t> vertexFormatBindings, std::vector<SpecializationConstantDescription> specializationConstants, std::vector<CreateSamplerObjectInfo> rootSamplers );
+    ShaderPassDescription( std::vector<DescriptorSetDescription> sets, std::vector<Output> outputs, std::string taskName, std::string meshName, std::string computeName, std::string vertexName, std::string fragmentName, std::string rayGenerationName, std::string rayClosestHitName, std::string rayAnyHitName, std::string rayMissName, FixedFunctionSettings fixedFunctionSettings, SampleShadingSettings sampleShadingSettings, WorkGroupSettings workGroupSettings, RayTracingSettings rayTracingSettings, std::vector<uint32_t> vertexFormatBindings, std::vector<SpecializationConstantDescription> specializationConstants, std::vector<CreateSamplerObjectInfo> rootSamplers );
     ShaderPassDescription(ShaderPassDescription&&) = default;
 
-    std::vector<DescriptorSetDescription> m_sets;
-    std::vector<Output> m_outputs;
-    std::string m_computeName;                      ///< Name of the compute shader (optional, not valid if m_vertexName or m_fragmentName are set)
-    std::string m_vertexName;                       ///< Name of the vertex shader used by this shader pass (optional, not valid if m_computeName set)
-    std::string m_fragmentName;                     ///< Name of the fragment shader used by this shader pass (optional, only valid if m_vertexName set)
-    std::string m_rayGenerationName;
-    std::string m_rayClosestHitName;
-    std::string m_rayAnyHitName;
-    std::string m_rayMissName;
-    FixedFunctionSettings m_fixedFunctionSettings;
-    SampleShadingSettings m_sampleShadingSettings;
-    WorkGroupSettings     m_workGroupSettings;
-    RayTracingSettings    m_rayTracingSettings;
-    std::vector<uint32_t> m_vertexFormatBindings;   //< Indices of the vertex buffers bound by this shader pass (index in to ShaderDescription::m_vertexFormats)
-    std::vector<SpecializationConstantDescription> m_constants;
-    //std::vector<uint32_t> m_vertexInstanceFormatBindings;  ///TODO: support more than one buffer of instance rate data
+    std::vector<DescriptorSetDescription>           m_sets;
+    std::vector<Output>                             m_outputs;
+    std::string                                     m_taskName;             ///< Name of the task shader (optional, not valid if m_vertexName or m_fragmentName are set)
+    std::string                                     m_meshName;             ///< Name of the mesh shader (optional, not valid if m_vertexName or m_fragmentName are set), mandatory if task shader is set
+    std::string                                     m_computeName;          ///< Name of the compute shader (optional, not valid if m_vertexName or m_fragmentName are set)
+    std::string                                     m_vertexName;           ///< Name of the vertex shader used by this shader pass (optional, not valid if m_computeName set)
+    std::string                                     m_fragmentName;         ///< Name of the fragment shader used by this shader pass (optional, only valid if m_vertexName set)
+    std::string                                     m_rayGenerationName;
+    std::string                                     m_rayClosestHitName;
+    std::string                                     m_rayAnyHitName;
+    std::string                                     m_rayMissName;
+    FixedFunctionSettings                           m_fixedFunctionSettings;
+    SampleShadingSettings                           m_sampleShadingSettings;
+    WorkGroupSettings                               m_workGroupSettings;
+    RayTracingSettings                              m_rayTracingSettings;
+    std::vector<uint32_t>                           m_vertexFormatBindings; //< Indices of the vertex buffers bound by this shader pass (index in to ShaderDescription::m_vertexFormats)
+    std::vector<SpecializationConstantDescription>  m_constants;
+    std::vector<CreateSamplerObjectInfo>            m_rootSamplers;
 };
 
-/// Describes a 'Shader'.
+/// Describes a 'ShaderBase'.
 /// May contain multiple shader passes (vector of ShaderPassDescription and a pass name lookup).
 /// Also contain description (VertexFormat) of the all the vertex buffers that can be bound to this set of shaders.
 /// Is platform agnostic.
@@ -130,7 +134,7 @@ public:
         , m_descriptionPerPass(std::move(other.m_descriptionPerPass))
         , m_passNameToIndex(std::move(other.m_passNameToIndex))
     {}
-    ShaderDescription(std::vector<VertexFormat> vertexFormats, std::vector<ShaderPassDescription> passes, const std::vector<std::string>& passNames)
+    ShaderDescription(std::vector<VertexFormat> vertexFormats, std::vector<ShaderPassDescription> passes, const std::vector<std::string>& passNames, bool tileShading)
         : m_vertexFormats(std::move(vertexFormats))
         , m_descriptionPerPass(std::move(passes))
     {

@@ -1,13 +1,14 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "timerSimple.hpp"
 #include <algorithm>
+#include <cstring>
 
 
 void TimerSimple::Update(uint32_t whichFrame, uint64_t startTick, uint64_t stopTick)
@@ -62,7 +63,7 @@ void TimerPoolSimple::Log( const TimerPoolSimple::tTimers& timers ) const
     for (const auto& timer : timers)
     {
         if (timer.TotalCompletedTicks > 0)
-            LOGI( "Timer %s :\t%.3fms\t(avg %.3fms)", timer.Name.c_str(), GetTimeInMs(timer), GetAverageTimeInMs(timer) );
+            LOGI( "Timer %s : %.3fms (avg)", timer.Name.c_str(), GetAverageTimeInMs(timer) );
     }
 }
 
@@ -85,7 +86,7 @@ void TimerPoolSimple::Log2( const TimerPoolSimple::tTimers& timers ) const
     std::sort( std::begin( timersInEventOrder ), std::end( timersInEventOrder ), []( auto a, auto b ) -> bool { return (a.isStop ? a.pTimer->LastStopTick : a.pTimer->LastStartTick) < (b.isStop ? b.pTimer->LastStopTick : b.pTimer->LastStartTick); } );
 
     constexpr uint32_t cMaxTimerOverlaps = 4;
-    constexpr uint32_t cMaxNameLength = 20;
+    constexpr uint32_t cMaxNameLength = 40;
     constexpr uint32_t cQueueFamilyWidth = cMaxTimerOverlaps * 2 + cMaxNameLength;
     constexpr uint32_t cMaxQueueFamilies = 3;
     struct 
@@ -149,4 +150,11 @@ void TimerPoolSimple::Log2( const TimerPoolSimple::tTimers& timers ) const
             }
         }
     }
+}
+
+TimerPoolSimple::tTimers TimerPoolSimple::SnapshotAndReset()
+{
+    auto snapshotData = m_Timers;
+    ResetTimers( -1 );
+    return snapshotData;
 }

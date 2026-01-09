@@ -1,14 +1,15 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "pipelineLayout.hpp"
-#include "material/descriptorSetLayout.hpp"
+#include "descriptorSetLayout.hpp"
 #include "vulkan/vulkan.hpp"
+#include "texture/sampler.hpp"
 
 PipelineLayout<Vulkan>::PipelineLayout() noexcept
 {}
@@ -33,8 +34,9 @@ void PipelineLayout<Vulkan>::Destroy(Vulkan& vulkan)
 	}
 }
 
-bool PipelineLayout<Vulkan>::Init(Vulkan& vulkan, const std::span<const DescriptorSetLayout> descriptorSetLayouts)
+bool PipelineLayout<Vulkan>::Init(Vulkan& vulkan, const std::span<const DescriptorSetLayout<Vulkan>> descriptorSetLayouts, const std::span<const CreateSamplerObjectInfo> rootSamplers)
 {
+	assert(rootSamplers.empty());	// not supported in Vulkan
 	std::vector<VkDescriptorSetLayout> vkDescriptorSetLayouts;
 	vkDescriptorSetLayouts.reserve(descriptorSetLayouts.size());
 	for (const auto& descriptorSetLayout : descriptorSetLayouts)

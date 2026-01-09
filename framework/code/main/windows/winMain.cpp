@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -35,6 +35,8 @@
 //=============================================================================
 // Declare the application global so can access it in WndProc
 FrameworkApplicationBase* gpApplication = nullptr;
+// Define a funcion pointer to the GUI's winproc handler.  Use this so the GUI can catch winproc events at the lowest level (eg imgui integration)
+LRESULT(*PFN_Gui_WndProcHandler)(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) = nullptr/*do nothing by default*/;
 
 #define KEY_THIS_FRAME_TIME     250
 
@@ -49,8 +51,8 @@ static bool gGuiMouseActive = false;
 // If the mouse is down and being handled by the application (not the gui)
 static bool gAppMouseActive = false;
 
-// Define a funcion pointer to the GUI's winproc handler.  Use this so the GUI can catch winproc events at the lowest level (eg imgui integration)
-LRESULT (*PFN_Gui_WndProcHandler)(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) = nullptr/*do nothing by default*/;
+// From WinMain.cpp
+extern LRESULT(*PFN_Gui_WndProcHandler)(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 int DefaultCrashReport(int i, char* msg, int* p)
 {
@@ -88,6 +90,7 @@ bool CreateConsoleWindow( bool forceNewConsole )
     }
 
     _CrtSetReportHook( PFN_CrashReportHook );
+    _set_error_mode( _OUT_TO_STDERR );
 
     // Redirect stdout and stderr from our app to the new console window...
 
@@ -142,19 +145,11 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_PAINT:
         if (gpApplication && gAppInitialized)
         {
-            static bool is_rendering = false;
-            if (is_rendering)
-            {
-                return DefWindowProc(hWnd, uMsg, wParam, lParam);
-            }
-
-            is_rendering = true;
             if (!gpApplication->Render())
             {
                 // Exit requested.
                 DestroyWindow(hWnd);
             }
-            is_rendering = false;
         }
         break;
 
@@ -316,10 +311,10 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     bool allocatedNewConsoleWindow = CreateConsoleWindow(false);
 
     // Check for a media directy (fatal to not have one).
-    constexpr auto mediaPath = "Media";
+    constexpr auto mediaPath = "build/Media";
     if (!std::filesystem::exists(mediaPath) || !std::filesystem::is_directory(mediaPath))
     {
-        std::string errorMessage = "Cannot find 'Media' folder.\n  If you built this application maybe you didnt run the corresponding 02_PrepareMedia.bat script?\n  If you did prepare the media (or are running a pre-built build) you're likely not running from the correct directory.\n";
+        std::string errorMessage = "Cannot find 'build/Media' folder.\n  You're likely not running from the correct directory or are missing files from the Media folder (check this sample's README.md for instructions).\n";
         LOGE(errorMessage.c_str());
         SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 
@@ -407,7 +402,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     // Initialize the application class
     if (!gpApplication->Initialize((uintptr_t)hWnd, (uintptr_t)hInstance))
     {
-        LOGE("Application initialization failed!!");
+        LOGE("\n\n===================================\nApplication initialization failed!!\n===================================\n\n");
         return FALSE;
     }
 

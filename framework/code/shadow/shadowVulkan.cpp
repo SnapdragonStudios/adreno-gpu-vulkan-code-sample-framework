@@ -1,10 +1,10 @@
-//============================================================================================================
+//=============================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
+//                  Copyright (c) 2020 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//============================================================================================================
+//==============================================================================
 
 #include "shadowVulkan.hpp"
 #include "vulkan/vulkan_support.hpp"
@@ -30,19 +30,40 @@ bool ShadowT<Vulkan>::Initialize(Vulkan& rGfxApi, uint32_t shadowMapWidth, uint3
     m_Scissor.extent.width = shadowMapWidth;
     m_Scissor.extent.height = shadowMapHeight;
 
-    const TextureFormat colorFormat[]{ TextureFormat::R8G8B8A8_UNORM };
-    const std::span<const TextureFormat> emptyColorFormat{};
+    TextureFormat colorFormat = TextureFormat::R8G8B8A8_UNORM;
     TextureFormat depthFormat = TextureFormat::D32_SFLOAT;
 
-    if (!m_ShadowMapRT.Initialize(&rGfxApi, shadowMapWidth, shadowMapHeight, addColorTarget ? colorFormat : emptyColorFormat, depthFormat, VK_SAMPLE_COUNT_1_BIT, "Shadow RT"))
+    m_ShadowDepthBuffer = CreateTextureObject( rGfxApi, shadowMapWidth, shadowMapHeight, depthFormat, TEXTURE_TYPE::TT_RENDER_TARGET, "Shadow Depth", Msaa::Samples1 );
+
+    std::span<TextureVulkan> colorBufferSpan{};
+    std::span<TextureFormat> colorFormatSpan{};
+    if (addColorTarget)
     {
-        LOGE("Unable to create shadow render target");
+        m_ShadowColorBuffer = CreateTextureObject( rGfxApi, shadowMapWidth, shadowMapHeight, colorFormat, TEXTURE_TYPE::TT_RENDER_TARGET, "Shadow Depth", Msaa::Samples1 );
+        colorBufferSpan ={ &m_ShadowColorBuffer, 1 };
+        colorFormatSpan = {&colorFormat, 1};
+    }
+
+    RenderPass<Vulkan> shadowRenderPass;
+    if (!rGfxApi.CreateRenderPass(
+            colorFormatSpan,
+            depthFormat,
+            Msaa::Samples1,
+            RenderPassInputUsage::Clear,            // color input
+            RenderPassOutputUsage::StoreReadOnly,   // color output
+            true,                                   // depth clear
+            RenderPassOutputUsage::StoreReadOnly,   // depth output
+            shadowRenderPass ))
+    {
         return false;
     }
+
+    Framebuffer<Vulkan> framebuffer;
+    framebuffer.Initialize( rGfxApi, shadowRenderPass, colorBufferSpan, &m_ShadowDepthBuffer, "Shadow framebuffer" );
+    m_ShadowMapRC = {std::move(shadowRenderPass), {}/*pipeline*/, framebuffer, "Shadow Context"};
     return true;
 }
 
 void ShadowT<Vulkan>::Release()
 {
-    m_ShadowMapRT.Release();
 }

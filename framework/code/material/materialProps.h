@@ -1,10 +1,9 @@
-//============================================================================================================
+//=============================================================================
 //
+//                  Copyright (c) 2022 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
-//
-//============================================================================================================
+//==============================================================================
 
 #pragma once
 #ifndef _MATERIAL_MATERIALPROPS_H_
@@ -31,12 +30,12 @@
 
 // Forward declarations
 struct ShaderInfo;
-class Texture;
+class TextureBase;
 template <typename T_GFXAPI> class Mesh;
 template <typename T_GFXAPI> struct Uniform;
 
 //=============================================================================
-// Material Description
+// MaterialBase Description
 //=============================================================================
 
 typedef struct _MaterialProps
@@ -44,7 +43,7 @@ typedef struct _MaterialProps
     // Used by the application, not the engine.  Nice to have it here
     uint32_t                RenderPassMask;
 
-    // Material Flags
+    // MaterialBase Flags
     // Need one per render target layer.  Usually this will be one, but not for MRTs
     uint32_t                            NumBlendStates;
     VkPipelineColorBlendAttachmentState BlendStates[MAX_GMEM_OUTPUT_LAYERS];
@@ -66,7 +65,7 @@ typedef struct _MaterialProps
     ShaderInfo*             pShader;
 
     // Textures (responsibility of owner to clean up)
-    Texture*                pTexture[MAX_MATERIAL_SAMPLERS];
+    TextureBase*                pTexture[MAX_MATERIAL_SAMPLERS];
 
     // Constant Buffers
     uint32_t                VertUniformOffset;
@@ -90,7 +89,7 @@ typedef struct _MaterialProps
 
     // Helper Functions
     void                    InitOneLayout(Vulkan*);
-    bool                    InitOnePipeline(Vulkan*, Mesh<Vulkan>* pMesh, uint32_t TargetWidth, uint32_t TargetHeight, VkRenderPass RenderPass);
+    bool                    InitOnePipeline(Vulkan*, Mesh<Vulkan>* pMesh, uint32_t TargetWidth, uint32_t TargetHeight, const RenderContext<Vulkan>& renderingPassContext);
     bool                    InitDescriptorPool(Vulkan*);
     bool                    InitDescriptorSet(Vulkan*);
 

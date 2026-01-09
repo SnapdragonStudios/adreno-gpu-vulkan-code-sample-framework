@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -16,23 +16,23 @@ struct AHardwareBuffer_Desc;
 struct AHardwareBuffer;
 template<typename T_GFXAPI> class MemoryManager;
 template<typename T_GFXAPI> class MemoryCpuMappedUntyped;
-template<typename T_GFXAPI> class BufferT;
+template<typename T_GFXAPI> class Buffer;
 template<typename T_GFXAPI, typename T_BUFFERTYPE> class MemoryCpuMapped;
 
 
 /// @brief Base class (virtual) for memory buffers.  Platform agnostic.
-class Buffer
+class BufferBase
 {
-    Buffer(const Buffer&) = delete;
-    Buffer& operator=(const Buffer&) = delete;
+    BufferBase(const BufferBase&) = delete;
+    BufferBase& operator=(const BufferBase&) = delete;
 protected:
-    Buffer() noexcept {};
+    BufferBase() noexcept {};
 public:
-    virtual ~Buffer() {}
+    virtual ~BufferBase() {}
     virtual void Destroy() = 0;
 
-    Buffer(Buffer&&) noexcept = default;
-    Buffer& operator=(Buffer&&) noexcept = default;
+    BufferBase(BufferBase&&) noexcept = default;
+    BufferBase& operator=(BufferBase&&) noexcept = default;
 };
 
 
@@ -43,7 +43,7 @@ class MapGuard : public MemoryCpuMapped<T_GFXAPI, T>
     MapGuard& operator=(const MapGuard&) = delete;
     MapGuard& operator=(MapGuard&& other) = delete;
 public:
-    MapGuard( BufferT< T_GFXAPI>& buffer, MemoryCpuMapped<T_GFXAPI, T> mapped)
+    MapGuard( Buffer< T_GFXAPI>& buffer, MemoryCpuMapped<T_GFXAPI, T> mapped)
         : MemoryCpuMapped<T_GFXAPI, T>(std::move(mapped))	// Only ever one owner of a MemoryCpuMapped
         , mBuffer(&buffer)						// not passed as a pointer so we know it's never initialized null
     {}
@@ -67,7 +67,7 @@ public:
         other.mBuffer = nullptr;
     }
 private:
-    BufferT< T_GFXAPI>* mBuffer;
+    Buffer< T_GFXAPI>* mBuffer;
 };
 
 
@@ -75,16 +75,16 @@ private:
 /// Expected for only the specialized version to be used!
 /// @ingroup Memory
 template<typename T_GFXAPI>
-class BufferT : public Buffer
+class Buffer : public BufferBase
 {
-    BufferT& operator=(const BufferT&) = delete;
-    BufferT(const BufferT&) = delete;
+    Buffer& operator=(const Buffer&) = delete;
+    Buffer(const Buffer&) = delete;
 protected:
 public:
-    BufferT() noexcept = delete;                    // this template class must be specialized
-    virtual ~BufferT() = delete;                    // this template class must be specialized
-    BufferT(BufferT&&) noexcept = delete;           // this template class must be specialized
-    BufferT& operator=(BufferT&&) noexcept = delete;// this template class must be specialized
+    Buffer() noexcept = delete;                    // this template class must be specialized
+    virtual ~Buffer() = delete;                    // this template class must be specialized
+    Buffer(Buffer&&) noexcept = delete;           // this template class must be specialized
+    Buffer& operator=(Buffer&&) noexcept = delete;// this template class must be specialized
 
     /// destroy buffer and leave in a state where it could be re-initialized
     void Destroy() override = delete;               // this template class must be specialized
@@ -93,6 +93,6 @@ public:
     template<typename T>
     MapGuard<T_GFXAPI, T> Map() = delete;           // this template class must be specialized
 
-    static_assert(sizeof(BufferT<T_GFXAPI>) != sizeof(Buffer));   // Ensure this class template is specialized (and not used as-is)
+    static_assert(sizeof(Buffer<T_GFXAPI>) != sizeof(BufferBase));   // Ensure this class template is specialized (and not used as-is)
 };
 

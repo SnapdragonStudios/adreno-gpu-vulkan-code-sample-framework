@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -36,7 +36,8 @@ public:
     /// @param frameTime time in seconds since last Update.
     /// @param position in - current camera position, out - camera position after applying controller
     /// @param rot in - current camera rotation, out - camera rotation after applying controller
-    void Update(float frameTime, glm::vec3& position, glm::quat& rot) override;
+    /// @param cut in - current camera cut, out - camera cut after applying controller
+    void Update(float frameTime, glm::vec3& position, glm::quat& rot, bool& cut) override;
 
 protected:
     glm::vec2   m_LastMovementTouchPosition;

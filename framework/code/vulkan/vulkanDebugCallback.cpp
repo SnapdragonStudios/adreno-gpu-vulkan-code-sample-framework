@@ -1,10 +1,10 @@
-//============================================================================================================
+//=============================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
+//                  Copyright (c) 2020 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//============================================================================================================
+//==============================================================================
 
 #include "vulkanDebugCallback.hpp"
 #include "system/os_common.h"
@@ -183,7 +183,7 @@ VkBool32 VulkanDebugCallback::DebugCallback(VkDebugReportFlagsEXT Flags, VkDebug
     {
         LOGI("%s", szBuffer);
     }
-    LOGE("********** Validation Message - End **********");
+    LOGE("********** Validation Message - End **********"); 
 
     // Return "True" to cause layer to bail out and command is NOT sent to Vulkan
     // Return "False" to send it to the Vulkan layer (behave like final product)

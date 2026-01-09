@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -137,24 +137,51 @@ public:
 };
 
 
-/// @brief Class describing a Vulkan extension and base class for defining extension behaviour and hooks into Vulkan calls
-class VulkanExtension
+/// @brief Enumeration of the Vulkan extension type (eg Device extension or Instance extansion).
+enum class VulkanExtensionType { eDevice, eInstance, eLayer };
+
+/// @brief Enumeration of the Vulkan extension status (eg loading state of an extension).
+enum class VulkanExtensionStatus { eUninitialized, eOptional, eRequired, eLoaded };
+
+/// @brief Enumeration for how extension is to be loaded.
+/// eDefault - request extension from vulkan normally (to spec).  THIS IS THE OPTION TO USE ALMOST ALWAYS!
+/// eForceLoad - ignore list of extensions reported by vulkan driver and request this extension anyways.  This is for developement/private driver extensions use at your own risk.
+/// eSkipRequest - if not in the list of extensions reported by vulkan dont request this extension, but act as if it is enabled (do initialization and mark extension as loaded).  This is for developement/private driver extensions use at your own risk.
+enum class VulkanExtensionLoadMode { eDefault, eForceLoad, eSkipRequest };
+
+/// @brief Class describing a Vulkan extension base for defining extension behaviour and hooks into Vulkan calls
+class VulkanExtensionBase
+{
+    VulkanExtensionBase(const VulkanExtensionBase&) = delete;             // Functionality built on VulkanExtension assumes this class remains fixed in memory
+    VulkanExtensionBase& operator=(const VulkanExtensionBase&) = delete;
+public:
+    static constexpr std::array<const char* const, 4> cStatusNames{"Uninitialized", "Optional", "Required", "Loaded"};
+
+    VulkanExtensionBase(std::string name, VulkanExtensionStatus status = VulkanExtensionStatus::eUninitialized, uint32_t version = 0) noexcept : Name(name), Status(status), Version(version) {}
+    virtual ~VulkanExtensionBase() = default;
+
+    const std::string                   Name;
+    VulkanExtensionStatus               Status = VulkanExtensionStatus::eUninitialized;
+    VulkanExtensionLoadMode             LoadMode = VulkanExtensionLoadMode::eDefault;
+    uint32_t                            Version = 0;            ///< Extension version (from Driver)
+
+    /// Register this extension with Vulkan. Typically will call Vulkan::AddExtensionHooks if the extension needs to hook in to any functionality.
+    virtual void Register(Vulkan& vulkan) {/*does not have to be derived from (or do anything)*/ }
+private:
+};
+
+
+/// @brief Class describing a Vulkan extension templated against the what the extension is extending (ie Instance or Device extsnion)
+template<VulkanExtensionType T_TYPE>
+class VulkanExtension : public VulkanExtensionBase
 {
     VulkanExtension( const VulkanExtension& ) = delete;             // Functionality built on VulkanExtension assumes this class remains fixed in memory
     VulkanExtension& operator=( const VulkanExtension& ) = delete;
 public:
-    enum eStatus { eUninitialized, eOptional, eRequired, eLoaded };
-    static constexpr std::array<const char* const, 4> cStatusNames { "Uninitialized", "Optional", "Required", "Loaded" };
+    static const VulkanExtensionType Type = T_TYPE;
 
-    VulkanExtension( std::string name, VulkanExtension::eStatus status = eUninitialized, uint32_t version = 0 ) noexcept : Status( status ), Name( name ), Version( version ) {}
+    VulkanExtension( std::string name, VulkanExtensionStatus status = VulkanExtensionStatus::eUninitialized, uint32_t version = 0 ) noexcept : VulkanExtensionBase(name, status, version ) {}
     virtual ~VulkanExtension() = default;
 
-    eStatus             Status = eUninitialized;
-    const std::string   Name;
-    uint32_t            Version = 0;            ///< Extension version (from Driver)
-
-    /// Register this extension with Vulkan. Typically will call Vulkan::AddExtensionHooks if the extension needs to hook in to any functionality.
-    virtual void Register( Vulkan& vulkan ) {/*does not have to be derived from (or do anything)*/ }
+    virtual void PostLoad() {}      //< Function called after extension is loaded (eg after VkCreateDevice).  Can be overridden.
 };
-
-

@@ -1,0 +1,10 @@
+#ignore exerything in external (expected to be populated by cmake fetchcontent)
+*
+
+# Except build/housekeeping
+!CMakeLists.txt
+!.gitignore
+
+# and select externals checked into our repository
+!blueNoisei/*
+

@@ -1,0 +1,9 @@
+// ************************************
+// General Settings
+// ************************************
+gSurfaceWidth = 1280
+gSurfaceHeight = 720
+
+gRenderWidth = 1280
+gRenderHeight = 720
+gMsaaSamples = 1

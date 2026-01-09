@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -12,12 +12,12 @@
 #include <vector>
 #include <future>
 #include <memory>
-#include <vulkan/vulkan.h>
+#include <volk/volk.h>
 #include "material/shaderModule.hpp"
 
 // Forward declarations
 class AssetManager;
-class DescriptorSetLayout;
+class DescriptorSetLayoutBase;
 class ShaderPassDescription;
 class VertexDescription;
 class VertexFormat;
@@ -26,13 +26,13 @@ class Vulkan;
 /// Wrapper around a Vulkan VkShaderModule.
 /// @ingroup Material
 template<>
-class ShaderModuleT<Vulkan> : public ShaderModule
+class ShaderModule<Vulkan> : public ShaderModuleBase
 {
-    ShaderModuleT(const ShaderModuleT<Vulkan>&) = delete;
-    ShaderModuleT& operator=(const ShaderModuleT<Vulkan>&) = delete;
+    ShaderModule(const ShaderModule<Vulkan>&) = delete;
+    ShaderModule& operator=(const ShaderModule<Vulkan>&) = delete;
 public:
-    ShaderModuleT() noexcept;
-    ~ShaderModuleT();
+    ShaderModule() noexcept;
+    ~ShaderModule();
 
     /// Free up the vkShaderModule resource.
     void Destroy(Vulkan&);

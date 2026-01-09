@@ -1,12 +1,13 @@
-//============================================================================================================
+//=============================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
+//                  Copyright (c) 2020 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//============================================================================================================
+//==============================================================================
 
 #include "materialProps.h"
+#include <cstring>
 #include "system/os_common.h"
 #include "memory/vulkan/indexBufferObject.hpp"
 #include "memory/vulkan/uniform.hpp"
@@ -87,12 +88,9 @@ void MaterialProps::InitOneLayout(Vulkan* pVulkan)
 }
 
 //-----------------------------------------------------------------------------
-bool MaterialProps::InitOnePipeline(Vulkan* pVulkan, Mesh<Vulkan>* pMesh, uint32_t TargetWidth, uint32_t TargetHeight, VkRenderPass RenderPass)
+bool MaterialProps::InitOnePipeline(Vulkan* pVulkan, Mesh<Vulkan>* pMesh, uint32_t TargetWidth, uint32_t TargetHeight, const RenderContext<Vulkan>& renderingPassContext)
 //-----------------------------------------------------------------------------
 {
-    // This is based on a specific mesh at this point
-    // TODO: How do I do multiple meshes?
-
     // Raster State
     VkPipelineRasterizationStateCreateInfo RasterState{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
     RasterState.flags = 0;
@@ -204,18 +202,25 @@ bool MaterialProps::InitOnePipeline(Vulkan* pVulkan, Mesh<Vulkan>* pMesh, uint32
     // Grab the vertex input state for the vertex buffer we will be binding.
     VkPipelineVertexInputStateCreateInfo visci = pMesh->m_VertexBuffers[0].CreatePipelineState();
 
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+    };
+
     if( !pVulkan->CreatePipeline( PipelineCache,
                                   &visci,
                                   PipelineLayout,
-                                  RenderPass,
-                                  0,//subpass,
+                                  renderingPassContext,
                                   &RasterState,
                                   &DepthStencilInfo,
                                   &BlendStateInfo,
                                   nullptr,//default multisample state
+                                  &inputAssemblyState,
                                   dynamicStateEnables,
                                   &Viewport,
                                   &Scissor,
+                                  VK_NULL_HANDLE,//task shader
+                                  VK_NULL_HANDLE,//mesh shader
                                   pShader->VertShaderModule.GetVkShaderModule(),
                                   pShader->FragShaderModule.GetVkShaderModule(),
                                   nullptr,//specializationInfo

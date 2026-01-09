@@ -1,13 +1,13 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <volk/volk.h>
 #include "memory/buffer.hpp"
 #include "memory/memory.hpp"
 #include "memoryManager.hpp"
@@ -16,23 +16,22 @@
 // Forward declarations
 struct AHardwareBuffer_Desc;
 struct AHardwareBuffer;
-template<typename T_GFXAPI> class BufferT;
+template<typename T_GFXAPI> class Buffer;
 
-using BufferVulkan = BufferT<Vulkan>;
 
 /// Defines a simple (vulkan specialized) object for creating and holding Vulkan memory buffer objects.
 /// @ingroup Memory
 template<>
-class BufferT<Vulkan> : public Buffer
+class Buffer<Vulkan> : public BufferBase
 {
-    BufferT<Vulkan>& operator=(const BufferT<Vulkan>&) = delete;
-    BufferT(const BufferT<Vulkan>&) = delete;
+    Buffer<Vulkan>& operator=(const Buffer<Vulkan>&) = delete;
+    Buffer(const Buffer<Vulkan>&) = delete;
 protected:
 public:
-    BufferT();
-    virtual ~BufferT();
-	BufferT(BufferT<Vulkan>&&) noexcept;
-	BufferT& operator=(BufferT<Vulkan>&&) noexcept;
+    Buffer();
+    virtual ~Buffer();
+	Buffer(Buffer<Vulkan>&&) noexcept;
+	Buffer& operator=(Buffer<Vulkan>&&) noexcept;
 
     using MemoryManager = MemoryManager<Vulkan>;
     using MemoryCpuMappedUntyped = MemoryCpuMappedUntyped<Vulkan>;
@@ -43,6 +42,9 @@ public:
 	bool Initialize(MemoryManager* pManager, size_t size, BufferUsageFlags bufferUsageFlags, MemoryUsage memoryUsage);
 	//bool Initialize(MemoryManager* pManager, BufferUsageFlags usageFlags, const AHardwareBuffer_Desc& hardwareBufferDesc, const void* initialData);
     //bool Initialize(MemoryManager* pManagere, BufferUsageFlags usageFlags, const AHardwareBuffer* pAHardwareBuffer);
+
+    bool Update(MemoryManager* pManager, size_t dataSize, const void* newData);
+    bool GetMeshData(MemoryManager* pManager, size_t dataSize, void* outputData) const;
 
     /// destroy buffer and leave in a state where it could be re-initialized
     virtual void Destroy();

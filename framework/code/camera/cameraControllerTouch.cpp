@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,12 +9,11 @@
 #include "cameraControllerTouch.hpp"
 
 static const float cMouseRotSpeed = 0.1f;
-static const float cMouseMoveSpeeed = 0.001f;
+static const float cTouchMoveSpeedMultipler = 0.001f;
 
 // Helpers
-constexpr glm::vec3 cVecUp = glm::vec3(0.0f, 1.0f, 0.0f);
-constexpr glm::vec3 cVecRight = glm::vec3(1.0f, 0.0f, 0.0f);
-constexpr glm::vec3 cVecForward = glm::vec3(0.0f, 0.0f, -1.0f);
+constexpr glm::vec3 cVecViewRight = glm::vec3( 1.0f, 0.0f, 0.0f );    // x-direction (vector pointing to right of screen)!
+constexpr glm::vec3 cVecViewForward = glm::vec3( 0.0f, 0.0f, -1.0f ); // z-direction (vector pointing into screen)
 
 
 //-----------------------------------------------------------------------------
@@ -92,24 +91,27 @@ void CameraControllerTouch::TouchUpEvent(int iPointerID, float xPos, float yPos)
 
 //-----------------------------------------------------------------------------
 
-void CameraControllerTouch::Update(float frameTime, glm::vec3& position, glm::quat& rot)
+void CameraControllerTouch::Update(float frameTime, glm::vec3& position, glm::quat& rot, bool& cut)
 {
+    cut = false;
     if (m_LookaroundTouchId != -1)
     {
         auto mouseDiff = m_LastLookaroundTouchPosition - m_CurrentLookaroundTouchPosition;
         auto angleChange = mouseDiff * frameTime * m_RotateSpeed;
 
         m_LastLookaroundTouchPosition = m_CurrentLookaroundTouchPosition;
-        rot = glm::angleAxis(angleChange.y, cVecForward) * rot * glm::angleAxis(angleChange.x, cVecUp);
+        // one (touch) rotation axis is relative to the view direction, other is relative to world - prevents camera from 'twisting' although does introduce gimbal when looking along the UP axis and rotationg left/right.
+        rot = glm::angleAxis( angleChange.x, m_WorldUp ) * rot * glm::angleAxis( angleChange.y, cVecViewRight );
+        rot = glm::normalize( rot );
     }
 
     if (m_MovementTouchId != -1)
     {
         auto mouseDiff = m_LastMovementTouchPosition - m_CurrentMovementTouchPosition;
-        auto directionChange = mouseDiff * frameTime * m_MoveSpeed;
+        auto directionChange = mouseDiff * frameTime * m_MoveSpeed * cTouchMoveSpeedMultipler;
 
-        position -= (cVecRight * directionChange.x) * rot;
-        position += (cVecForward * directionChange.y) * rot;
+        position -= rot * cVecViewRight * directionChange.x;
+        position += rot * cVecViewForward * directionChange.y;
     }
 }
 

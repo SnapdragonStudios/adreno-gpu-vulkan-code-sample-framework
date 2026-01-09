@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -13,7 +13,7 @@
 #include <iterator>
 #include <optional>
 #include <string>
-#include "glm\gtx\quaternion.hpp"
+#include "glm/gtx/quaternion.hpp"
 
 static const glm::quat cRotateToYUp{ 0.7071067094802856f, -0.7071068286895752f, 0.f, 0.f };
 static const glm::quat cIdentityRotate = glm::identity<glm::quat>();
@@ -167,7 +167,7 @@ AnimationIterator AnimationList::MakeIterator(const Animation& animation)
 }
 
 // Recalculate matrix array (one per nodeId)
-void AnimationList::UpdateSkeletonMatrixes(const Skeleton& skeleton, AnimationIterator& iterator, std::span<glm::mat3x4> nodeMatrixs)
+void AnimationList::UpdateSkeletonMatrixes(const Skeleton& skeleton, AnimationIterator& iterator, std::span<glm::mat4> nodeMatrixs)
 {
     const Animation& animation = iterator.animation;
     float time = iterator.time;
@@ -175,26 +175,16 @@ void AnimationList::UpdateSkeletonMatrixes(const Skeleton& skeleton, AnimationIt
     const auto& animationDataNodes = animation.GetAnimationData().GetNodes();
     assert(animationDataNodes.size() == iterator.nodeIterators.size());
 
-    for (uint32_t animationNodeIndex =0; animationNodeIndex<(uint32_t)iterator.nodeIterators.size(); ++animationNodeIndex)
+    for (uint32_t animationNodeIndex = 0; animationNodeIndex < (uint32_t)iterator.nodeIterators.size(); ++animationNodeIndex)
     {
         const auto& nodeId = animationDataNodes[animationNodeIndex].NodeId; // gltf/nodeMatrixs id/index
 
-        glm::mat4 Matrix = glm::translate(animation.CalcLocalTranslation(animationNodeIndex, time, iterator.nodeIterators[animationNodeIndex].frameIdx ));
-        Matrix = Matrix * glm::toMat4(animation.CalcLocalRotation(animationNodeIndex, time, iterator.nodeIterators[animationNodeIndex].frameIdx));
-        Matrix = Matrix * glm::scale(animation.CalcLocalScale(animationNodeIndex, time, iterator.nodeIterators[animationNodeIndex].frameIdx));
+        glm::mat4 matrix = glm::translate(animation.CalcLocalTranslation(animationNodeIndex, time, iterator.nodeIterators[animationNodeIndex].frameIdx));
+        matrix = matrix * glm::toMat4(animation.CalcLocalRotation(animationNodeIndex, time, iterator.nodeIterators[animationNodeIndex].frameIdx));
+        matrix = matrix * glm::scale(animation.CalcLocalScale(animationNodeIndex, time, iterator.nodeIterators[animationNodeIndex].frameIdx));
 
-        nodeMatrixs[nodeId] = glm::transpose(Matrix);
-
-        const SkeletonNodeData* skeletonNodeData = skeleton.GetSkeletonData().GetNodeById(nodeId);
-        const SkeletonNodeData* skeletonNodeDataParent = skeletonNodeData->Parent();
-        if (skeletonNodeDataParent)
-        {
-            nodeMatrixs[nodeId] = Matrix * nodeMatrixs[skeletonNodeDataParent->NodeId()];
-        }
-        for (const auto& child : skeletonNodeData->Children())
-        {
-            auto childWorld =  Matrix * child.LocalTransform();
-            nodeMatrixs[child.NodeId()] = glm::transpose(childWorld);
-        }
+        nodeMatrixs[nodeId] = matrix;
     }
+
+    skeleton.TransformLocalToWorld(nodeMatrixs, nodeMatrixs);
 }

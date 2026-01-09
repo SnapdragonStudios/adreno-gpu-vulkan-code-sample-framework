@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -162,6 +162,7 @@ static void CalculateTangentAndBitangent(const float* objNormal, const glm::vec3
 void MeshObjectIntermediate::Release()
 {
     std::vector<FatVertex>().swap(m_VertexBuffer);  // use swap so we know the memory disappears (clear may leave the memory 'reserved').
+    std::vector<FatWeight>().swap(m_WeightBuffer);
     std::vector<MaterialDef>().swap(m_Materials);
     m_Transform = glm::identity<glm::mat4>();
     m_NodeId = -1;
@@ -212,22 +213,30 @@ MeshObjectIntermediate MeshObjectIntermediate::CopyFlattened() const
     std::visit([&](auto& m)
         {
             using T = std::decay_t<decltype(m)>;
-            if constexpr (std::is_same_v<T, std::vector<uint32_t>> || std::is_same_v<T, std::vector<uint16_t>>)
+            if constexpr (std::is_same_v<T, std::vector<uint32_t>> || std::is_same_v<T, std::vector<uint16_t>> || std::is_same_v<T, std::vector<uint8_t>>)
             {
-                dst.m_VertexBuffer.reserve(m.size());
-                for (const auto index : m )
+                dst.m_VertexBuffer.resize(m.size());
+                std::transform(std::begin(m), std::end(m), std::begin(dst.m_VertexBuffer), [this](const auto index) {
+                    return this->m_VertexBuffer[index];
+                });
+                if (!this->m_WeightBuffer.empty())
                 {
-                    dst.m_VertexBuffer.push_back(this->m_VertexBuffer[index]);
+                    dst.m_WeightBuffer.resize(m.size());
+                    std::transform(std::begin(m), std::end(m), std::begin(dst.m_WeightBuffer), [this](const auto index) {
+                        return this->m_WeightBuffer[index];
+                    });
                 }
             }
             else
             {
                 dst.m_VertexBuffer = m_VertexBuffer;
+                dst.m_WeightBuffer = m_WeightBuffer;
             }
         }, this->m_IndexBuffer);
     dst.m_Materials = m_Materials;
     dst.m_Transform = m_Transform;
     dst.m_NodeId = m_NodeId;
+    dst.m_WeightsPerVertex = m_WeightsPerVertex;
     return dst;
 }
 
@@ -338,6 +347,7 @@ std::vector<MeshObjectIntermediate> MeshObjectIntermediate::LoadObj(AssetManager
                     materials[faceMaterialId].specular_texname,
                     0.5f,                                           // metallicFactor
                     0.5f,                                           // roughnessFactor
+                    glm::vec3(0.0f),                                // emissiveFactor
                     !materials[faceMaterialId].alpha_texname.empty(),
                     materials[faceMaterialId].illum == 7
                 });
@@ -497,7 +507,7 @@ MeshObjectIntermediate MeshObjectIntermediate::CreateScreenSpaceTriMesh()
 // String literal lower case hash (constexpr)
 constexpr FnvHashLower operator "" _h(const char* str, size_t) { return FnvHashLower(str); }
 
-std::vector<uint32_t> MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(const std::span<const MeshObjectIntermediate::FatVertex>& fatVertexBuffer, const VertexFormat& vertexFormat)
+std::vector<uint32_t> MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(const std::span<const MeshObjectIntermediate::FatVertex>& fatVertexBuffer, const std::span<const MeshObjectIntermediate::FatWeight>& fatWeightBuffer, const VertexFormat& vertexFormat)
 {
     //
     // Determine the arrangement of the output data (based on the vertexFormat)
@@ -509,6 +519,8 @@ std::vector<uint32_t> MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(con
     int colorIndex = -1;
     int tangentIndex = -1;
     int bitangentIndex = -1;
+    int jointIndex = -1;
+    int weightIndex = -1;
 
     for (int i = 0; i < vertexFormat.elementIds.size(); ++i)
     {
@@ -535,30 +547,46 @@ std::vector<uint32_t> MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(con
         case "Bitangent"_h:
             bitangentIndex = i;
             break;
+        case "Joint"_h:
+            jointIndex = i;
+            break;
+        case "Weight"_h:
+            weightIndex = i;
+            break;
         default:
             LOGE("Cannot map vertex elementId %s to the mesh data", elementId.c_str());
             break;
         }
     }
 
-    const uint32_t destSpan32 = (uint32_t)vertexFormat.span / 4;  // span of output data (in 32bit words)
-    assert((vertexFormat.span & 3) == 0);   // does not support spans that are not a multiple of 4
+    const size_t numVertices = fatVertexBuffer.size();
 
-    // Determine the mapping between the FatVertex (input) data and the output VertexFormat items
-    std::array<int, sizeof(MeshObjectIntermediate::FatVertex) / sizeof(float)> copyOffsets;
-    memset(copyOffsets.data(), -1, sizeof(copyOffsets));
-    for (const std::pair<uint32_t, int>& srcOffset_DestIndex : {
-        std::pair<uint32_t, int>((uint32_t)offsetof(MeshObjectIntermediate::FatVertex, position) / 4, positionIndex),
-        std::pair<uint32_t, int>((uint32_t)offsetof(MeshObjectIntermediate::FatVertex, normal) / 4, normalIndex),
-        std::pair<uint32_t, int>((uint32_t)offsetof(MeshObjectIntermediate::FatVertex, color) / 4, colorIndex),
-        std::pair<uint32_t, int>((uint32_t)offsetof(MeshObjectIntermediate::FatVertex, uv0) / 4, uv0Index),
-        std::pair<uint32_t, int>((uint32_t)offsetof(MeshObjectIntermediate::FatVertex, tangent) / 4, tangentIndex),
-        std::pair<uint32_t, int>((uint32_t)offsetof(MeshObjectIntermediate::FatVertex, bitangent) / 4, bitangentIndex) })
+    // Determine the mapping between the FatVertex / FatWeight (input) data and the output VertexFormat items
+    struct SrcToDstMapping {
+        size_t srcOffset;
+        int destIndex;
+        int* srcOffsetArray;
+    };
+    std::array<int, sizeof(MeshObjectIntermediate::FatVertex) / sizeof(uint32_t)> copyOffsets;
+    std::array<int, sizeof(MeshObjectIntermediate::FatWeight) / sizeof(uint32_t)> copyWeightOffsets;
+    copyOffsets.fill(-1);
+    copyWeightOffsets.fill(-1);
+    for (const auto& srcOffset_DestIndex : {
+        SrcToDstMapping{offsetof(MeshObjectIntermediate::FatVertex, position) / 4, positionIndex, copyOffsets.data()},
+        SrcToDstMapping{offsetof(MeshObjectIntermediate::FatVertex, normal) / 4, normalIndex, copyOffsets.data()},
+        SrcToDstMapping{offsetof(MeshObjectIntermediate::FatVertex, color) / 4, colorIndex, copyOffsets.data()},
+        SrcToDstMapping{offsetof(MeshObjectIntermediate::FatVertex, uv0) / 4, uv0Index, copyOffsets.data()},
+        SrcToDstMapping{offsetof(MeshObjectIntermediate::FatVertex, tangent) / 4, tangentIndex, copyOffsets.data()},
+        SrcToDstMapping{offsetof(MeshObjectIntermediate::FatVertex, bitangent) / 4, bitangentIndex, copyOffsets.data()},
+        SrcToDstMapping{offsetof(MeshObjectIntermediate::FatWeight, joint) / 4, jointIndex, copyWeightOffsets.data()},
+        SrcToDstMapping{offsetof(MeshObjectIntermediate::FatWeight, weight) / 4, weightIndex, copyWeightOffsets.data()},
+         })
     {
-        int destIndex = srcOffset_DestIndex.second;
+        const int destIndex = srcOffset_DestIndex.destIndex;
         if (destIndex != -1)
         {
-            uint32_t srcOffset32 = srcOffset_DestIndex.first;
+            uint32_t srcOffset32 = srcOffset_DestIndex.srcOffset;
+            int* srcOffsetArray = srcOffset_DestIndex.srcOffsetArray;
             uint32_t destOffset = vertexFormat.elements[destIndex].offset;
             assert((destOffset & 3) == 0);      // cannot handle non 4 byte aligned data
             destOffset /= 4;
@@ -566,13 +594,13 @@ std::vector<uint32_t> MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(con
             switch (destSize)
             {
             case 16:
-                copyOffsets[srcOffset32++] = destOffset++;
+                srcOffsetArray[srcOffset32++] = destOffset++;
             case 12:
-                copyOffsets[srcOffset32++] = destOffset++;
+                srcOffsetArray[srcOffset32++] = destOffset++;
             case 8:
-                copyOffsets[srcOffset32++] = destOffset++;
+                srcOffsetArray[srcOffset32++] = destOffset++;
             case 4:
-                copyOffsets[srcOffset32++] = destOffset++;
+                srcOffsetArray[srcOffset32++] = destOffset++;
                 break;
             default:
                 assert(0);
@@ -581,17 +609,19 @@ std::vector<uint32_t> MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(con
         }
     }
 
-    const size_t numVertices = fatVertexBuffer.size();
+    const uint32_t destSpan32 = (uint32_t)vertexFormat.span / 4;  // span of output data (in 32bit words)
+    assert((vertexFormat.span & 3) == 0);   // does not support spans that are not a multiple of 4
 
     std::vector<uint32_t> outputData;
     outputData.resize(destSpan32 * numVertices, 0/*zero buffer*/);
 
-    uint32_t* pSrc = (uint32_t*)fatVertexBuffer.data();
+    const uint32_t* pSrc = (const uint32_t*)fatVertexBuffer.data();
+    const uint32_t* pSrcWeight = fatWeightBuffer.empty() ? nullptr : (const uint32_t*)fatWeightBuffer.data();
     uint32_t* pDst = outputData.data();
 
     for (size_t i = 0; i < numVertices; ++i)
     {
-        // Copy from tinyObjVertex to our buffer vertex format (compiler may decide to unroll this since copyOffsets.size() is known at compile time
+        // Copy vertex data from tinyObjVertex to our buffer vertex format (compiler may decide to unroll this since copyOffsets.size() is known at compile time
         for (uint32_t srcOffset = 0; srcOffset < copyOffsets.size(); ++srcOffset)
         {
             if (copyOffsets[srcOffset] >= 0)
@@ -599,6 +629,15 @@ std::vector<uint32_t> MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(con
                 pDst[copyOffsets[srcOffset]] = *pSrc;
             }
             ++pSrc;
+        }
+        // Copy vertex weights and joint idxs from tinyObjVertex to our buffer vertex format (compiler may decide to unroll this since copyWeightOffsets.size() is known at compile time
+        for (uint32_t srcOffset = 0; srcOffset < copyWeightOffsets.size(); ++srcOffset)
+        {
+            if (copyWeightOffsets[srcOffset] >= 0)
+            {
+                pDst[copyWeightOffsets[srcOffset]] = *pSrcWeight;
+            }
+            ++pSrcWeight;
         }
         pDst += destSpan32;
     }   // WhichVert
@@ -718,7 +757,7 @@ size_t MeshObjectIntermediate::CalcNumTriangles() const
     return std::visit( [&]( const auto& m )
         {
             using T = std::decay_t<decltype(m)>;
-            if constexpr (std::is_same_v<T, std::vector<uint32_t>> || std::is_same_v<T, std::vector<uint16_t>>)
+            if constexpr (std::is_same_v<T, std::vector<uint32_t>> || std::is_same_v<T, std::vector<uint16_t>> || std::is_same_v<T, std::vector<uint8_t>>)
             {
                 return m.size() / 3;
             }
@@ -741,7 +780,9 @@ size_t MeshObjectIntermediate::CalcNumTriangles() const
             if (!material.diffuseFilename.empty())
                 textureNames.insert(material.diffuseFilename);
             if (!material.bumpFilename.empty())
-                textureNames.insert(material.bumpFilename);
+                textureNames.insert( material.bumpFilename );
+            if (!material.specMapFilename.empty())
+                textureNames.insert( material.specMapFilename );
         }
     }
     std::vector<std::string> textureNamesVector;
@@ -841,11 +882,11 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
 
 
                 // We now know the  ModelData.accessors[] index for all our data.
-                for (uint32_t WhichAttrib = 0; WhichAttrib < NUM_GLTF_ATTRIBS; WhichAttrib++)
+                for (auto& attrib: AttribInfo)
                 {
-                    if (AttribInfo[WhichAttrib].AccessorIndx >= 0)
+                    if (attrib.AccessorIndx >= 0)
                     {
-                        const tinygltf::Accessor& AccessorData = ModelData.accessors[AttribInfo[WhichAttrib].AccessorIndx];
+                        const tinygltf::Accessor& AccessorData = ModelData.accessors[attrib.AccessorIndx];
                         const tinygltf::BufferView& ViewData = ModelData.bufferViews[AccessorData.bufferView];
                         int Stride = AccessorData.ByteStride(ViewData);
                         if (Stride < 0)
@@ -853,12 +894,12 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
                             printf("\nError loading %s: Cannot calculate data stride", m_filename.c_str());
                             return false;
                         }
-                        AttribInfo[WhichAttrib].BytesPerElem = Stride;
-                        AttribInfo[WhichAttrib].BytesTotal = ViewData.byteLength;
-                        AttribInfo[WhichAttrib].Count = (uint32_t) AccessorData.count;
+                        attrib.BytesPerElem = Stride;
+                        attrib.BytesTotal = ViewData.byteLength;
+                        attrib.Count = (uint32_t) AccessorData.count;
 
                         const tinygltf::Buffer& BufferData = ModelData.buffers[ViewData.buffer];
-                        AttribInfo[WhichAttrib].pData = (void*)(&BufferData.data.at(ViewData.byteOffset + AccessorData.byteOffset));
+                        attrib.pData = (void*)(&BufferData.data.at(ViewData.byteOffset + AccessorData.byteOffset));
                     }
                 }
 
@@ -901,12 +942,16 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
                 auto& meshObject = meshObjects.emplace_back();
 
                 // Pass up the mesh name 
+                meshObject.m_NodeName = NodeData.name;
                 meshObject.m_MeshName = MeshData.name;
 
                 // Set the object transform.
                 meshObject.m_Transform = m_ignoreTransforms ? glm::mat4{1.0f} : Transform;
                 meshObject.m_Transform[3] *= glm::vec4(m_globalScale, 1.0f);// Transform position needs scale applying, dont scale entire transform as the vertex data is scaled independantly (below).
                 meshObject.m_NodeId = (int)NodeIdx;
+
+                // Want the vertex color to be the base color from the material
+                glm::vec4 materialColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
 
                 if (materialIdx >= 0)/*-1 is valid*/
                 {
@@ -927,6 +972,9 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
                                                             material.pbrMetallicRoughness.baseColorFactor[1],
                                                             material.pbrMetallicRoughness.baseColorFactor[2],
                                                             material.pbrMetallicRoughness.baseColorFactor[3]);
+
+                    // Want the vertex color to be the base color from the material
+                    materialColor = baseColorFactor;
 
                     int normalIndex = material.normalTexture.index;
                     normalIndex = normalIndex >= 0 ? ModelData.textures[normalIndex].source : -1;
@@ -952,6 +1000,8 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
 
                         (float)material.pbrMetallicRoughness.roughnessFactor,
 
+                        glm::vec3(material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2]),
+
                         material.alphaMode == "MASK",
                         material.alphaMode == "BLEND" });
 
@@ -969,8 +1019,14 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
                 else if (AttribInfo[ATTRIB_INDICES].BytesPerElem == 2)
                 {
                     uint16_t* p16 = (uint16_t*)AttribInfo[ATTRIB_INDICES].pData;
-                    std::span<uint16_t> indicesSpan{ p16, NumIndices };
-                    meshObject.m_IndexBuffer.emplace< std::vector<uint16_t>>(indicesSpan.begin(), indicesSpan.end());
+                    std::span<uint16_t> indicesSpan{p16, NumIndices};
+                    meshObject.m_IndexBuffer.emplace< std::vector<uint16_t>>( indicesSpan.begin(), indicesSpan.end() );
+                }
+                else if (AttribInfo[ATTRIB_INDICES].BytesPerElem == 1)
+                {
+                    uint8_t* p8 = (uint8_t*)AttribInfo[ATTRIB_INDICES].pData;
+                    std::span<uint8_t> indicesSpan{p8, NumIndices};
+                    meshObject.m_IndexBuffer.emplace< std::vector<uint8_t>>( indicesSpan.begin(), indicesSpan.end() );
                 }
                 else
                 {
@@ -978,14 +1034,33 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
                     return false;
                 }
 
-                float* pPosition = (float*)AttribInfo[ATTRIB_POSITION].pData;
+                const float* pPosition = (const float*)AttribInfo[ATTRIB_POSITION].pData;
                 uint32_t positionIncr = AttribInfo[ATTRIB_POSITION].BytesPerElem / sizeof(float);
-                float* pNormals = (float*)AttribInfo[ATTRIB_NORMAL].pData;
+                const float* pNormals = (const float*)AttribInfo[ATTRIB_NORMAL].pData;
                 uint32_t normalIncr = AttribInfo[ATTRIB_NORMAL].BytesPerElem / sizeof(float);
-                float* pTangents = (float*)AttribInfo[ATTRIB_TANGENT].pData;
+                const float* pTangents = (const float*)AttribInfo[ATTRIB_TANGENT].pData;
                 uint32_t tangentIncr = AttribInfo[ATTRIB_TANGENT].BytesPerElem / sizeof(float);
-                float* pTexCoords = (float*)AttribInfo[ATTRIB_TEXCOORD_0].pData;
+                const float* pTexCoords = (const float*)AttribInfo[ATTRIB_TEXCOORD_0].pData;
                 uint32_t texCoordsIncr = AttribInfo[ATTRIB_TEXCOORD_0].BytesPerElem / sizeof(float);
+                const uint8_t* pJoints = (const uint8_t*)AttribInfo[ATTRIB_JOINTS_0].pData;
+                uint32_t jointsIncr = AttribInfo[ATTRIB_JOINTS_0].BytesPerElem / sizeof(uint8_t);
+                const float* pWeights = (const float*)AttribInfo[ATTRIB_WEIGHTS_0].pData;
+                uint32_t weightsIncr = AttribInfo[ATTRIB_WEIGHTS_0].BytesPerElem / sizeof(float);
+
+                if (pJoints)
+                {
+                    if (AttribInfo[ATTRIB_JOINTS_0].BytesPerElem != 4)
+                    {
+                        printf("\nError loading %s: Mesh has invalid BytesPerElem (%d) for joints", m_filename.c_str(), AttribInfo[ATTRIB_JOINTS_0].BytesPerElem);
+                        return false;
+                    }
+                    if (AttribInfo[ATTRIB_WEIGHTS_0].BytesPerElem != 16)
+                    {
+                        printf("\nError loading %s: Mesh has invalid BytesPerElem (%d) for weights", m_filename.c_str(), AttribInfo[ATTRIB_WEIGHTS_0].BytesPerElem);
+                        return false;
+                    }
+                    meshObject.m_WeightBuffer.reserve(NumPositions);
+                }
 
                 // The problem is that color can come in as unsigned short (not floats), so 
                 // can't access as a float pointer
@@ -994,7 +1069,8 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
 
                 for (uint32_t WhichVert = 0; WhichVert < NumPositions; ++WhichVert)
                 {
-                    MeshObjectIntermediate::FatVertex vertex = {};
+                    MeshObjectIntermediate::FatVertex vertex {};
+                    MeshObjectIntermediate::FatWeight jointWeights {.weight = {1.0f,0.0f,0.0f,0.0f}};
                     if (pPosition != nullptr)
                     {
                         vertex.position[0] = pPosition[0] * m_globalScale.x;
@@ -1077,10 +1153,11 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
                     }
                     else
                     {
-                        vertex.color[0] = 1.0f;
-                        vertex.color[1] = 1.0f;
-                        vertex.color[2] = 1.0f;
-                        vertex.color[3] = 1.0f;
+                        // Want the vertex color to be the base color from the material
+                        vertex.color[0] = materialColor.x;
+                        vertex.color[1] = materialColor.y;
+                        vertex.color[2] = materialColor.z;
+                        vertex.color[3] = materialColor.w;
                     }
 
                     if (AttribInfo[ATTRIB_NORMAL].pData != nullptr)
@@ -1103,6 +1180,25 @@ bool MeshObjectIntermediateGltfProcessor::operator()(const tinygltf::Model& Mode
 
                     vertex.material = materialIdx;
                     meshObject.m_VertexBuffer.push_back(vertex);
+
+                    if (pWeights != nullptr)
+                    {
+                        jointWeights.weight[0] = pWeights[0];
+                        jointWeights.weight[1] = pWeights[1];
+                        jointWeights.weight[2] = pWeights[2];
+                        jointWeights.weight[3] = pWeights[3];
+                        pWeights += weightsIncr;
+                    }
+                    if (pJoints)
+                    {
+                        jointWeights.joint[0] = pJoints[0];
+                        jointWeights.joint[1] = pJoints[1];
+                        jointWeights.joint[2] = pJoints[2];
+                        jointWeights.joint[3] = pJoints[3];
+                        pJoints += jointsIncr;
+
+                        meshObject.m_WeightBuffer.push_back(jointWeights);
+                    }
                 }
             }
         }

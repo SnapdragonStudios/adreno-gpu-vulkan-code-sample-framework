@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -13,7 +13,6 @@ class Vulkan;
 #include "bufferObject.hpp"
 #include "memory/indexBuffer.hpp"
 
-using IndexBufferObject = IndexBuffer<Vulkan>;
 
 // Template specialization for Vulkan Index buffer
 template<>
@@ -21,7 +20,7 @@ class IndexBuffer<Vulkan> final : public IndexBufferT<Vulkan>
 {
 public:
     IndexBuffer(IndexType i) noexcept : IndexBufferT<Vulkan>(i), mVkIndexType( IndexTypeToVk(i) ) {}
-    //IndexBufferObject(VkIndexType) noexcept;
+    //IndexBuffer(VkIndexType) noexcept;
     IndexBuffer(IndexBuffer<Vulkan>&& o) noexcept : IndexBufferT(std::move(static_cast<IndexBufferT<Vulkan>&&>(o))), mVkIndexType( o.mVkIndexType ) {}
     IndexBuffer<Vulkan>& operator=(IndexBuffer<Vulkan>&& o) noexcept { assert(mVkIndexType == o.mVkIndexType); IndexBufferT<Vulkan>::operator=(std::move(static_cast<IndexBuffer<Vulkan> &&>(o))); return *this; };
     ~IndexBuffer() {}

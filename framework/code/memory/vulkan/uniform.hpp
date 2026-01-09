@@ -1,10 +1,10 @@
-//============================================================================================================
+//=============================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
+//                  Copyright (c) 2020 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//============================================================================================================
+//==============================================================================
 #pragma once
 
 /// @file uniform.hpp
@@ -14,12 +14,13 @@
 #include "memoryMapped.hpp"
 #include "memory/memory.hpp"
 #include "memory/uniform.hpp"
-#include <vulkan/vulkan.h>
+#include <volk/volk.h>
 
 // forward defines
 class Vulkan;
 template<typename T_GFXAPI> struct Uniform;
 using UniformVulkan = Uniform<Vulkan>;
+template<size_t T_NUM_BUFFERS> using UniformVulkanArray = UniformArray<Vulkan, T_NUM_BUFFERS>;
 
 /// All the variables needed to create a uniform buffer
 template<>
@@ -31,6 +32,7 @@ struct Uniform<Vulkan>
     Uniform(Uniform<Vulkan>&&) noexcept;
     MemoryAllocatedBuffer<Vulkan, VkBuffer> buf;
     VkDescriptorBufferInfo bufferInfo;
+    bool IsEmpty() const { return !buf; }
 };
 
 /// Uniform buffer array that can be updated every frame without stomping the in-flight uniform buffers.
@@ -42,8 +44,9 @@ struct UniformArray<Vulkan, T_NUM_BUFFERS>
     UniformArray& operator=(const UniformArray&) = delete;
     UniformArray(UniformArray&&) noexcept { assert(0); }
     std::array<MemoryAllocatedBuffer<Vulkan, VkBuffer>, T_NUM_BUFFERS> buf;
-    std::array<VkBuffer, T_NUM_BUFFERS> vkBuffers{};  ///< copy of VkBuffer handles (for easy use in bindings etc)
+    std::array<VkBuffer, T_NUM_BUFFERS> bufferHandles{};  ///< copy of VkBuffer handles (for easy use in bindings etc)
     constexpr size_t size() const { return T_NUM_BUFFERS; }
+    bool IsEmpty() const { return !buf[0]; }
 };
 
 
@@ -82,7 +85,7 @@ bool CreateUniformBuffer(Vulkan* pVulkan, UniformArray<Vulkan, T_NUM_BUFFERS>& r
     {
         if (!CreateUniformBuffer(pVulkan, rNewUniform.buf[i], dataSize, pData, usage))
             return false;
-        rNewUniform.vkBuffers[i] = rNewUniform.buf[i].GetVkBuffer();
+        rNewUniform.bufferHandles[i] = rNewUniform.buf[i].GetVkBuffer();
     }
     return true;
 }
@@ -96,7 +99,7 @@ void ReleaseUniformBuffer(Vulkan* pVulkan, UniformArray<Vulkan, T_NUM_BUFFERS>& 
 {
     for (size_t i = 0; i < T_NUM_BUFFERS; ++i)
     {
-        rUniform.vkBuffers[i] = VK_NULL_HANDLE;
+        rUniform.bufferHandles[i] = VK_NULL_HANDLE;
         ReleaseUniformBuffer(pVulkan, rUniform.buf[i]);
     }
 }
@@ -116,4 +119,9 @@ void UpdateUniformBuffer(Vulkan* pVulkan, UniformArrayT<Vulkan, T, T_NUM_BUFFERS
 {
     static_assert(std::is_same<T, TT>::value, "UpdateUniformBuffer, uniform is different type to newData");
     return UpdateUniformBuffer(pVulkan, static_cast<UniformArray<Vulkan, T_NUM_BUFFERS>&>(uniform), newData, bufferIdx);
+}
+template<typename T, size_t T_NUM_BUFFERS>
+void ReleaseUniformBuffer(Vulkan* pVulkan, UniformArrayT<Vulkan, T, T_NUM_BUFFERS>& uniform)
+{
+    ReleaseUniformBuffer(pVulkan, static_cast<UniformArray<Vulkan, T_NUM_BUFFERS>&>(uniform));
 }

@@ -1,13 +1,13 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "timerPool.hpp"
-#include "extensionHelpers.hpp"
+#include "extensionLib.hpp"
 #include <algorithm>
 #include <iterator>
 
@@ -19,7 +19,7 @@ TimerPoolBase::TimerPoolBase( Vulkan& vulkan ) noexcept : m_Vulkan( vulkan )
 
 TimerPoolBase::~TimerPoolBase()
 {
-    assert(m_VulkanQueryPool == VK_NULL_HANDLE);
+    Destroy();
 }
 
 
@@ -39,10 +39,10 @@ bool TimerPoolBase::Initialize( uint32_t maxTimers )
     QueryInfo.queryCount = timerCount * 2/*one for start time, one for stop time*/;      // size based on number of frames, may fall-down if we want/support timers that run across frame boundaries.
     QueryInfo.pipelineStatistics = 0;
 
-    const auto* hostQueryResetExt = m_Vulkan.GetExtension<ExtensionHelper::Ext_VK_EXT_host_query_reset>();
-    if (!hostQueryResetExt || hostQueryResetExt->Status != VulkanExtension::eLoaded)
+    const auto* hostQueryResetExt = m_Vulkan.GetExtension<ExtensionLib::Ext_VK_EXT_host_query_reset>();
+    if (!hostQueryResetExt || hostQueryResetExt->Status != VulkanExtensionStatus::eLoaded)
     {
-        LOGE("TimerPoolBase functionality requires VK_EXT_host_query_reset extension"); // Likely missing appConfig.RequiredExtension<ExtensionHelper::Ext_VK_EXT_host_query_reset>()  (or hardware does not support VK_EXT_host_query_reset)
+        LOGE("TimerPoolBase functionality requires VK_EXT_host_query_reset extension"); // Likely missing appConfig.RequiredExtension<ExtensionLib::Ext_VK_EXT_host_query_reset>()  (or hardware does not support VK_EXT_host_query_reset)
         // If we move to requiring Vulkan 1.2 then we can remove this check and use vkResetQueryPool (no extension needed in 1.2)
         // Alternately we could do the resets on the GPU (which is supported in 1.1) and modify tracking of valid timers accordingly
         return false;
@@ -70,7 +70,7 @@ bool TimerPoolBase::Initialize( uint32_t maxTimers )
     ResetQueryPool( 0, QueryInfo.queryCount );
 
     // Queues can have different timer 'valid bits', grab the values for each queue.
-    std::transform( m_Vulkan.m_pVulkanQueueProps.begin(), m_Vulkan.m_pVulkanQueueProps.end(), std::back_insert_iterator(m_DeviceQueueValidTimerBitMask), []( const auto& a ) -> uint64_t {
+    std::transform( m_Vulkan.m_pVulkanQueueProps.begin(), m_Vulkan.m_pVulkanQueueProps.end(), std::back_inserter(m_DeviceQueueValidTimerBitMask), []( const auto& a ) -> uint64_t {
         uint64_t v = a.timestampValidBits < 64 ? (uint64_t(1) << uint64_t(a.timestampValidBits)) : 0;
         return v - uint64_t(1);
     });
@@ -149,7 +149,7 @@ void TimerPoolBase::ReadResults(VkCommandBuffer commandBuffer, uint32_t whichFra
         vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT/*src stage*/, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT/* dest stage bit*/,
             0, 0, nullptr, 0, nullptr, 0, nullptr);
         // Copy the timing queries that may have been written this frame to a buffer (ready for mapping back to the cpu).
-        vkCmdCopyQueryPoolResults(commandBuffer, m_VulkanQueryPool, 0, maxUsedQueries, m_VulkanQueryResults.vkBuffers[whichFrame], 0, sizeof(VulkanQueryResult), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+        vkCmdCopyQueryPoolResults(commandBuffer, m_VulkanQueryPool, 0, maxUsedQueries, m_VulkanQueryResults.bufferHandles[whichFrame], 0, sizeof(VulkanQueryResult), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
         // Reset the timing queries that may have been written this frame.
         vkCmdResetQueryPool(commandBuffer, m_VulkanQueryPool, 0, maxUsedQueries);
     }

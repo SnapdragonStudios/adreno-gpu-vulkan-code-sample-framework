@@ -1,7 +1,6 @@
 //============================================================================================================
 //
-//
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -33,7 +32,7 @@ public:
     operator bool() const { return !m_Data.empty(); }
     void Release();
 protected:
-    friend class TexturePpm;
+    friend class TexturePpmBase;
 private:
     uint32_t m_Width = 0;
     uint32_t m_Height = 0;
@@ -44,13 +43,13 @@ private:
 
 /// @brief Class to handle loading PPM textures
 /// Generally applications will want a singleton of this class.
-class TexturePpm
+class TexturePpmBase
 {
-    TexturePpm(const TexturePpm&) = delete;
-    TexturePpm& operator=(const TexturePpm&) = delete;
+    TexturePpmBase(const TexturePpmBase&) = delete;
+    TexturePpmBase& operator=(const TexturePpmBase&) = delete;
 public:
-    TexturePpm() = default;
-    virtual ~TexturePpm() noexcept;
+    TexturePpmBase() = default;
+    virtual ~TexturePpmBase() noexcept;
 
     /// @brief Load the given ppm(2) texture 
     TexturePpmFileWrapper LoadFile(AssetManager& assetManager, const char* const pFileName) const;
@@ -63,14 +62,14 @@ public:
     virtual void Release() {}
 
     template<typename T_GFXAPI>
-    TextureT<T_GFXAPI> LoadPpm( T_GFXAPI& gfxApi, AssetManager& assetManager, const char* const pFileName, const SamplerT<T_GFXAPI>& sampler );
+    Texture<T_GFXAPI> LoadPpm( T_GFXAPI& gfxApi, AssetManager& assetManager, const char* const pFileName, const Sampler<T_GFXAPI>& sampler );
     template<typename T_GFXAPI>
-    TextureT<T_GFXAPI> LoadPpm( T_GFXAPI& gfxApi, const TexturePpmFileWrapper& ppmData, const SamplerT<T_GFXAPI>& sampler );
+    Texture<T_GFXAPI> LoadPpm( T_GFXAPI& gfxApi, const TexturePpmFileWrapper& ppmData, const Sampler<T_GFXAPI>& sampler );
 };
 
 
 template<typename T_GFXAPI>
-TextureT<T_GFXAPI> TexturePpm::LoadPpm( T_GFXAPI& gfxApi, AssetManager& assetManager, const char* const pFileName, const SamplerT<T_GFXAPI>& sampler )
+Texture<T_GFXAPI> TexturePpmBase::LoadPpm( T_GFXAPI& gfxApi, AssetManager& assetManager, const char* const pFileName, const Sampler<T_GFXAPI>& sampler )
 {
     auto ppmData = LoadFile( assetManager, pFileName );
     if (!ppmData)
@@ -79,7 +78,7 @@ TextureT<T_GFXAPI> TexturePpm::LoadPpm( T_GFXAPI& gfxApi, AssetManager& assetMan
 }
 
 template<typename T_GFXAPI>
-TextureT<T_GFXAPI> TexturePpm::LoadPpm( T_GFXAPI& gfxApi, const TexturePpmFileWrapper& ppmData, const SamplerT<T_GFXAPI>& sampler )
+Texture<T_GFXAPI> TexturePpmBase::LoadPpm( T_GFXAPI& gfxApi, const TexturePpmFileWrapper& ppmData, const Sampler<T_GFXAPI>& sampler )
 {
     return ::CreateTextureFromBuffer( gfxApi, ppmData.m_Data.data(), ppmData.m_Data.size(), ppmData.m_Width, ppmData.m_Height, ppmData.m_Depth, ppmData.m_Format, SamplerAddressMode::Repeat, SamplerFilter::Linear );
 }
@@ -88,13 +87,13 @@ TextureT<T_GFXAPI> TexturePpm::LoadPpm( T_GFXAPI& gfxApi, const TexturePpmFileWr
 /// @brief Templated (by graphics api) ppm loader class, expected to be specialized.
 /// @tparam T_GFXAPI 
 template<typename T_GFXAPI>
-class TexturePpmT : public TexturePpm
+class TexturePpm : public TexturePpmBase
 {
-    TexturePpmT( const TexturePpmT<T_GFXAPI>& ) = delete;
-    TexturePpmT& operator=( const TexturePpmT<T_GFXAPI>& ) = delete;
+    TexturePpm( const TexturePpm<T_GFXAPI>& ) = delete;
+    TexturePpm& operator=( const TexturePpm<T_GFXAPI>& ) = delete;
 public:
-    TexturePpmT( T_GFXAPI& rGfxApi ) noexcept = delete;   // class expected to be specialized
-    ~TexturePpmT() noexcept override = delete;          // class expected to be specialized
+    TexturePpm( T_GFXAPI& rGfxApi ) noexcept = delete;   // class expected to be specialized
+    ~TexturePpm() noexcept override = delete;          // class expected to be specialized
 
-    static_assert( sizeof( TexturePpmT<T_GFXAPI> ) != sizeof( TexturePpmT ) );   // Ensure this class template is specialized (and not used as-is)
+    static_assert( sizeof( TexturePpm<T_GFXAPI> ) != sizeof( TexturePpm ) );   // Ensure this class template is specialized (and not used as-is)
 };

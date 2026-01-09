@@ -1,14 +1,14 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 #pragma once
 
 #include "material/vertexFormat.hpp"
-#include <vulkan/vulkan.h>
+#include <volk/volk.h>
 
 /// Describes the Vulkan layout of a single vertex stream (not the buffer, just one of the the contained vertices).
 /// @ingroup Material

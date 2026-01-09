@@ -1,19 +1,20 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "os_common.h"
 #include "assetManager.hpp"
+#include <cstdarg>
 #include <sys/stat.h>
 
-#if defined (OS_ANDROID)
+#if defined (OS_ANDROID) || defined(OS_LINUX)
 #include <unistd.h>
 #include <sys/time.h>
-#endif // defined (OS_ANDROID)
+#endif // defined (OS_ANDROID) || defined (OS_LINUX)
 
 #if defined (OS_WINDOWS)
 #define NOMINMAX
@@ -62,6 +63,15 @@ uint32_t OS_GetNumCores()
     else
         return (uint32_t) iNumCores;
 
+#elif defined(OS_LINUX)
+
+    // sysconf can return a negative number!
+    int iNumCores = sysconf( _SC_NPROCESSORS_ONLN );  // Number of processors online
+    if( iNumCores <= 0 )
+        return 0;
+    else
+        return (uint32_t) iNumCores;
+
 #else
 
 #error Must define an OS!
@@ -85,11 +95,10 @@ uint32_t OS_GetTimeMS()
 
     return (uint32_t)(((double)nTime.QuadPart / (double)nFrequency.QuadPart) * 1000.0f);
 
-#elif defined (OS_ANDROID)
+#elif defined (OS_ANDROID) || defined (OS_LINUX)
 
     struct timeval t;
     t.tv_sec = t.tv_usec = 0;
-
     if (gettimeofday(&t, NULL) == -1)
     {
         return 0;
@@ -97,9 +106,8 @@ uint32_t OS_GetTimeMS()
 
     return (uint32_t)(t.tv_sec * 1000LL + t.tv_usec / 1000LL);
 
-#endif // defined (OS_WINDOWS|OS_ANDROID)
+#endif // defined (OS_WINDOWS|OS_ANDROID|OS_LINUX)
 }
-
 
 //-----------------------------------------------------------------------------
 uint64_t OS_GetTimeUS()
@@ -117,7 +125,7 @@ uint64_t OS_GetTimeUS()
 
     return (uint64_t)((double)nTime.QuadPart / (((double)nFrequency.QuadPart) / 1000000.0));
 
-#elif defined (OS_ANDROID)
+#elif defined (OS_ANDROID) || defined(OS_LINUX)
 
     struct timeval t;
     t.tv_sec = t.tv_usec = 0;
@@ -129,9 +137,8 @@ uint64_t OS_GetTimeUS()
 
     return (uint64_t)(t.tv_sec * 1000000LL + t.tv_usec);
 
-#endif // defined (OS_WINDOWS|OS_ANDROID)
+#endif // defined (OS_WINDOWS|OS_ANDROID|OS_LINUX)
 }
-
 
 //-----------------------------------------------------------------------------
 void OS_SleepMs(uint32_t ms)
@@ -141,13 +148,12 @@ void OS_SleepMs(uint32_t ms)
 
     Sleep(ms);
 
-#elif defined (OS_ANDROID)
+#elif defined (OS_ANDROID) || defined (OS_LINUX)
 
     usleep(ms*1000);
 
-#endif // defined (OS_WINDOWS|OS_ANDROID)
+#endif // defined (OS_WINDOWS|OS_ANDROID|OS_LINUX)
 }
-
 
 #if defined (OS_WINDOWS)
 //-----------------------------------------------------------------------------
@@ -172,9 +178,6 @@ static void LOG_(WORD ConsoleColor, const char* pszFormat, va_list args)
         OutputDebugString(szBuffer);
     }
 }
-#endif // defined (OS_WINDOWS)
-
-#if defined (OS_WINDOWS)
 //-----------------------------------------------------------------------------
 void LOGE(const char* pszFormat, ...)
 //-----------------------------------------------------------------------------
@@ -184,9 +187,6 @@ void LOGE(const char* pszFormat, ...)
     LOG_(FOREGROUND_RED | FOREGROUND_INTENSITY, pszFormat, args);
     va_end(args);
 }
-#endif // defined (OS_WINDOWS)
-
-#if defined (OS_WINDOWS)
 //-----------------------------------------------------------------------------
 void LOGW(const char* pszFormat, ...)
 //-----------------------------------------------------------------------------
@@ -196,9 +196,6 @@ void LOGW(const char* pszFormat, ...)
     LOG_(FOREGROUND_BLUE | FOREGROUND_GREEN, pszFormat, args);
     va_end(args);
 }
-#endif // defined (OS_WINDOWS)
-
-#if defined (OS_WINDOWS)
 //-----------------------------------------------------------------------------
 void LOGI(const char* pszFormat, ...)
 //-----------------------------------------------------------------------------
@@ -209,4 +206,37 @@ void LOGI(const char* pszFormat, ...)
     va_end(args);
 }
 #endif // defined (OS_WINDOWS)
+
+#if defined (OS_LINUX)
+//-----------------------------------------------------------------------------
+void LOGE(const char* pszFormat, ...)
+//-----------------------------------------------------------------------------
+{
+    va_list args;
+    va_start(args, pszFormat);
+    vfprintf(stderr, pszFormat, args);
+    va_end(args);
+    fprintf(stderr, "\n");
+}
+//-----------------------------------------------------------------------------
+void LOGW(const char* pszFormat, ...)
+//-----------------------------------------------------------------------------
+{
+    va_list args;
+    va_start(args, pszFormat);
+    vfprintf(stdout, pszFormat, args);
+    va_end(args);
+    fprintf(stdout, "\n");
+}
+//-----------------------------------------------------------------------------
+void LOGI(const char* pszFormat, ...)
+//-----------------------------------------------------------------------------
+{
+    va_list args;
+    va_start(args, pszFormat);
+    vfprintf(stdout, pszFormat, args);
+    va_end(args);
+    fprintf(stdout, "\n");
+}
+#endif // defined (OS_LINUX)
 

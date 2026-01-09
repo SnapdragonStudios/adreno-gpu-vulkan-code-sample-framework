@@ -1,32 +1,32 @@
 //============================================================================================================
 //
-//
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
 
 #include "vulkan/vulkan.hpp"
 #include "vulkan/TextureFuncts.h"
+#include "texture/vulkan/texture.hpp"
 #include "loaderKtx.hpp"
 #include <ktxvulkan.h>  // KTX-Software
 
 
 // Static
 // Set to TextureKtxVulkan before calling upload (for the callbacks to use).  Cleaner than hacking on the vulkan allocator, although still icky.
-static thread_local TextureKtxT<Vulkan>* sUploadingTextureKtxVulkan = nullptr;
+static thread_local TextureKtx<Vulkan>* sUploadingTextureKtxVulkan = nullptr;
 
 
-TextureKtxT<Vulkan>::TextureKtxT(Vulkan& vulkan) noexcept : TextureKtx(), m_Vulkan(vulkan)
+TextureKtx<Vulkan>::TextureKtx(Vulkan& vulkan) noexcept : TextureKtxBase(), m_Vulkan(vulkan)
 {
 }
 
-TextureKtxT<Vulkan>::~TextureKtxT() noexcept
+TextureKtx<Vulkan>::~TextureKtx() noexcept
 {}
 
-bool TextureKtxT<Vulkan>::Initialize()
+bool TextureKtx<Vulkan>::Initialize()
 {
-    if (!TextureKtx::Initialize())
+    if (!TextureKtxBase::Initialize())
         return false;
 
     // Setup the ktx library's device info (ready for subsequent ktx texture data transfers to the GPU)
@@ -38,11 +38,11 @@ bool TextureKtxT<Vulkan>::Initialize()
         return false;
 
     // Callbacks to override the allocation/bind functions used by ktxTexture_VkUploadEx
-    // We want to use our memorymanager (and the VMA allocator under it) to do vulkan allocations so the allocations play nicely with the TextureT<Vulkan> container)
-    m_VulkanDeviceInfo->vkFuncs.vkAllocateMemory = TextureKtxT<Vulkan>::VkAllocateMemory;
-    m_VulkanDeviceInfo->vkFuncs.vkFreeMemory = TextureKtxT<Vulkan>::VkFreeMemory;
-    m_VulkanDeviceInfo->vkFuncs.vkDestroyImage = TextureKtxT<Vulkan>::VkDestroyImage;
-    m_VulkanDeviceInfo->vkFuncs.vkBindImageMemory = TextureKtxT<Vulkan>::VkBindImageMemory;
+    // We want to use our memorymanager (and the VMA allocator under it) to do vulkan allocations so the allocations play nicely with the Texture<Vulkan> container)
+    m_VulkanDeviceInfo->vkFuncs.vkAllocateMemory = TextureKtx<Vulkan>::VkAllocateMemory;
+    m_VulkanDeviceInfo->vkFuncs.vkFreeMemory = TextureKtx<Vulkan>::VkFreeMemory;
+    m_VulkanDeviceInfo->vkFuncs.vkDestroyImage = TextureKtx<Vulkan>::VkDestroyImage;
+    m_VulkanDeviceInfo->vkFuncs.vkBindImageMemory = TextureKtx<Vulkan>::VkBindImageMemory;
 
     const auto& gpuFeatures = m_Vulkan.GetGpuFeatures().Base.features;
     if (gpuFeatures.textureCompressionBC)
@@ -55,16 +55,16 @@ bool TextureKtxT<Vulkan>::Initialize()
     return true;
 }
 
-void TextureKtxT<Vulkan>::Release()
+void TextureKtx<Vulkan>::Release()
 {
     if (m_VulkanDeviceInfo)
         ktxVulkanDeviceInfo_Destruct(m_VulkanDeviceInfo.get());
     m_VulkanDeviceInfo.release();   // we didnt own the pointer!
 
-    TextureKtx::Release();
+    TextureKtxBase::Release();
 }
 
-uint32_t TextureKtxT<Vulkan>::DetermineTranscodeOutputFormat() const
+uint32_t TextureKtx<Vulkan>::DetermineTranscodeOutputFormat() const
 {
     if (m_SupportsBcCompression && (m_FavorBcCompression || (!m_SupportsAstcCompression && !m_SupportsEtc2Compression)))
         return KTX_TTF_BC7_RGBA;   // should be better quality than KTX_TTF_BC1_OR_3 but may take longer to transcode (untested)
@@ -77,7 +77,7 @@ uint32_t TextureKtxT<Vulkan>::DetermineTranscodeOutputFormat() const
         return KTX_TTF_RGBA32;
 }
 
-TextureKtxFileWrapper TextureKtxT<Vulkan>::Transcode(TextureKtxFileWrapper&& fileData)
+TextureKtxFileWrapper TextureKtx<Vulkan>::Transcode(TextureKtxFileWrapper&& fileData)
 {
     auto* const pKtxData = GetKtxTexture(fileData);
     if (pKtxData!=nullptr && ktxTexture_NeedsTranscoding(pKtxData) && pKtxData->classId == class_id::ktxTexture2_c)
@@ -91,7 +91,7 @@ TextureKtxFileWrapper TextureKtxT<Vulkan>::Transcode(TextureKtxFileWrapper&& fil
     return std::move(fileData);
 }
 
-TextureVulkan TextureKtxT<Vulkan>::LoadKtx(Vulkan& vulkan, const TextureKtxFileWrapper& fileData, const SamplerT<Vulkan>& sampler)
+TextureVulkan TextureKtx<Vulkan>::LoadKtx(Vulkan& vulkan, const TextureKtxFileWrapper& fileData, Sampler<Vulkan> sampler)
 {
     auto* const pKtxData = GetKtxTexture(fileData);
     if (!pKtxData)
@@ -117,38 +117,29 @@ TextureVulkan TextureKtxT<Vulkan>::LoadKtx(Vulkan& vulkan, const TextureKtxFileW
     }
     sUploadingTextureKtxVulkan = nullptr;
 
-    VkImageView imageView;
-    if (!CreateImageView(vulkan, uploadedTexture.image, uploadedTexture.imageFormat, 0, uploadedTexture.levelCount, uploadedTexture.layerCount, uploadedTexture.viewType, &imageView))
+    // Take ownership of the image from the container holding images created during ktxTexture_VkUploadEx
+    Image<Vulkan> allocatedImage{std::move( m_AllocatedImages.extract( m_AllocatedImages.find( uploadedTexture.image ) ).value() )};
+
+    auto imageView = CreateImageView( vulkan, allocatedImage, VkToTextureFormat(uploadedTexture.imageFormat), uploadedTexture.levelCount, 0, uploadedTexture.layerCount, 0, (ImageViewType) uploadedTexture.viewType );
+    if (imageView.IsEmpty())
     {
         ktxVulkanTexture_Destruct(&uploadedTexture, vulkan.m_VulkanDevice, nullptr);
         return {};
     }
-    //SamplerT<Vulkan>& samplerVulkan = static_cast<const SamplerT<Vulkan>&>(sampler);
-    //if (samplerVulkan.IsEmpty())
-    //{
-    //    if (!CreateSampler(&vulkan, VK_SAMPLER_ADDRESS_MODE_REPEAT, SamplerFilter::Linear, VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK, false, 0.0f, &sampler))
-    //    {
-    //        vkDestroyImageView(vulkan.m_VulkanDevice, imageView, nullptr);
-    //        ktxVulkanTexture_Destruct(&uploadedTexture, vulkan.m_VulkanDevice, nullptr);
-    //        return {};
-    //    }
-    //}
 
     TextureFormat textureFormat = VkToTextureFormat(uploadedTexture.imageFormat);
 
-    // Take ownership of the image from the container holding images created during ktxTexture_VkUploadEx
-    auto allocatedImage = std::move(m_AllocatedImages.extract(m_AllocatedImages.find(uploadedTexture.image)).value());
     // Return the fully formed texture object
-    TextureVulkan texture{ uploadedTexture.width, uploadedTexture.height, uploadedTexture.depth, uploadedTexture.levelCount, textureFormat, uploadedTexture.imageLayout, std::move(allocatedImage), sampler, imageView };
+    TextureVulkan texture{uploadedTexture.width, uploadedTexture.height, uploadedTexture.depth, uploadedTexture.levelCount, 0, uploadedTexture.layerCount, 0, textureFormat, uploadedTexture.imageLayout, VkClearValue{}, std::move( allocatedImage ), std::move( sampler ), std::move( imageView )};
     return texture;
 }
 
-TextureVulkan TextureKtxT<Vulkan>::LoadKtx( Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, const SamplerT<Vulkan>& sampler )
+TextureVulkan TextureKtx<Vulkan>::LoadKtx( Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, Sampler<Vulkan> sampler )
 {
     auto ktxData = LoadFile( assetManager, pFileName );
     if (!ktxData)
         return {};
-    return LoadKtx( vulkan, ktxData, sampler );
+    return LoadKtx( vulkan, ktxData, std::move(sampler) );
 }
 
 // Comparison functions so we can look for VkBuffer in a set of MemoryAllocatedBuffer<Vulkan, VkBuffer>
@@ -164,7 +155,7 @@ static bool operator<(const MemoryAllocatedBuffer<Vulkan, VkDeviceMemory>& a, co
 static bool operator<(const VkDeviceMemory& a, const MemoryAllocatedBuffer<Vulkan, VkDeviceMemory>& b) { return a < b.GetVkBuffer(); }
 static bool operator<(const MemoryAllocatedBuffer<Vulkan, VkDeviceMemory>& a, const VkDeviceMemory& b) { return a.GetVkBuffer() < b; }
 
-/*static*/ VkResult TextureKtxT<Vulkan>::VkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo, const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory)
+/*static*/ VkResult TextureKtx<Vulkan>::VkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo, const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory)
 {
     if (sUploadingTextureKtxVulkan)
     {
@@ -180,7 +171,7 @@ static bool operator<(const MemoryAllocatedBuffer<Vulkan, VkDeviceMemory>& a, co
     return vkAllocateMemory(device, pAllocateInfo, pAllocator, pMemory);
 }
 
-/*static*/ void TextureKtxT<Vulkan>::VkFreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator)
+/*static*/ void TextureKtx<Vulkan>::VkFreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator)
 {
     if (sUploadingTextureKtxVulkan)
     {
@@ -202,7 +193,7 @@ static bool operator<(const MemoryAllocatedBuffer<Vulkan, VkDeviceMemory>& a, co
         return VkFreeMemory(device, memory, pAllocator);
 }
 
-/*static*/ VkResult TextureKtxT<Vulkan>::VkBindImageMemory(VkDevice device, VkImage image, VkDeviceMemory memory, VkDeviceSize memoryOffset)
+/*static*/ VkResult TextureKtx<Vulkan>::VkBindImageMemory(VkDevice device, VkImage image, VkDeviceMemory memory, VkDeviceSize memoryOffset)
 {
     if (sUploadingTextureKtxVulkan)
     {
@@ -220,7 +211,7 @@ static bool operator<(const MemoryAllocatedBuffer<Vulkan, VkDeviceMemory>& a, co
         return vkBindImageMemory(device, image, memory, memoryOffset);
 }
 
-/*static*/ void TextureKtxT<Vulkan>::VkDestroyImage(VkDevice device, VkImage image, const VkAllocationCallbacks* pAllocator)
+/*static*/ void TextureKtx<Vulkan>::VkDestroyImage(VkDevice device, VkImage image, const VkAllocationCallbacks* pAllocator)
 {
     if (sUploadingTextureKtxVulkan && image != VK_NULL_HANDLE)
     {
@@ -237,15 +228,15 @@ static bool operator<(const MemoryAllocatedBuffer<Vulkan, VkDeviceMemory>& a, co
 }
 
 /// @brief Function specialization
-template<>
-TextureT<Vulkan> TextureKtx::LoadKtx( Vulkan& vulkan, const TextureKtxFileWrapper& textureFile, const SamplerT<Vulkan>& sampler )
-{
-    return apiCast<Vulkan>( this )->LoadKtx( vulkan, textureFile, sampler );
-}
+//template<>
+//Texture<Vulkan> TextureKtxBase::LoadKtx( Vulkan& vulkan, const TextureKtxFileWrapper& textureFile, Sampler<Vulkan> sampler )
+//{
+//    return apiCast<Vulkan>( this )->LoadKtx( vulkan, textureFile, std::move(sampler) );
+//}
 
 /// @brief Function specialization
-template<>
-TextureT<Vulkan> TextureKtx::LoadKtx( Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, const SamplerT<Vulkan>& sampler )
-{
-    return apiCast<Vulkan>( this )->LoadKtx( vulkan, assetManager, pFileName, sampler );
-}
+//template<>
+//Texture<Vulkan> TextureKtxBase::LoadKtx( Vulkan& vulkan, AssetManager& assetManager, const char* const pFileName, Sampler<Vulkan> sampler )
+//{
+//    return apiCast<Vulkan>( this )->LoadKtx( vulkan, assetManager, pFileName, std::move(sampler) );
+//}

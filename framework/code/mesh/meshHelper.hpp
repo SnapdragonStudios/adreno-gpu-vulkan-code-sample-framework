@@ -1,10 +1,10 @@
-//============================================================================================================
+//=============================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
-//                              SPDX-License-Identifier: BSD-3-Clause
+//                  Copyright (c) 2022 QUALCOMM Technologies Inc.
+//                              All Rights Reserved.
 //
-//============================================================================================================
+//==============================================================================
 #pragma once
 
 #include "mesh.hpp"
@@ -45,8 +45,8 @@ struct MeshHelper
     template<typename T_GFXAPI>
     static bool CreateMesh(MemoryManager<T_GFXAPI>& memoryManager, const MeshObjectIntermediate& meshObject, uint32_t bindingIndex, const std::span<const VertexFormat> pVertexFormat, Mesh<T_GFXAPI>* meshObjectOut);
 
-    /// Helper to create a IndexBufferObject, IF the mesh object has index buffer data.
-    /// @returns true on success (including no index buffer data existing in IndexBufferObject), false on error.
+    /// Helper to create a IndexBuffer object, IF the mesh object has index buffer data.
+    /// @returns true on success (including no index buffer data existing in IndexBuffer object), false on error.
     template<typename T_GFXAPI>
     static bool CreateIndexBuffer(MemoryManager<T_GFXAPI>& memoryManager, const MeshObjectIntermediate& meshObject, std::optional<class IndexBuffer<T_GFXAPI>>& indexBufferOut, BufferUsageFlags usage = BufferUsageFlags::Index);
 
@@ -59,6 +59,29 @@ struct MeshHelper
     /// @return true on success
     template<typename T_GFXAPI>
     static bool CreateScreenSpaceMesh(MemoryManager<T_GFXAPI>& memoryManager, glm::vec4 PosLLRadius, glm::vec4 UVLLRadius, uint32_t binding, Mesh<T_GFXAPI>* meshObjectOut);
+
+    /// @brief Templated function to update a renderable Mesh 
+    /// @tparam T_GFXAPI Graphics API class.
+    /// @param memoryManager 
+    /// @param meshObject
+    /// @param whichBuffer 
+    /// @param dataSize 
+    /// @param newData 
+    /// @return true on success
+    template<typename T_GFXAPI>
+    static bool UpdateMesh(MemoryManager<T_GFXAPI>& memoryManager, Mesh<T_GFXAPI>& meshObject, uint32_t whichBuffer, size_t dataSize, void *newData);
+
+    /// @brief Templated function to update a renderable Mesh 
+    /// @tparam T_GFXAPI Graphics API class.
+    /// @param memoryManager 
+    /// @param meshObject
+    /// @param whichBuffer 
+    /// @param dataSize 
+    /// @param outputData 
+    /// @return true on success
+    template<typename T_GFXAPI>
+    static bool GetMeshData(MemoryManager<T_GFXAPI>& memoryManager, const Mesh<T_GFXAPI>& meshObject, uint32_t whichBuffer, size_t dataSize, void *outputData);
+
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -84,7 +107,7 @@ bool MeshHelper::CreateMesh(MemoryManager<T_GFXAPI>& memoryManager, const MeshOb
         const auto& vertexFormat = pVertexFormat[vertexBufferIdx];
         if (vertexFormat.inputRate == VertexFormat::eInputRate::Vertex)
         {
-            const std::vector<uint32_t> formattedVertexData = MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(meshObject.m_VertexBuffer, pVertexFormat[vertexBufferIdx]);
+            const std::vector<uint32_t> formattedVertexData = MeshObjectIntermediate::CopyFatVertexToFormattedBuffer(meshObject.m_VertexBuffer, meshObject.m_WeightBuffer, pVertexFormat[vertexBufferIdx]);
 
             if (!meshObjectOut->m_VertexBuffers.emplace_back().Initialize(&memoryManager, vertexFormat.span, numVertices, formattedVertexData.data()))
             {
@@ -107,6 +130,40 @@ bool MeshHelper::CreateMesh(MemoryManager<T_GFXAPI>& memoryManager, const MeshOb
 ///////////////////////////////////////////////////////////////////////////////
 
 template<typename T_GFXAPI>
+bool MeshHelper::UpdateMesh(MemoryManager<T_GFXAPI>& memoryManager, Mesh<T_GFXAPI>& meshObject, uint32_t whichBuffer, size_t dataSize, void* newData)
+{
+    // Make sure the vertex buffer is in range
+    if (whichBuffer >= meshObject.m_VertexBuffers.size())
+    {
+        LOGE("MeshHelper::UpdateMesh: Error! Buffer index (%d) out of range (%d vertex buffers)", whichBuffer, (int)meshObject.m_VertexBuffers.size());
+        return false;
+    }
+
+    meshObject.m_VertexBuffers[0].Update(&memoryManager, dataSize, newData);
+
+    return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+template<typename T_GFXAPI>
+bool MeshHelper::GetMeshData(MemoryManager<T_GFXAPI>& memoryManager, const Mesh<T_GFXAPI>& meshObject, uint32_t whichBuffer, size_t dataSize, void* outputData)
+{
+    // Make sure the vertex buffer is in range
+    if (whichBuffer >= meshObject.m_VertexBuffers.size())
+    {
+        LOGE("MeshHelper::GetMeshData: Error! Buffer index (%d) out of range (%d vertex buffers)", whichBuffer, (int)meshObject.m_VertexBuffers.size());
+        return false;
+    }
+
+    meshObject.m_VertexBuffers[0].GetMeshData(&memoryManager, dataSize, outputData);
+
+    return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+template<typename T_GFXAPI>
 bool MeshHelper::CreateIndexBuffer(MemoryManager<T_GFXAPI>& memoryManager, const MeshObjectIntermediate& meshObject, std::optional<class IndexBuffer<T_GFXAPI>>& indexBufferOut, BufferUsageFlags usage)
 {
     //
@@ -118,7 +175,7 @@ bool MeshHelper::CreateIndexBuffer(MemoryManager<T_GFXAPI>& memoryManager, const
             if constexpr (std::is_same_v<T, std::vector<uint32_t>>) {
                 auto& indexBuffer = indexBufferOut.emplace(IndexType::IndexU32);
                 const auto& vec32 = std::get<std::vector<uint32_t>>(meshObject.m_IndexBuffer);
-                if (!indexBuffer.Initialize(&memoryManager, vec32.size(), vec32.data(), false, usage))
+                if (!indexBuffer.Initialize(&memoryManager, std::span(vec32), false, usage))
                 {
                     return false;
                 }
@@ -126,7 +183,7 @@ bool MeshHelper::CreateIndexBuffer(MemoryManager<T_GFXAPI>& memoryManager, const
             else if constexpr (std::is_same_v<T, std::vector<uint16_t>>) {
                 auto& indexBuffer = indexBufferOut.emplace(IndexType::IndexU16);
                 const auto& vec16 = std::get<std::vector<uint16_t>>(meshObject.m_IndexBuffer);
-                if (!indexBuffer.Initialize(&memoryManager, vec16.size(), vec16.data(), false, usage))
+                if (!indexBuffer.Initialize(&memoryManager, std::span(vec16), false, usage))
                 {
                     return false;
                 }
@@ -147,7 +204,7 @@ bool MeshHelper::CreateIndexBuffer(MemoryManager<T_GFXAPI>& memoryManager, const
 template<typename T_GFXAPI>
 bool MeshHelper::CreateScreenSpaceMesh( MemoryManager<T_GFXAPI>& memoryManager, uint32_t binding, Mesh<T_GFXAPI>* meshObjectOut )
 {
-    return MeshHelper::CreateMesh<T_GFXAPI>( memoryManager, MeshObjectIntermediate::CreateScreenSpaceMesh(), binding, { &vertex_layout::sFormat,1 }, meshObjectOut );
+    return MeshHelper::CreateMesh( memoryManager, MeshObjectIntermediate::CreateScreenSpaceMesh(), binding, { &vertex_layout::sFormat,1 }, meshObjectOut );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -155,5 +212,5 @@ bool MeshHelper::CreateScreenSpaceMesh( MemoryManager<T_GFXAPI>& memoryManager, 
 template<typename T_GFXAPI>
 bool MeshHelper::CreateScreenSpaceMesh( MemoryManager<T_GFXAPI>& memoryManager, glm::vec4 PosLLRadius, glm::vec4 UVLLRadius, uint32_t binding, Mesh<T_GFXAPI>* meshObjectOut )
 {
-    return MeshHelper::CreateMesh<T_GFXAPI>( memoryManager, MeshObjectIntermediate::CreateScreenSpaceMesh(PosLLRadius, UVLLRadius), binding, { &vertex_layout::sFormat,1 }, meshObjectOut );
+    return MeshHelper::CreateMesh( memoryManager, MeshObjectIntermediate::CreateScreenSpaceMesh(PosLLRadius, UVLLRadius), binding, { &vertex_layout::sFormat,1 }, meshObjectOut );
 }

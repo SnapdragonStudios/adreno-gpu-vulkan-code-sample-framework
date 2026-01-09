@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -65,12 +65,12 @@ bool MeshLoader::LoadGlftModel(AssetManager& assetManager, const std::string& fi
         bool RetVal = ModelLoader.LoadASCIIFromFile(&ModelData, &err, &warn, filename);
         if (!warn.empty())
         {
-            printf("\nWarning loading %s: %s", filename.c_str(), warn.c_str());
+            LOGE("\nWarning loading %s: %s", filename.c_str(), warn.c_str());
         }
 
         if (!err.empty())
         {
-            printf("\nError loading %s: %s", filename.c_str(), err.c_str());
+            LOGE("\nError loading %s: %s", filename.c_str(), err.c_str());
         }
 
         if (!RetVal)

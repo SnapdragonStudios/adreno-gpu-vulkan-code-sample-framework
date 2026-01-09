@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -16,6 +16,27 @@
 class Vulkan;
 template<typename T_VKTYPE> class MemoryAllocatedBuffer<Vulkan, T_VKTYPE>;
 
+
+
+/// Wraps the Vk Allocation handle.  Represents an allocation out of 'vulkan' memory.  Cannot be copied (only moved) - single owner.
+/// Passed around between whomever is 'owner' of the allocation (when mapping etc)
+/// @ingroup Memory
+template<>
+class MemoryAllocation<Vulkan> final
+{
+    friend class MemoryManager<Vulkan>;
+public:
+    MemoryAllocation( const MemoryAllocation& ) = delete;
+    MemoryAllocation& operator=( const MemoryAllocation& ) = delete;
+    MemoryAllocation() {}
+    MemoryAllocation( MemoryAllocation&& other ) noexcept;
+    MemoryAllocation& operator=( MemoryAllocation&& other ) noexcept;
+    ~MemoryAllocation() { assert( allocation == nullptr ); }	// protect accidental deletion (leak)
+    explicit operator bool() const { return allocation != nullptr; }
+private:
+    void clear() { allocation = nullptr; }
+    void* allocation = nullptr;             // anonymous handle (gpx api specific)
+};
 
 /// Vulkan template specialization of MemoryAllocatedBuffer
 /// Represents a memory block allocated by VMA and that has either a VkImage or VkBuffer
@@ -33,11 +54,30 @@ public:
 	MemoryAllocatedBuffer& operator=(MemoryAllocatedBuffer<Vulkan, T_VKTYPE>&& other) noexcept;
     MemoryAllocatedBuffer() noexcept {}
     const T_VKTYPE& GetVkBuffer() const { return buffer; }
+    const MemoryAllocation<Vulkan>& GetMemoryAllocation() const { return allocation; }
 	explicit operator bool() const { return static_cast<bool>(allocation); }
 private:
 	MemoryAllocation<Vulkan> allocation;
 	T_VKTYPE buffer = 0;	// the allocated vulkan buffer (or VK_NULL_HANDLE)
 };
+
+//
+// MemoryAllocation implementation
+//
+inline MemoryAllocation<Vulkan>::MemoryAllocation( MemoryAllocation<Vulkan>&& other ) noexcept
+{
+    allocation = other.allocation;
+    other.allocation = nullptr;
+}
+
+inline MemoryAllocation<Vulkan>& MemoryAllocation<Vulkan>::operator=( MemoryAllocation<Vulkan>&& other ) noexcept
+{
+    if (&other != this) {
+        allocation = other.allocation;
+        other.allocation = nullptr;
+    }
+    return *this;
+}
 
 //
 // MemoryAllocatedBuffer vulkan specialization implementation

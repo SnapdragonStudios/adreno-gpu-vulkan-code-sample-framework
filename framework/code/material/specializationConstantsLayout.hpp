@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -11,17 +11,12 @@
 #include "specializationConstantDescription.hpp"
 #include <span>
 
-//#include "vulkan/specializationConstantsLayout.hpp"
-
-
-// Forward declarations
-class Vulkan;
 
 /// Templated wrapper for collection of specialization constant layout data (eg VkSpecializationMapEntry for Vulkan VkSpecializationInfo::pMapEntries).
 /// Expected to be specialized (compile will fail if this template is used rather than a specialization of it)
 /// @ingroup Material
 template<typename T_GFXAPI>
-class SpecializationConstantsLayout
+class SpecializationConstantsLayout final
 {
     SpecializationConstantsLayout( const SpecializationConstantsLayout<T_GFXAPI>& ) = delete;
     SpecializationConstantsLayout& operator=( const SpecializationConstantsLayout<T_GFXAPI>& ) = delete;

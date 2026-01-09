@@ -24,7 +24,6 @@
 
 // Forward declarations
 class TimerPoolBase;
-class CRenderTarget;
 typedef uint64_t VkFlags64;
 typedef VkFlags64 VkPipelineStageFlags2;
 typedef VkPipelineStageFlags2 VkPipelineStageFlags2KHR;
@@ -35,8 +34,10 @@ typedef VkPipelineStageFlags2 VkPipelineStageFlags2KHR;
 
 struct ShaderInfo
 {
-    ShaderModuleT<Vulkan>  VertShaderModule;
-    ShaderModuleT<Vulkan>  FragShaderModule;
+    ShaderModule<Vulkan>  VertShaderModule;
+    ShaderModule<Vulkan>  FragShaderModule;
+    ShaderModule<Vulkan>  TaskShaderModule;
+    ShaderModule<Vulkan>  MeshShaderModule;
 };
 
 /// Helper enum for setting up a VkPipelineColorBlendAttachmentState
@@ -72,36 +73,6 @@ bool DumpImagePixelData(
     uint32_t mipLevel,
     uint32_t arrayLayer,
     const tDumpImageOutputFn& outputFunction);
-
-#if 0
-//=============================================================================
-// Wrap_VkImage
-//=============================================================================
-class Wrap_VkImage
-{
-    // Functions
-    Wrap_VkImage(const Wrap_VkImage&) = delete;
-    Wrap_VkImage& operator=(const Wrap_VkImage&) = delete;
-public:
-    Wrap_VkImage();
-    ~Wrap_VkImage();
-
-    bool Initialize(Vulkan* pVulkan, const VkImageCreateInfo& ImageInfo, MemoryUsage TypeFlag, const char* pName = nullptr);
-    void Release();
-
-    const auto& GetImageInfo() const { return m_ImageInfo; }
-
-    // Attributes
-public:
-    std::string                             m_Name;
-    MemoryAllocatedBuffer<Vulkan, VkImage>  m_VmaImage;
-
-private:
-    Vulkan *                                m_pVulkan = nullptr;
-    MemoryUsage                             m_Usage { MemoryUsage::Unknown };
-    VkImageCreateInfo                       m_ImageInfo{};
-};
-#endif
 
 ///
 /// Wrapper around VkSemaphore.

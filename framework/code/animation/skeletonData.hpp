@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -54,6 +54,7 @@ public:
     SkeletonData(std::vector<SkeletonNodeData>&& Nodes, std::vector<const SkeletonNodeData*>&& NodesById, std::vector<const SkeletonNodeData*>&& rootNodes);
 
     const SkeletonNodeData* GetNodeById(uint32_t nodeId) const { return m_NodesById[nodeId]; }
+    const auto& GetRootNodes() const { return m_RootNodes; }
 
 protected:
     friend class Skeleton;

@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -42,7 +42,7 @@ TraceablePass::~TraceablePass()
     assert(mPipeline == VK_NULL_HANDLE);
 }
 
-Traceable::Traceable(VulkanRT& vulkanRt, Material&& material)
+Traceable::Traceable(VulkanRT& vulkanRt, Material<Vulkan>&& material)
     : mVulkanRt(vulkanRt)
     , mMaterial(std::move(material))
 {
@@ -137,7 +137,7 @@ bool Traceable::Init()
     for (uint32_t materialPassIdx = 0; materialPassIdx < (uint32_t) materialPasses.size(); ++materialPassIdx)
     {
         const auto& materialPass = materialPasses[materialPassIdx];
-        const auto& shaderPass = materialPass.mShaderPass;
+        const auto& shaderPass = materialPass.GetShaderPass();
         assert(std::holds_alternative<RayTracingShaderModules<Vulkan>>(shaderPass.m_shaders.m_modules));
 
         // Usually pipeline layout will be stored with the shader but if the descriptor set layout is 'dynamic' (and stored in the materialPass) the pipeline layout will also be in the materialPass.
@@ -174,7 +174,7 @@ bool Traceable::Init()
         {
             for (const auto& passImageBinding : passImageBindings.first) // image binding can be an array of bindings
             {
-                const auto passUsage = BindingUseData(materialPassIdx, passImageBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passImageBinding.image);
+                const auto passUsage = BindingUseData(materialPassIdx, passImageBindings.second.setBinding.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passImageBinding.image);
 
                 passNeedsExecutionBarrier |= emitBarrier(passUsage, prevImageUsages, [&imageMemoryBarriers](VkImage image) {
                     imageMemoryBarriers.push_back(VkImageMemoryBarrier{
@@ -234,7 +234,7 @@ bool Traceable::Init()
         {
             for (const auto& passBufferBinding : passBufferBindings.first) // buffer binding can be an array of bindings
             {
-                const auto passUsage = BindingUseData(materialPassIdx, passBufferBindings.second.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passBufferBinding);
+                const auto passUsage = BindingUseData(materialPassIdx, passBufferBindings.second.setBinding.isReadOnly ? BindingAccess::ReadOnly : BindingAccess::ReadWrite, passBufferBinding);
 
                 passNeedsExecutionBarrier |= emitBarrier(passUsage, prevBufferUsages,
                     [&](const VkBufferAndOffset& buffer) {
@@ -246,8 +246,8 @@ bool Traceable::Init()
                             VK_ACCESS_SHADER_READ_BIT,  //dstAccessMask
                             VK_QUEUE_FAMILY_IGNORED,    //srcQueueFamilyIndex;
                             VK_QUEUE_FAMILY_IGNORED,    //dstQueueFamilyIndex;
-                            buffer.buffer,              //buffer;
-                            buffer.offset,              //offset
+                            buffer.buffer(),            //buffer;
+                            buffer.offset(),            //offset
                             VK_WHOLE_SIZE               //size
                         });
                     });
@@ -382,7 +382,7 @@ void Traceable::SetRayThreadCount(uint32_t passIdx, const std::array<uint32_t, 3
     mPasses[passIdx].SetRayThreadCount(threadCount);
 }
 
-void Traceable::Dispatch(Wrap_VkCommandBuffer* cmdBuffers, uint32_t numCmdBuffers, uint32_t startDescriptorSetIdx) const
+void Traceable::Dispatch(CommandListVulkan* cmdBuffers, uint32_t numCmdBuffers, uint32_t startDescriptorSetIdx) const
 {
     assert(cmdBuffers != nullptr);
 
@@ -390,7 +390,7 @@ void Traceable::Dispatch(Wrap_VkCommandBuffer* cmdBuffers, uint32_t numCmdBuffer
     {
         for (const auto& traceablePass : GetPasses())
         {
-            DispatchPass(cmdBuffers->m_VkCommandBuffer, traceablePass, (whichBuffer + startDescriptorSetIdx) % (uint32_t)traceablePass.GetVkDescriptorSets().size());
+            DispatchPass(*cmdBuffers, traceablePass, (whichBuffer + startDescriptorSetIdx) % (uint32_t)traceablePass.GetVkDescriptorSets().size());
         }
         ++cmdBuffers;
     }

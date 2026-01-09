@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -20,7 +20,7 @@ AccelerationInstanceBufferObject& AccelerationInstanceBufferObject::operator=(Ac
 {
     if (this != &other)
     {
-        BufferT<Vulkan>::operator=(std::move(other));
+        Buffer<Vulkan>::operator=(std::move(other));
         mNumInstances = other.mNumInstances;
         other.mNumInstances = 0;
     }
@@ -33,7 +33,7 @@ bool AccelerationInstanceBufferObject::Initialize(MemoryManager* pManager, size_
 {
     mNumInstances = numInstances;
 
-    return BufferT<Vulkan>::Initialize(pManager, (VkDeviceSize)(sizeof(VkAccelerationStructureInstanceKHR) * numInstances), BufferUsageFlags::AccelerationStructureBuild | BufferUsageFlags::ShaderDeviceAddress, MemoryUsage::CpuToGpu);
+    return Buffer<Vulkan>::Initialize(pManager, (VkDeviceSize)(sizeof(VkAccelerationStructureInstanceKHR) * numInstances), BufferUsageFlags::AccelerationStructureBuild | BufferUsageFlags::ShaderDeviceAddress, MemoryUsage::CpuToGpu);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -41,7 +41,7 @@ bool AccelerationInstanceBufferObject::Initialize(MemoryManager* pManager, size_
 void AccelerationInstanceBufferObject::Destroy()
 {
     mNumInstances = 0;
-    BufferT<Vulkan>::Destroy();
+    Buffer<Vulkan>::Destroy();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

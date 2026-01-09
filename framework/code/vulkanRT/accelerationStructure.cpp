@@ -1,7 +1,7 @@
 //============================================================================================================
 //
 //
-//                  Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
+//                  Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
 //                              SPDX-License-Identifier: BSD-3-Clause
 //
 //============================================================================================================
@@ -9,7 +9,7 @@
 #include "vulkanRT.hpp"
 
 
-bool AccelerationStructure::Create(Vulkan& vulkan, VulkanRT& vulkanRT, size_t accelerationStructureSize, VkAccelerationStructureTypeKHR type)
+bool AccelerationStructure<Vulkan>::Create(Vulkan& vulkan, VulkanRT& vulkanRT, size_t accelerationStructureSize, VkAccelerationStructureTypeKHR type)
 {
     auto& memoryManager = vulkan.GetMemoryManager();
 
@@ -37,7 +37,7 @@ bool AccelerationStructure::Create(Vulkan& vulkan, VulkanRT& vulkanRT, size_t ac
     return true;
 }
 
-void AccelerationStructure::CloneCmd(VulkanRT& vulkanRT, VkCommandBuffer cmdBuffer, const AccelerationStructure& src) const
+void AccelerationStructure<Vulkan>::CloneCmd(VulkanRT& vulkanRT, VkCommandBuffer cmdBuffer, const AccelerationStructure<Vulkan>& src) const
 {
     assert(src.m_accelerationStructure != VK_NULL_HANDLE);
     assert(m_accelerationStructure != VK_NULL_HANDLE);
@@ -49,7 +49,7 @@ void AccelerationStructure::CloneCmd(VulkanRT& vulkanRT, VkCommandBuffer cmdBuff
     vulkanRT.vkCmdCopyAccelerationStructureKHR(cmdBuffer, &copyInfo);
 }
 
-void AccelerationStructure::Destroy(Vulkan& vulkan, VulkanRT& vulkanRT)
+void AccelerationStructure<Vulkan>::Destroy(Vulkan& vulkan, VulkanRT& vulkanRT)
 {
     vulkanRT.vkDestroyAccelerationStructureKHR(m_accelerationStructure);
     m_accelerationStructure = VK_NULL_HANDLE;
