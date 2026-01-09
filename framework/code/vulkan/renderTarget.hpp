@@ -225,6 +225,7 @@ public:
 
     // The Depth Attachment
     TextureVulkan               m_DepthAttachment;
+    TextureVulkan*              m_InheritedDepthAttachment = nullptr; // Note: Not owning
 
     // The Frame Buffer
     Framebuffer<Vulkan>         m_FrameBuffer;

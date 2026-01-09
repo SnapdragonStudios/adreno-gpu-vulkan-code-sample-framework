@@ -787,6 +787,9 @@ bool Vulkan::RegisterKnownExtensions()
     m_ExtKhrSynchronization2 = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_synchronization2>();
     m_ExtKhrDrawIndirectCount = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_draw_indirect_count>();
     m_ExtRenderPass2 = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_create_renderpass2>();
+    m_ExtBufferDeviceAddress = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_buffer_device_address>();
+    m_Ext8BitStorage = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_8bit_storage>();
+    m_ExtCooperativeMatrix = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_cooperative_matrix>();
     m_ExtFragmentShadingRate = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_fragment_shading_rate>();
     m_ExtMeshShader = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_mesh_shader>();
     m_ExtDynamicRendering = m_DeviceExtensions.GetExtension<ExtensionLib::Ext_VK_KHR_dynamic_rendering>();
@@ -1234,6 +1237,7 @@ bool Vulkan::GetDataGraphProcessingEngine()
     // isn't fully supported publicly by the driver
 #if defined(OS_ANDROID)
     {
+#if 0
         auto* Ext_VK_ARM_tensors = static_cast<ExtensionLib::Ext_VK_ARM_tensors*>(m_DeviceExtensions.GetExtension(VK_ARM_TENSORS_EXTENSION_NAME));
         auto* Ext_VK_ARM_data_graph = static_cast<ExtensionLib::Ext_VK_ARM_data_graph*>(m_DeviceExtensions.GetExtension(VK_ARM_DATA_GRAPH_EXTENSION_NAME));
         auto fpGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(GetVulkanInstance(), "vkGetDeviceProcAddr");
@@ -1244,14 +1248,27 @@ bool Vulkan::GetDataGraphProcessingEngine()
         {
             LOGI("Forcing registering and enabling Graph Pipelines extensions for Android");
 
-            Ext_VK_ARM_tensors->Status = VulkanExtensionStatus::eLoaded;
-            Ext_VK_ARM_tensors->LookupFunctionPointers(m_VulkanDevice, fpGetDeviceProcAddr);
-            Ext_VK_ARM_tensors->LookupFunctionPointers(m_VulkanInstance);
+            try
+            {
+                Ext_VK_ARM_tensors->Status = VulkanExtensionStatus::eLoaded;
+                Ext_VK_ARM_tensors->LookupFunctionPointers(m_VulkanDevice, fpGetDeviceProcAddr);
+                Ext_VK_ARM_tensors->LookupFunctionPointers(m_VulkanInstance);
 
-            Ext_VK_ARM_data_graph->Status = VulkanExtensionStatus::eLoaded;
-            Ext_VK_ARM_data_graph->LookupFunctionPointers(m_VulkanDevice, fpGetDeviceProcAddr);
-            Ext_VK_ARM_data_graph->LookupFunctionPointers(m_VulkanInstance);
+                Ext_VK_ARM_data_graph->Status = VulkanExtensionStatus::eLoaded;
+                Ext_VK_ARM_data_graph->LookupFunctionPointers(m_VulkanDevice, fpGetDeviceProcAddr);
+                Ext_VK_ARM_data_graph->LookupFunctionPointers(m_VulkanInstance);
+
+                LOGI("Forcing registering and enabling Graph Pipelines extensions for Android - Done");
+            }
+            catch (...)
+            {
+                Ext_VK_ARM_tensors->Status = VulkanExtensionStatus::eLoaded;
+                Ext_VK_ARM_data_graph->Status = VulkanExtensionStatus::eLoaded;
+
+                LOGI("Forcing registering and enabling Graph Pipelines extensions for Android - Failed, disabling EXT");
+            }
         }
+#endif
     }
 #endif
 

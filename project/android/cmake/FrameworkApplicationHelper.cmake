@@ -55,6 +55,20 @@ target_link_libraries( ${TARGET_NAME} ${CMAKE_CURRENT_BINARY_DIR}/../../../../..
 #endif()
 target_link_libraries( ${TARGET_NAME} ${CMAKE_CURRENT_BINARY_DIR}/../../../../../android/framework/${CMAKE_BUILD_TYPE}/libframework.a )
 target_link_libraries( ${TARGET_NAME} ${CMAKE_CURRENT_BINARY_DIR}/../../../../../android/framework/${CMAKE_BUILD_TYPE}/libframework_base.a )
+
+target_link_libraries(
+    ${TARGET_NAME}
+    ${CMAKE_CURRENT_BINARY_DIR}/../../../../../android/framework/${CMAKE_BUILD_TYPE}/libglslang.a
+)
+target_link_libraries(
+    ${TARGET_NAME}
+    ${CMAKE_CURRENT_BINARY_DIR}/../../../../../android/framework/${CMAKE_BUILD_TYPE}/libglslang-default-resource-limits.a
+)
+target_link_libraries(
+    ${TARGET_NAME}
+    ${CMAKE_CURRENT_BINARY_DIR}/../../../../../android/framework/${CMAKE_BUILD_TYPE}/libSPIRV.a
+)
+
 target_include_directories(${TARGET_NAME} PUBLIC ../../framework/code)
 target_include_directories(${TARGET_NAME} PUBLIC ../../framework/external)
 target_include_directories(${TARGET_NAME} PUBLIC ../../framework/external/glm)      # so code can do #include "glm/mat3x3.hpp" etc

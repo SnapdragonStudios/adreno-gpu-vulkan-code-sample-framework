@@ -456,6 +456,7 @@ bool Application::CreateRenderTargets()
             gSurfaceHeight,
             FinalColorType,
             TextureFormat::UNDEFINED,
+            nullptr,
             blitColorTypes,
         },
         "BLIT RT"))
@@ -475,6 +476,7 @@ bool Application::CreateRenderTargets()
                 gRenderHeight,
                 TileShadingSceneColorType,
                 desiredDepthFormat,
+                nullptr,
                 tileShadingSceneColorTypes, 
                 TT_DEPTH_TARGET_LOCAL_READ,
             },

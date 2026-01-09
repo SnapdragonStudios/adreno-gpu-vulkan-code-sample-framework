@@ -67,6 +67,9 @@ namespace ExtensionLib {
     struct Ext_VK_EXT_hdr_metadata;
     struct Ext_VK_KHR_fragment_shading_rate;
     struct Ext_VK_KHR_create_renderpass2;
+    struct Ext_VK_KHR_buffer_device_address;
+    struct Ext_VK_KHR_8bit_storage;
+    struct Ext_VK_KHR_cooperative_matrix;
     struct Ext_VK_KHR_synchronization2;
     struct Ext_VK_QCOM_tile_properties;
     struct Ext_VK_QCOM_tile_shading;
@@ -1077,6 +1080,9 @@ private:
     const ExtensionLib::Ext_VK_EXT_hdr_metadata*             m_ExtHdrMetadata = nullptr;
     const ExtensionLib::Ext_VK_KHR_fragment_shading_rate*    m_ExtFragmentShadingRate = nullptr;
     const ExtensionLib::Ext_VK_KHR_create_renderpass2*       m_ExtRenderPass2 = nullptr;
+    const ExtensionLib::Ext_VK_KHR_buffer_device_address*    m_ExtBufferDeviceAddress = nullptr;
+    const ExtensionLib::Ext_VK_KHR_8bit_storage*             m_Ext8BitStorage = nullptr;
+    const ExtensionLib::Ext_VK_KHR_cooperative_matrix*       m_ExtCooperativeMatrix = nullptr;
     const ExtensionLib::Ext_VK_KHR_synchronization2*         m_ExtKhrSynchronization2 = nullptr;
     const ExtensionLib::Ext_VK_QCOM_tile_properties*         m_ExtQcomTileProperties = nullptr;
     const ExtensionLib::Ext_VK_QCOM_tile_shading*            m_ExtQcomTileShading = nullptr;
