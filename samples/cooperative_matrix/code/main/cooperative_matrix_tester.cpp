@@ -16,7 +16,11 @@
 #include "vulkan/extensionLib.hpp"
 #include <../external/glslang/glslang/Include/glslang_c_interface.h>
 #include <../external/glslang/glslang/Public/resource_limits_c.h>
+
+#pragma push_macro("BOOL")
+#define BOOL HALF_BOOL
 #include "half/half.h"
+#pragma pop_macro("BOOL")
 
 #ifndef TRUE
 #define TRUE 1
