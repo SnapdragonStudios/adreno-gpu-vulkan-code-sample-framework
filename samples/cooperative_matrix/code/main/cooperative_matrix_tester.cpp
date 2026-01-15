@@ -642,23 +642,6 @@ void CooperativeMatrixRunner::RenderUI()
     {
         ImGui::DragInt("Test Repeats", &m_test_repeats, 1.0f, 0, 100);
 
-        // NOTE: Validation (and its transpose option) will be added in a future path
-        ImGui::BeginDisabled();
-        if (m_validate_matrix_result)
-        {
-            ImGui::BeginDisabled();
-            static bool always_true = true;
-            ImGui::Checkbox("Transpose When Needed", &always_true);
-            ImGui::EndDisabled();
-        }
-        else
-        {
-            ImGui::Checkbox("Transpose When Needed", &m_transpose_when_needed);
-        }
-
-        ImGui::Checkbox("Validate Result", &m_validate_matrix_result);
-        ImGui::EndDisabled();
-
         static const char* test_case_names[] = {
             "MxM Basic",
             "MxM Vector To Matrix",
@@ -668,14 +651,14 @@ void CooperativeMatrixRunner::RenderUI()
         int test_type_current_index = static_cast<int>(m_test_type);
         bool changed = false;
 
+        ImGui::Text("Note: Not all tests are compatible with all devices!");
+        ImGui::Text("Check shader instruction set for compatibility if testing other than MXM_BASIC");
+
         if (ImGui::BeginCombo("Test Case", test_case_names[test_type_current_index]))
         {
             // NOTE: Temporarily disabled other tests, new test template coming on the next patch
             for (int i = 0; i < static_cast<int>(TestType::TT_COUNT); ++i)
             {
-                // NOTE: Temporarily disabled other tests, new test template coming on the next patch
-                ImGui::BeginDisabled(i > 0);
-
                 const bool is_selected = (test_type_current_index == i);
                 if (ImGui::Selectable(test_case_names[i], is_selected))
                 {
@@ -683,16 +666,21 @@ void CooperativeMatrixRunner::RenderUI()
                     changed     = true;
                 }
 
-                ImGui::EndDisabled();
-
                 if (is_selected)
                     ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
         }
 
-        ImGui::Separator();
+        ImGui::BeginDisabled(m_test_type != TestType::TT_CONV);
+        ImGui::DragInt("Conv Width", &m_input_width, 1.0f, 1, 256);
+        ImGui::DragInt("Conv Height", &m_input_height, 1.0f, 1, 256);
+        ImGui::Checkbox("Normalize Inputs", &m_normalize_inputs);
+        ImGui::EndDisabled();
+    }
 
+    if (ImGui::CollapsingHeader("Matrix Configuration", ImGuiTreeNodeFlags_None))
+    {
         static const char* fill_type_labels[] = {
                 "Fill with Zero",
                 "Fill with Constants",
@@ -728,6 +716,23 @@ void CooperativeMatrixRunner::RenderUI()
                 m_matrix_transpose_options[i] = static_cast<MatrixTransposeOption>(current_index);
             }
         }
+
+        // NOTE: Validation (and its transpose option) will be added in a future path
+        ImGui::BeginDisabled();
+        if (m_validate_matrix_result)
+        {
+            ImGui::BeginDisabled();
+            static bool always_true = true;
+            ImGui::Checkbox("Transpose When Needed", &always_true);
+            ImGui::EndDisabled();
+        }
+        else
+        {
+            ImGui::Checkbox("Transpose When Needed", &m_transpose_when_needed);
+        }
+
+        ImGui::Checkbox("Validate Result", &m_validate_matrix_result);
+        ImGui::EndDisabled();
     }
 
     if (ImGui::CollapsingHeader("Device Configuration", 0))
@@ -746,8 +751,6 @@ void CooperativeMatrixRunner::RenderUI()
         PrepareTestSession();
     }
 
-    ImGui::Text("For accurate values, make sure you are using the right device configurations (check 'Device Configuration' tab)");
-
     if (m_is_processing_tests)
     {
         ImGui::SameLine();
@@ -757,6 +760,8 @@ void CooperativeMatrixRunner::RenderUI()
         ImGui::ProgressBar(static_cast<float>(m_total_processed_tests) / static_cast<float>(std::max(0u, m_total_tests)));
         ImGui::BeginDisabled(disable_ui);
     }
+
+    ImGui::Text("For accurate values, make sure you are using the right device configurations (check 'Device Configuration' tab)");
 
     if (!m_test_groups.empty())
     {
@@ -864,6 +869,10 @@ void CooperativeMatrixRunner::RenderUI()
 
                                 ImGui::Text("[Time]: %.2fus", test_result.time_total);
                                 ImGui::Text("[TOPS]: %.2f", test_result.TOPS);
+
+                                if (m_test_type == TT_CONV)
+                                    ImGui::TextDisabled("WxH = %dx%d", test_description.inputWidth, test_description.inputHeight);
+
                                 ImVec4 color = GetPercentageColor(test_result.percentage / 100.0f);
                                 ImGui::PushStyleColor(ImGuiCol_Text, color);
                                 ImGui::Text("[%%]: %.2f", test_result.percentage);
@@ -957,8 +966,8 @@ void CooperativeMatrixRunner::PrepareTestSession()
         new_test_description.gpu_freq_MHz   = m_gpu_freq_MHz;
         new_test_description.test_type      = m_test_type;
 
-        new_test_description.inputWidth  = 8;
-        new_test_description.inputHeight = 8;
+        new_test_description.inputWidth  = m_input_width;
+        new_test_description.inputHeight = m_input_height;
 
         new_test_description.input_type  = test_template_description.input_type;
         new_test_description.output_type = test_template_description.output_type;
@@ -1130,6 +1139,27 @@ std::optional<CooperativeMatrixRunner::TestResult> CooperativeMatrixRunner::RunT
     if (!FindMatrixProperty(m_hFoundCooperativeMatrices, cooperativeMatrixProps, MSize, NSize, KSize, test_description.input_type, test_description.input_type, test_description.output_type, test_description.output_type))
     {
         return std::nullopt;
+    }
+
+    if (m_normalize_inputs)
+    {
+        int required_area = MSizeInBlocks * cooperativeMatrixProps.MSize;
+
+        // Start with inputWidth as-is, compute height to match required_area
+        if (inputWidth <= 0) inputWidth = 1; // safety
+        inputHeight = required_area / inputWidth;
+
+        // If division leaves remainder, just force height to match
+        if (inputWidth * inputHeight != required_area)
+        {
+            inputHeight = required_area / inputWidth;
+            if (inputWidth * inputHeight != required_area)
+            {
+                // Last resort: set width = required_area, height = 1
+                inputWidth = required_area;
+                inputHeight = 1;
+            }
+        }
     }
 
     // Set local_size (workgroup size) based on GPU/Tier, and datatype (fp32, fp16, etc)

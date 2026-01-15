@@ -58,8 +58,8 @@ class CooperativeMatrixRunner
         bool layoutC_Mfirst = false;
         bool layoutR_Mfirst = false;
 
-        int inputWidth = 1;
-        int inputHeight = 1;
+        int inputWidth = 32;
+        int inputHeight = 16;
     };
 
     struct TestResult
@@ -139,6 +139,10 @@ private:
     int  m_test_repeats          = 1;
     bool m_transpose_when_needed = false;
     bool m_validate_matrix_result = false;
+
+    bool m_normalize_inputs = true;
+    int m_input_width = 32;
+    int m_input_height = 16;
 
     bool     m_is_processing_tests   = false;
     uint32_t m_total_tests           = 0;

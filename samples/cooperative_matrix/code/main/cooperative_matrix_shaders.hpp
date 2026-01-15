@@ -264,9 +264,6 @@ layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main()
 {
-    if(gl_LocalInvocationIndex == 0)
-       debugPrintfEXT("\nRunning SPIR-V shader (QCOM version) gl_WorkGroupSize(%d, %d, %d)\n", gl_WorkGroupSize.x, gl_WorkGroupSize.y, gl_WorkGroupSize.z);
-
     const uint32_t block_id_m = gl_GlobalInvocationID.y;
     const uint32_t block_id_n = gl_GlobalInvocationID.z;
     if ((block_id_m >= TOTAL_M/TILE_M) || (block_id_n >= TOTAL_N/TILE_N)) return;
@@ -287,15 +284,13 @@ void main()
         uint32_t subMatrixBStartInElements = layoutB_Kfirst ? col * strideBinElements + step : col + step * strideBinElements;
 
         coopmat<A_TYPE, gl_ScopeSubgroup, TILE_M, TILE_K, gl_MatrixUseA> matA;
-#define NEW
-#ifdef NEW
+
         uint32_t uvecA[8];
         for (int i=0; i<8; i++)
-          uvecA[i] = floatBitsToInt(inputA.x[subMatrixAStartInElements + gl_GlobalInvocationID.x * strideAinElements + i]);
-        matA = constructCoopMatA64QCOM(uvecA, gl_Float32QCOM);
-#else
-        coopMatLoad(matA, inputA.x, subMatrixAStartInElements, strideAinElements, int(layoutA_Mfirst));
-#endif
+            uvecA[i] = floatBitsToInt(inputA.x[subMatrixAStartInElements + gl_GlobalInvocationID.x * strideAinElements + i]);
+
+        // convert A vector to A matrix
+        vectorToCoopmatQCOM(uvecA, matA);
 
         coopmat<A_TYPE, gl_ScopeSubgroup, TILE_K, TILE_N, gl_MatrixUseB> matB;
         coopMatLoad(matB, inputB.x, subMatrixBStartInElements, strideBinElements, int(layoutB_Kfirst));
