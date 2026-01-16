@@ -735,15 +735,6 @@ void CooperativeMatrixRunner::RenderUI()
         ImGui::EndDisabled();
     }
 
-    if (ImGui::CollapsingHeader("Device Configuration", 0))
-    {
-        ImGui::Text("Default values for [SM8750][Adreno830] - Change as needed");
-        ImGui::DragInt("GPU Frequency MHz", &m_gpu_freq_MHz, 1.0f, 0, 999999);
-        ImGui::DragInt("GPU Micro SP", &m_gpu_microSP, 1.0f, 0, 999999);
-        ImGui::DragInt("GPU ALU per Micro SP", &m_gpu_ALU_per_microSP, 1.0f, 0, 999999);
-        ImGui::DragInt("GPU OPs per MAD", &m_gpu_ops_per_mad, 1.0f, 0, 999999);
-    }
-
     ImGui::Separator();
 
     if (ImGui::Button("Run Tests"))
@@ -760,8 +751,6 @@ void CooperativeMatrixRunner::RenderUI()
         ImGui::ProgressBar(static_cast<float>(m_total_processed_tests) / static_cast<float>(std::max(0u, m_total_tests)));
         ImGui::BeginDisabled(disable_ui);
     }
-
-    ImGui::Text("For accurate values, make sure you are using the right device configurations (check 'Device Configuration' tab)");
 
     if (!m_test_groups.empty())
     {
@@ -874,9 +863,9 @@ void CooperativeMatrixRunner::RenderUI()
                                     ImGui::TextDisabled("WxH = %dx%d", test_description.inputWidth, test_description.inputHeight);
 
                                 ImVec4 color = GetPercentageColor(test_result.percentage / 100.0f);
-                                ImGui::PushStyleColor(ImGuiCol_Text, color);
-                                ImGui::Text("[%%]: %.2f", test_result.percentage);
-                                ImGui::PopStyleColor();
+                                // ImGui::PushStyleColor(ImGuiCol_Text, color);
+                                // ImGui::Text("[%%]: %.2f", test_result.percentage);
+                                // ImGui::PopStyleColor();
                             }
                             else
                             {
@@ -963,7 +952,6 @@ void CooperativeMatrixRunner::PrepareTestSession()
         TestDescription new_test_description;
 
         new_test_description.fill_data_type = m_fill_data_type;
-        new_test_description.gpu_freq_MHz   = m_gpu_freq_MHz;
         new_test_description.test_type      = m_test_type;
 
         new_test_description.inputWidth  = m_input_width;
@@ -1016,8 +1004,6 @@ std::optional<CooperativeMatrixRunner::TestResult> CooperativeMatrixRunner::RunT
     test_result.is_valid = true;
 
     VkResult result;
-
-    uint32_t gpu_freq_MHz = test_description.gpu_freq_MHz;
 
     int MSize = test_description.MSize;
     int NSize = test_description.NSize;
@@ -1712,17 +1698,6 @@ std::optional<CooperativeMatrixRunner::TestResult> CooperativeMatrixRunner::RunT
 
     if(gpuvendor_id == VK_VENDOR_ID_QUALCOMM )
     {
-        uint32_t num_uSP;
-        switch (gputier_id)
-        {
-        case QCOM_TIER_3:
-        case QCOM_TIER_4:
-            num_uSP = 16;
-            break;
-        default:
-            num_uSP = 12;
-        }
-
         uint64_t total_ops = 0;
         if (tt == TT_CONV)
         {
@@ -1739,20 +1714,11 @@ std::optional<CooperativeMatrixRunner::TestResult> CooperativeMatrixRunner::RunT
                 static_cast<uint64_t>(testCase.TOTAL_K) * 2;
         }
 
-        uint32_t theoreticalTime_ns = 1000 * ((unsigned long int)testCase.TOTAL_M * testCase.TOTAL_N * testCase.TOTAL_K / 64 / 2 / num_uSP / (4 / bytesPerInput)) / gpu_freq_MHz;
-        if (tt == TT_CONV)
-                 theoreticalTime_ns = 1000 * ((unsigned long int)testCase.TOTAL_M * testCase.TOTAL_N * testCase.TOTAL_K * filterHeight * filterWidth / 64 / 2 / num_uSP / (4 / bytesPerInput)) / gpu_freq_MHz;
-        
-        std::cout << "Maximum theoretical perf on device @" << gpu_freq_MHz << "MHz is " << theoreticalTime_ns / 1000 << "us." << std::endl;
         ms /= double(perf_loop);
-        double percentOfPeak_avg = 100 * theoreticalTime_ns / ms / 1000 / 1000;
-        double percentOfPeak_min = 100 * theoreticalTime_ns / min_ms / 1000 / 1000;
-        std::cout << "MxM kernel time, average of " << perf_loop << " run(s): " << ms * 1000 << "us (" << percentOfPeak_avg << "% of theoretical peak (assuming " << gpu_freq_MHz << "MHz frequency))\n";
-        std::cout << "MxM kernel time, min of     " << perf_loop << " run(s): " << min_ms * 1000 << "us (" << percentOfPeak_min << "% of theoretical peak (assuming " << gpu_freq_MHz << "MHz frequency))\n";
 
         test_result.time_total = ms * 1000;
         test_result.TOPS       = static_cast<double>(total_ops) / (ms / 1000.0) / 1e12;
-        test_result.percentage = percentOfPeak_avg;
+        test_result.percentage = 0.0;
     }
     else
     {

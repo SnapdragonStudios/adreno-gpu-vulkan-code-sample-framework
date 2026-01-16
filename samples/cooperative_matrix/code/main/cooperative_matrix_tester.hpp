@@ -40,8 +40,6 @@ class CooperativeMatrixRunner
         TestType test_type = TT_MXM_BASIC;
         FillDataType fill_data_type = FILL_WITH_RANDON_INT;
 
-        uint32_t gpu_freq_MHz = 900;
-
         VkComponentTypeKHR input_type;
         VkComponentTypeKHR output_type;
 
@@ -129,10 +127,6 @@ private:
 
     TestType     m_test_type           = TT_MXM_BASIC;
     FillDataType m_fill_data_type      = FILL_WITH_RANDON_INT;
-    int32_t      m_gpu_freq_MHz        = 900;
-    int32_t      m_gpu_microSP         = 12;
-    int32_t      m_gpu_ALU_per_microSP = 2;
-    int32_t      m_gpu_ops_per_mad     = 2;
 
     MatrixTransposeOption m_matrix_transpose_options[NUM_MATS] = { VARIABLE , VARIABLE , VARIABLE , ALWAYS_FALSE };
 
